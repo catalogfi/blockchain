@@ -1,0 +1,4 @@
+.idea/
+.env
+*.out
+coverprofile.out
