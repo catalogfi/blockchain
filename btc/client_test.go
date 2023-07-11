@@ -92,8 +92,15 @@ var _ = Describe("bitcoin client", func() {
 				Expect(len(hash)).Should(Equal(64))
 				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
+				By("GetBlockByHash()")
+				block, err := client.GetBlockByHash(context.Background(), "00000000792fb6eaaf9591d0b809c43e6db4ca4a7a34e2543a95b931f6097729")
+				Expect(err).To(BeNil())
+				Expect(block.Hash).Should(Equal("00000000792fb6eaaf9591d0b809c43e6db4ca4a7a34e2543a95b931f6097729"))
+				Expect(block.Height).Should(Equal(int64(2431641)))
+				Expect(len(block.Tx)).Should(Equal(96))
+
 				By("GetBlockByHeight()")
-				block, err := client.GetBlockByHeight(context.Background(), 2431641)
+				block, err = client.GetBlockByHeight(context.Background(), 2431641)
 				Expect(err).To(BeNil())
 				Expect(block.Hash).Should(Equal("00000000792fb6eaaf9591d0b809c43e6db4ca4a7a34e2543a95b931f6097729"))
 				Expect(len(block.Tx)).Should(Equal(96))

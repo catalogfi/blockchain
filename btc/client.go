@@ -39,6 +39,9 @@ type Client interface {
 
 	// GetBlockByHeight returns the block detail of the given height.
 	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
+
+	// GetBlockByHash returns the block detail with the given hash.
+	GetBlockByHash(ctx context.Context, hash string) (*btcjson.GetBlockVerboseResult, error)
 }
 
 type client struct {
@@ -111,6 +114,14 @@ func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcj
 	}
 	block := btcjson.GetBlockVerboseResult{}
 	if err := client.send(ctx, &block, "getblock", resp); err != nil {
+		return nil, fmt.Errorf("bad \"getblock\": %v", err)
+	}
+	return &block, nil
+}
+
+func (client *client) GetBlockByHash(ctx context.Context, hash string) (*btcjson.GetBlockVerboseResult, error) {
+	block := btcjson.GetBlockVerboseResult{}
+	if err := client.send(ctx, &block, "getblock", hash); err != nil {
 		return nil, fmt.Errorf("bad \"getblock\": %v", err)
 	}
 	return &block, nil

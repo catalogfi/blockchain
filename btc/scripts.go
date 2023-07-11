@@ -2,6 +2,7 @@ package btc
 
 import (
 	"crypto/sha256"
+	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -111,4 +112,19 @@ func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
 	scriptHash := sha256.Sum256(witnessScript)
 	bldr.AddData(scriptHash[:])
 	return bldr.Script()
+}
+
+// ParseScriptSigP2PKH gets the signature and public key from a P2PKH scriptSig.
+func ParseScriptSigP2PKH(scriptSig []byte) ([]byte, []byte, error) {
+	// The scriptSig should be (length + （sig 70/71/72 + sighash） + length + pubkey)
+	switch len(scriptSig) {
+	case 1 + 71 + 1 + 33:
+		return scriptSig[1:72], scriptSig[73:], nil
+	case 1 + 72 + 1 + 33:
+		return scriptSig[1:73], scriptSig[74:], nil
+	case 1 + 73 + 1 + 33:
+		return scriptSig[1:74], scriptSig[75:], nil
+	default:
+		return nil, nil, fmt.Errorf("invalid script length %v", len(scriptSig))
+	}
 }
