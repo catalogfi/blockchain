@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcjson"
@@ -20,7 +21,11 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrNilResult = errors.New("nil result")
+var (
+	ErrNilResult = errors.New("nil result")
+
+	ErrTxNotFound = errors.New("No such mempool or blockchain transaction")
+)
 
 type NoRetryError struct {
 	err error
@@ -128,7 +133,10 @@ func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (btc
 	hash := chainhash.Hash{}
 	copy(hash[:], txhash)
 	if err := client.send(ctx, &resp, "getrawtransaction", hash.String(), 1); err != nil {
-		return resp, fmt.Errorf("bad \"getrawtransaction\": %w", err)
+		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
+			return resp, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+		}
+		return resp, fmt.Errorf(`bad "getrawtransaction": %w`, err)
 	}
 	return resp, nil
 }
