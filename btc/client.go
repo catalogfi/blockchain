@@ -63,7 +63,7 @@ type Client interface {
 	SubmitTx(ctx context.Context, tx wire.MsgTx) error
 
 	// GetRawTransaction returns the raw transaction of the given hash.
-	GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error)
+	GetRawTransaction(ctx context.Context, txhash []byte) (*btcjson.TxRawResult, error)
 
 	// GetBlockByHeight returns the block detail of the given height.
 	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
@@ -128,17 +128,17 @@ func (client *client) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
 	return nil
 }
 
-func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error) {
+func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (*btcjson.TxRawResult, error) {
 	resp := btcjson.TxRawResult{}
 	hash := chainhash.Hash{}
 	copy(hash[:], txhash)
 	if err := client.send(ctx, &resp, "getrawtransaction", hash.String(), 1); err != nil {
 		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
-			return resp, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+			return nil, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
 		}
-		return resp, fmt.Errorf(`bad "getrawtransaction": %w`, err)
+		return nil, fmt.Errorf(`bad "getrawtransaction": %w`, err)
 	}
-	return resp, nil
+	return &resp, nil
 }
 
 func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {

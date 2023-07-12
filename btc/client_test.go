@@ -69,7 +69,7 @@ var _ = Describe("bitcoin client", func() {
 		})
 	})
 
-	FContext("bitcoin testnet", func() {
+	Context("bitcoin testnet", func() {
 		Context("when using quicknode api", func() {
 			It("should get the data without any error", func(ctx SpecContext) {
 				By("Initialise the logger")
@@ -113,6 +113,13 @@ var _ = Describe("bitcoin client", func() {
 				rawTx, err := client.GetRawTransaction(context.Background(), txHash.CloneBytes())
 				Expect(err).To(BeNil())
 				Expect(rawTx.Hex).Should(Equal("0200000001935f334905b4786f296c067408e3ab028c28670dbad8fc6f84b2564645293018000000006a473044022048cc0fb22526365e08c9f71580ac5a9554784d8b2c0b2ee0c6b08a16fac636a802206c680787f9d23ba650e3171434ea8ca7775a305ade07dc00bd7d3d04fd127b76012102ef96baa1bff1890335bd9c0d88d428932e7cb5aee3ddfe1b79be06cd01aa733dfeffffff0269a77857000000001600140712fe0355630e4ffad1003a285bf2f69c13832999f10400000000001600145ce5a037f931b963f87421f447f126d86d781fc8971a2500"))
+
+				invalidTxHashStr := "0351dbc63c2331cf7a7f504979a946a9fbff18dfd2dd5e73cb82a9dd0b8eef48"
+				invalidTxHash, err := chainhash.NewHashFromStr(invalidTxHashStr)
+				Expect(err).To(BeNil())
+				invalidRawTx, err := client.GetRawTransaction(context.Background(), invalidTxHash.CloneBytes())
+				Expect(invalidRawTx).Should(BeNil())
+				Expect(errors.Is(err, btc.ErrTxNotFound)).Should(BeTrue())
 
 				By("GetUTXOs()")
 				addr, err := btcutil.DecodeAddress("mvb4nE8firm7abnss9r7j5tra2w7M7uktF", &chaincfg.TestNet3Params)
