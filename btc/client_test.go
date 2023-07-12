@@ -3,6 +3,7 @@ package btc_test
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"os"
 	"reflect"
 
@@ -68,7 +69,7 @@ var _ = Describe("bitcoin client", func() {
 		})
 	})
 
-	Context("bitcoin testnet", func() {
+	FContext("bitcoin testnet", func() {
 		Context("when using quicknode api", func() {
 			It("should get the data without any error", func(ctx SpecContext) {
 				By("Initialise the logger")
@@ -119,6 +120,16 @@ var _ = Describe("bitcoin client", func() {
 				utxos, err := client.GetUTXOs(ctx, addr)
 				Expect(err).To(BeNil())
 				Expect(len(utxos)).Should(BeNumerically(">", 1))
+
+				By("GetTxOut")
+				spentTxHash := "b1c7c6e7afb00ea4f69c90ec446ab06230365bb78a39a566a97fb437e64ee762"
+				res, err := client.GetTxOut(context.Background(), spentTxHash, 0)
+				Expect(res).Should(BeNil())
+				Expect(errors.Is(err, btc.ErrNilResult)).Should(BeTrue())
+				unspentTxHash := "2b7d8f5419c3a56d1892d95cfb55aed4818a59b1882554ffb06954895bf45679"
+				res, err = client.GetTxOut(context.Background(), unspentTxHash, 0)
+				Expect(err).To(BeNil())
+				Expect(res.Confirmations).Should(BeNumerically(">", 100))
 			})
 		})
 	})

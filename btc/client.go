@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -18,6 +19,29 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"go.uber.org/zap"
 )
+
+var ErrNilResult = errors.New("nil result")
+
+type NoRetryError struct {
+	err error
+}
+
+func NewNoRetryError(err error) *NoRetryError {
+	return &NoRetryError{
+		err: err,
+	}
+}
+
+func (err *NoRetryError) Error() string {
+	if err.err != nil {
+		return err.err.Error()
+	}
+	return ""
+}
+
+func (err *NoRetryError) Unwrap() error {
+	return err.err
+}
 
 // Client to interact with the bitcoin network. We'll follow the standard bitcoind rpc interface if that meet our
 // requirements.
@@ -35,13 +59,15 @@ type Client interface {
 
 	// GetRawTransaction returns the raw transaction of the given hash.
 	GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error)
-	// todo : batch version of this ?
 
 	// GetBlockByHeight returns the block detail of the given height.
 	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
 
 	// GetBlockByHash returns the block detail with the given hash.
 	GetBlockByHash(ctx context.Context, hash string) (*btcjson.GetBlockVerboseResult, error)
+
+	// GetTxOut returns details about an unspent transaction output
+	GetTxOut(ctx context.Context, hash string, vout uint32) (*btcjson.GetTxOutResult, error)
 }
 
 type client struct {
@@ -79,7 +105,7 @@ func (client *client) GetUTXOs(ctx context.Context, address btcutil.Address) (UT
 func (client *client) LatestBlock(ctx context.Context) (int64, string, error) {
 	var resp btcjson.GetBlockChainInfoResult
 	if err := client.send(ctx, &resp, "getblockchaininfo"); err != nil {
-		return 0, "", fmt.Errorf("get block count: %v", err)
+		return 0, "", fmt.Errorf("get block count: %w", err)
 	}
 	return int64(resp.Blocks), resp.BestBlockHash, nil
 }
@@ -88,11 +114,11 @@ func (client *client) LatestBlock(ctx context.Context) (int64, string, error) {
 func (client *client) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
 	var serial bytes.Buffer
 	if err := tx.Serialize(&serial); err != nil {
-		return fmt.Errorf("bad tx: %v", err)
+		return fmt.Errorf("bad tx: %w", err)
 	}
 	resp := ""
 	if err := client.send(ctx, &resp, "sendrawtransaction", hex.EncodeToString(serial.Bytes())); err != nil {
-		return fmt.Errorf("bad \"sendrawtransaction\": %v", err)
+		return fmt.Errorf("bad \"sendrawtransaction\": %w", err)
 	}
 	return nil
 }
@@ -102,7 +128,7 @@ func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (btc
 	hash := chainhash.Hash{}
 	copy(hash[:], txhash)
 	if err := client.send(ctx, &resp, "getrawtransaction", hash.String(), 1); err != nil {
-		return resp, fmt.Errorf("bad \"getrawtransaction\": %v", err)
+		return resp, fmt.Errorf("bad \"getrawtransaction\": %w", err)
 	}
 	return resp, nil
 }
@@ -110,11 +136,11 @@ func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (btc
 func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
 	resp := ""
 	if err := client.send(ctx, &resp, "getblockhash", height); err != nil {
-		return nil, fmt.Errorf("bad \"getblockhash\": %v", err)
+		return nil, fmt.Errorf("bad \"getblockhash\": %w", err)
 	}
 	block := btcjson.GetBlockVerboseResult{}
 	if err := client.send(ctx, &block, "getblock", resp); err != nil {
-		return nil, fmt.Errorf("bad \"getblock\": %v", err)
+		return nil, fmt.Errorf("bad \"getblock\": %w", err)
 	}
 	return &block, nil
 }
@@ -122,9 +148,17 @@ func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcj
 func (client *client) GetBlockByHash(ctx context.Context, hash string) (*btcjson.GetBlockVerboseResult, error) {
 	block := btcjson.GetBlockVerboseResult{}
 	if err := client.send(ctx, &block, "getblock", hash); err != nil {
-		return nil, fmt.Errorf("bad \"getblock\": %v", err)
+		return nil, fmt.Errorf("bad \"getblock\": %w", err)
 	}
 	return &block, nil
+}
+
+func (client *client) GetTxOut(ctx context.Context, hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
+	result := btcjson.GetTxOutResult{}
+	if err := client.send(ctx, &result, "gettxout", hash, vout); err != nil {
+		return nil, fmt.Errorf("bad \"gettxout\": %w", err)
+	}
+	return &result, nil
 }
 
 func (client *client) send(ctx context.Context, resp interface{}, method string, params ...interface{}) error {
@@ -151,8 +185,9 @@ func (client *client) send(ctx context.Context, resp interface{}, method string,
 			return fmt.Errorf("sending http request: %v", err)
 		}
 		defer res.Body.Close()
+
 		if err := decodeResponse(resp, res.Body); err != nil {
-			return fmt.Errorf("decoding http response: %v", err)
+			return NewNoRetryError(err)
 		}
 		return nil
 	})
@@ -192,10 +227,10 @@ func decodeResponse(resp interface{}, r io.Reader) error {
 		return fmt.Errorf("decoding response: %v", err)
 	}
 	if res.Error != nil {
-		return fmt.Errorf("decoding response: %v", string(*res.Error))
+		return errors.New(string(*res.Error))
 	}
 	if res.Result == nil {
-		return fmt.Errorf("decoding result: result is nil")
+		return ErrNilResult
 	}
 	if err := json.Unmarshal(*res.Result, resp); err != nil {
 		return fmt.Errorf("decoding result: %v", err)
@@ -207,6 +242,12 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 	ticker := time.NewTicker(dur)
 	err := f()
 	for err != nil {
+		// Skip retrying if it's a `NoRetryError`
+		var e *NoRetryError
+		if errors.As(err, &e) {
+			return err
+		}
+
 		logger.Debug("retrying", zap.Any("error", err.Error()))
 		select {
 		case <-ctx.Done():
