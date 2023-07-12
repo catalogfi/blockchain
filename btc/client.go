@@ -24,7 +24,11 @@ import (
 var (
 	ErrNilResult = errors.New("nil result")
 
-	ErrTxNotFound = errors.New("No such mempool or blockchain transaction")
+	ErrTxNotFound = errors.New("no such mempool or blockchain transaction")
+
+	ErrTxAlreadyInBlockchain = errors.New("transaction already in block chain")
+
+	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
 )
 
 type NoRetryError struct {
@@ -123,6 +127,13 @@ func (client *client) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
 	}
 	resp := ""
 	if err := client.send(ctx, &resp, "sendrawtransaction", hex.EncodeToString(serial.Bytes())); err != nil {
+		if strings.Contains(err.Error(), "Transaction already in block chain") {
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxAlreadyInBlockchain)
+		}
+		if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
+		}
+
 		return fmt.Errorf("bad \"sendrawtransaction\": %w", err)
 	}
 	return nil
