@@ -29,6 +29,8 @@ var (
 	ErrTxAlreadyInBlockchain = errors.New("transaction already in block chain")
 
 	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
+
+	ErrMempoolConflict = errors.New("txn-mempool-conflict")
 )
 
 type NoRetryError struct {
@@ -131,6 +133,9 @@ func (client *client) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
 			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxAlreadyInBlockchain)
 		}
 		if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
+		}
+		if strings.Contains(err.Error(), "txn-mempool-conflict") {
 			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
 		}
 
