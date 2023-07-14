@@ -288,9 +288,13 @@ type MockClient struct {
 	FuncGetUTXOs          func(context.Context, btcutil.Address) (UTXOs, error)
 	FuncLatestBlock       func(context.Context) (int64, string, error)
 	FuncSubmitTx          func(context.Context, wire.MsgTx) error
-	FuncGetRawTransaction func(context.Context, []byte) (btcjson.TxRawResult, error)
+	FuncGetRawTransaction func(context.Context, []byte) (*btcjson.TxRawResult, error)
 	FuncGetBlockByHeight  func(context.Context, int64) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetBlockByHash    func(context.Context, string) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetTxOut          func(context.Context, string, uint32) (*btcjson.GetTxOutResult, error)
 }
+
+var _ Client = NewMockClient()
 
 func NewMockClient() *MockClient {
 	return &MockClient{}
@@ -312,10 +316,18 @@ func (m *MockClient) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
 	return m.FuncSubmitTx(ctx, tx)
 }
 
-func (m *MockClient) GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error) {
+func (m *MockClient) GetRawTransaction(ctx context.Context, txhash []byte) (*btcjson.TxRawResult, error) {
 	return m.FuncGetRawTransaction(ctx, txhash)
 }
 
 func (m *MockClient) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
 	return m.FuncGetBlockByHeight(ctx, height)
+}
+
+func (m *MockClient) GetBlockByHash(ctx context.Context, hash string) (*btcjson.GetBlockVerboseResult, error) {
+	return m.FuncGetBlockByHash(ctx, hash)
+}
+
+func (m *MockClient) GetTxOut(ctx context.Context, hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
+	return m.FuncGetTxOut(ctx, hash, vout)
 }
