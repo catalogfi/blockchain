@@ -10,6 +10,14 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+type Network int
+
+const (
+	NetworkMainnet = 1
+	NetworkGoerli  = 5
+	NetworkSepolia = 11155111
+)
+
 func InstantWalletInitCode(owner, underwriter common.Address, timelock *big.Int) ([]byte, error) {
 	contractABI, err := bindings.InstantWalletMetaData.GetAbi()
 	if err != nil {
