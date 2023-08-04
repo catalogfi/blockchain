@@ -2,7 +2,6 @@ package eth
 
 import (
 	"fmt"
-	"log"
 	"math/big"
 
 	"github.com/catalogfi/multichain/eth/bindings"
@@ -66,7 +65,6 @@ func ERC1967ProxyAddress(caller, implementation common.Address, initData []byte)
 		return common.Address{}, err
 	}
 	salt := crypto.Keccak256Hash(packed)
-	log.Print("salt = %v", salt.Hex())
 
 	// Contract init code hash
 	contractABI, err := bindings.ERC1967ProxyMetaData.GetAbi()
