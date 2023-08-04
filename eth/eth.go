@@ -1,6 +1,8 @@
 package eth
 
 import (
+	"fmt"
+	"log"
 	"math/big"
 
 	"github.com/catalogfi/multichain/eth/bindings"
@@ -12,18 +14,39 @@ import (
 
 type Network int
 
+func (net Network) ChainID() *big.Int {
+	return big.NewInt(int64(net))
+}
+
 const (
-	NetworkMainnet = 1
-	NetworkGoerli  = 5
-	NetworkSepolia = 11155111
+	NetworkMainnet (Network) = 1
+	NetworkGoerli  (Network) = 5
+	NetworkSepolia (Network) = 11155111
 )
 
-func InstantWalletInitCode(owner, underwriter common.Address, timelock *big.Int) ([]byte, error) {
+func SignHash(data []byte) common.Hash {
+	msg := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(data), data)
+	return crypto.Keccak256Hash([]byte(msg))
+}
+
+func InstantWalletInitData(owner, underwriter common.Address, timelock *big.Int) ([]byte, error) {
 	contractABI, err := bindings.InstantWalletMetaData.GetAbi()
 	if err != nil {
 		return nil, err
 	}
 	return contractABI.Pack("__InstantWallet_init", owner, underwriter, timelock)
+}
+
+func InstantWalletInitCode(factory, implementation common.Address, initData []byte) ([]byte, error) {
+	contractABI, err := bindings.InstantWalletFactoryMetaData.GetAbi()
+	if err != nil {
+		return nil, err
+	}
+	code, err := contractABI.Pack("createInstantWallet", implementation, initData)
+	if err != nil {
+		return nil, err
+	}
+	return append(factory.Bytes(), code...), nil
 }
 
 func ERC1967ProxyAddress(caller, implementation common.Address, initData []byte) (common.Address, error) {
@@ -43,6 +66,7 @@ func ERC1967ProxyAddress(caller, implementation common.Address, initData []byte)
 		return common.Address{}, err
 	}
 	salt := crypto.Keccak256Hash(packed)
+	log.Print("salt = %v", salt.Hex())
 
 	// Contract init code hash
 	contractABI, err := bindings.ERC1967ProxyMetaData.GetAbi()
