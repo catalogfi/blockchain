@@ -6,9 +6,10 @@ import (
 
 	"github.com/catalogfi/multichain/btc"
 	"github.com/catalogfi/multichain/testutil"
+	"go.uber.org/zap"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"go.uber.org/zap"
 )
 
 func TestBtc(t *testing.T) {
@@ -23,11 +24,9 @@ var _ = BeforeSuite(func() {
 	Expect(os.Getenv("PRIV_KEY_1")).ShouldNot(BeEmpty())
 	Expect(os.Getenv("PRIV_KEY_2")).ShouldNot(BeEmpty())
 	Expect(os.Getenv("BTC_RPC")).ShouldNot(BeEmpty())
-	Expect(os.Getenv("BTC_INDEXER")).ShouldNot(BeEmpty())
-	Expect(os.Getenv("BTC_INDEXER_QUICKNODE")).ShouldNot(BeEmpty())
-	Expect(os.Getenv("BTC_INDEXER_ELECTRS")).ShouldNot(BeEmpty())
 	Expect(os.Getenv("BTC_USER")).ShouldNot(BeEmpty())
 	Expect(os.Getenv("BTC_PASSWORD")).ShouldNot(BeEmpty())
+	// Expect(os.Getenv("BTC_INDEXER_QUICKNODE")).ShouldNot(BeEmpty())
 })
 
 // RegtestClient initialises a btc.Client could be used with a local regression testnet.

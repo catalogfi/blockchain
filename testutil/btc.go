@@ -3,17 +3,19 @@ package testutil
 import (
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // NigiriFaucet funds the given address using the `nigiri faucet` command. It will transfer 1 BTC to the target address
 // and automatically generate a new block for the tx. Beware the result will be something like `txId: xxxxx` which is
 // not exactly the transaction hash. You'll need to trim the prefix when parsing the hash.
 func NigiriFaucet(addr string) (string, error) {
-	hash, err := RunOutput("nigiri", "faucet", addr)
+	res, err := RunOutput("nigiri", "faucet", addr)
 	if err != nil {
 		return "", err
 	}
-	return string(hash), nil
+	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "txId:"))
+	return txid, nil
 }
 
 // NigiriNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with

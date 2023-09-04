@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -27,13 +28,18 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		AddInt64(waitTime).
 		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
 		AddOp(txscript.OP_DROP).
+		AddOp(txscript.OP_DUP).
+		AddOp(txscript.OP_HASH160).
 		AddData(ownerPub).
 		AddOp(txscript.OP_ELSE).
 		AddOp(txscript.OP_SHA256).
 		AddData(refundSecretHash).
 		AddOp(txscript.OP_EQUALVERIFY).
+		AddOp(txscript.OP_DUP).
+		AddOp(txscript.OP_HASH160).
 		AddData(revokerPub).
 		AddOp(txscript.OP_ENDIF).
+		AddOp(txscript.OP_EQUALVERIFY).
 		AddOp(txscript.OP_CHECKSIG).
 		Script()
 }
@@ -79,8 +85,7 @@ func SetMultisigWitness(multisigTx *wire.MsgTx, pubkeyA, sigA, pubKeyB, sigB []b
 // SetRefundSpendWitness used for setting witness signature for spending the refunded utxo from the refund script,
 // has 2 possible paths either refund immediately through user secret or refund through timelock.
 func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, signature, refundSecretHash, refundSecret, op []byte, waitTime int64) error {
-	// assumed that there's only 1 txIn (instant wallet utxo)
-	refundScript, err := HtlcScript(ownerPubkey, revokerPubkey, refundSecretHash, waitTime)
+	refundScript, err := HtlcScript(btcutil.Hash160(ownerPubkey), btcutil.Hash160(revokerPubkey), refundSecretHash, waitTime)
 	if err != nil {
 		return err
 	}
@@ -106,12 +111,12 @@ func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, 
 }
 
 func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
-	bldr := txscript.NewScriptBuilder()
+	builder := txscript.NewScriptBuilder()
 
-	bldr.AddOp(txscript.OP_0)
+	builder.AddOp(txscript.OP_0)
 	scriptHash := sha256.Sum256(witnessScript)
-	bldr.AddData(scriptHash[:])
-	return bldr.Script()
+	builder.AddData(scriptHash[:])
+	return builder.Script()
 }
 
 // ParseScriptSigP2PKH gets the signature and public key from a P2PKH scriptSig.

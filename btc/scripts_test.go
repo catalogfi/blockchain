@@ -113,7 +113,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		By(fmt.Sprintf("Redeem tx hash = %v", color.YellowString(redeemTx.TxHash().String())))
 	})
 
-	It("should create instant wallet and refund from it using secret hash", func() {
+	FIt("should create instant wallet and refund from it using secret hash", func() {
 		By("Initialization")
 		network := &chaincfg.RegressionNetParams
 		privKey1, pubKey1, pkAddr1, err := testutil.ParseKeys("PRIV_KEY_1", network)

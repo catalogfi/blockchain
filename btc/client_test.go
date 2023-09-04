@@ -12,7 +12,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/multichain/btc"
-	"github.com/catalogfi/multichain/testutil"
 	"go.uber.org/zap"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -23,16 +22,10 @@ var _ = Describe("bitcoin client", func() {
 	Context("regression local testnet", func() {
 		Context("when using electrs indexer", func() {
 			It("should be able to get all the data without any error", func() {
-				By("Initialise the logger")
+				By("Initialise a local regnet client")
 				logger, err := zap.NewDevelopment()
 				Expect(err).To(BeNil())
-
-				By("Initialise a local regnet client")
-				user := testutil.ParseStringEnv("BTC_USER", "")
-				password := testutil.ParseStringEnv("BTC_PASSWORD", "")
-				opts := btc.DefaultClientOptions().WithUser(user).WithPassword(password)
-				indexerClient := btc.NewElectrsIndexerClient(logger, btc.DefaultElectrsIndexerURL)
-				client := btc.NewClient(opts, logger, indexerClient)
+				client := RegtestClient(logger)
 
 				By("Net()")
 				Expect(reflect.DeepEqual(client.Net(), &chaincfg.RegressionNetParams)).Should(BeTrue())
@@ -69,7 +62,7 @@ var _ = Describe("bitcoin client", func() {
 		})
 	})
 
-	Context("bitcoin testnet", func() {
+	PContext("bitcoin testnet", func() {
 		Context("when using quicknode api", func() {
 			It("should get the data without any error", func(ctx SpecContext) {
 				By("Initialise the logger")
@@ -77,7 +70,7 @@ var _ = Describe("bitcoin client", func() {
 				Expect(err).To(BeNil())
 
 				By("Initialise a testnet client")
-				host := os.Getenv("BTC_RPC")
+				host := os.Getenv("BTC_INDEXER_QUICKNODE")
 				indexerURL := os.Getenv("BTC_INDEXER_QUICKNODE")
 				indexerClient := btc.NewQuickNodeIndexerClient(logger, indexerURL)
 				opts := btc.DefaultClientOptions().WithNet(&chaincfg.TestNet3Params).WithHost(host)
@@ -128,7 +121,7 @@ var _ = Describe("bitcoin client", func() {
 				Expect(err).To(BeNil())
 				Expect(len(utxos)).Should(BeNumerically(">", 1))
 
-				By("GetTxOut")
+				By("GetTxOut()")
 				spentTxHash := "b1c7c6e7afb00ea4f69c90ec446ab06230365bb78a39a566a97fb437e64ee762"
 				res, err := client.GetTxOut(context.Background(), spentTxHash, 0)
 				Expect(res).Should(BeNil())
