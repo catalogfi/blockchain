@@ -25,19 +25,19 @@ func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
 func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) ([]byte, error) {
 	return txscript.NewScriptBuilder().
 		AddOp(txscript.OP_IF).
-		AddInt64(waitTime).
-		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
-		AddOp(txscript.OP_DROP).
-		AddOp(txscript.OP_DUP).
-		AddOp(txscript.OP_HASH160).
-		AddData(ownerPub).
-		AddOp(txscript.OP_ELSE).
 		AddOp(txscript.OP_SHA256).
 		AddData(refundSecretHash).
 		AddOp(txscript.OP_EQUALVERIFY).
 		AddOp(txscript.OP_DUP).
 		AddOp(txscript.OP_HASH160).
 		AddData(revokerPub).
+		AddOp(txscript.OP_ELSE).
+		AddInt64(waitTime).
+		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddOp(txscript.OP_DUP).
+		AddOp(txscript.OP_HASH160).
+		AddData(ownerPub).
 		AddOp(txscript.OP_ENDIF).
 		AddOp(txscript.OP_EQUALVERIFY).
 		AddOp(txscript.OP_CHECKSIG).
@@ -84,7 +84,7 @@ func SetMultisigWitness(multisigTx *wire.MsgTx, pubkeyA, sigA, pubKeyB, sigB []b
 
 // SetRefundSpendWitness used for setting witness signature for spending the refunded utxo from the refund script,
 // has 2 possible paths either refund immediately through user secret or refund through timelock.
-func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, signature, refundSecretHash, refundSecret, op []byte, waitTime int64) error {
+func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, signature, refundSecretHash, refundSecret []byte, owner bool, waitTime int64) error {
 	refundScript, err := HtlcScript(btcutil.Hash160(ownerPubkey), btcutil.Hash160(revokerPubkey), refundSecretHash, waitTime)
 	if err != nil {
 		return err
@@ -92,19 +92,21 @@ func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, 
 
 	var witnessStack wire.TxWitness
 
-	// else condition for instant revokation
-	if op == nil {
+	if owner {
+		// owner
 		witnessStack = make([][]byte, 4)
 		witnessStack[0] = signature
-		witnessStack[1] = refundSecret
+		witnessStack[1] = ownerPubkey
 		witnessStack[2] = nil
 		witnessStack[3] = refundScript
 	} else {
-		// for users normal refund flow
-		witnessStack = make([][]byte, 3)
+		// revoker
+		witnessStack = make([][]byte, 5)
 		witnessStack[0] = signature
-		witnessStack[1] = []byte{0x1}
-		witnessStack[2] = refundScript
+		witnessStack[1] = revokerPubkey
+		witnessStack[2] = refundSecret
+		witnessStack[3] = []byte{0x1}
+		witnessStack[4] = refundScript
 	}
 	refundSpend.TxIn[0].Witness = witnessStack
 	return nil

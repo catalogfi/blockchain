@@ -40,6 +40,31 @@ type Recipient struct {
 	Amount int64  `json:"amount"`
 }
 
+type Transaction struct {
+	TxID   string `json:"txid"`
+	VINs   []VIN  `json:"vin"`
+	Status Status `json:"status"`
+}
+
+type VIN struct {
+	TxID         string    `json:"txid"`
+	Vout         int       `json:"vout"`
+	Prevout      Prevout   `json:"prevout"`
+	ScriptSigAsm string    `json:"scriptsig_asm"`
+	Witness      *[]string `json:"witness" `
+}
+
+type Prevout struct {
+	ScriptPubKeyType    string `json:"scriptpubkey_type"`
+	ScriptPubKey        string `json:"scriptpubkey"`
+	ScriptPubKeyAddress string `json:"scriptpubkey_address"`
+}
+
+type Status struct {
+	Confirmed   bool   `json:"confirmed"`
+	BlockHeight uint64 `json:"block_height"`
+}
+
 func GenerateSystemPrivKey(mnemonic string, userPubkeyHex []byte) (*btcec.PrivateKey, error) {
 	seed := pbkdf2.Key([]byte(mnemonic), append([]byte("mnemonic"), userPubkeyHex...), 2048, 64, sha512.New)
 	var masterKey *hdkeychain.ExtendedKey
