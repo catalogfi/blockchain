@@ -40,31 +40,6 @@ type Recipient struct {
 	Amount int64  `json:"amount"`
 }
 
-type Transaction struct {
-	TxID   string `json:"txid"`
-	VINs   []VIN  `json:"vin"`
-	Status Status `json:"status"`
-}
-
-type VIN struct {
-	TxID         string    `json:"txid"`
-	Vout         int       `json:"vout"`
-	Prevout      Prevout   `json:"prevout"`
-	ScriptSigAsm string    `json:"scriptsig_asm"`
-	Witness      *[]string `json:"witness" `
-}
-
-type Prevout struct {
-	ScriptPubKeyType    string `json:"scriptpubkey_type"`
-	ScriptPubKey        string `json:"scriptpubkey"`
-	ScriptPubKeyAddress string `json:"scriptpubkey_address"`
-}
-
-type Status struct {
-	Confirmed   bool   `json:"confirmed"`
-	BlockHeight uint64 `json:"block_height"`
-}
-
 func GenerateSystemPrivKey(mnemonic string, userPubkeyHex []byte) (*btcec.PrivateKey, error) {
 	seed := pbkdf2.Key([]byte(mnemonic), append([]byte("mnemonic"), userPubkeyHex...), 2048, 64, sha512.New)
 	var masterKey *hdkeychain.ExtendedKey
@@ -155,4 +130,17 @@ func P2wshAddress(script []byte, network *chaincfg.Params) (string, error) {
 		return "", err
 	}
 	return instantWalletAddr.EncodeAddress(), nil
+}
+
+// SpendingWitness loops through the txs of a particular address and return the spending witness of the address.
+// It will return a nil string slice if no spending tx is found.
+func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
+	for _, tx := range txs {
+		for _, vin := range tx.VINs {
+			if vin.Prevout.ScriptPubKeyAddress == address.EncodeAddress() && vin.Witness != nil {
+				return *vin.Witness
+			}
+		}
+	}
+	return nil
 }

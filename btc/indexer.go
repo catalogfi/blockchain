@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,9 +25,37 @@ const (
 	DefaultRetryInterval = 5 * time.Second
 )
 
+type Transaction struct {
+	TxID   string `json:"txid"`
+	VINs   []VIN  `json:"vin"`
+	Status Status `json:"status"`
+}
+
+type VIN struct {
+	TxID         string    `json:"txid"`
+	Vout         int       `json:"vout"`
+	Prevout      Prevout   `json:"prevout"`
+	ScriptSigAsm string    `json:"scriptsig_asm"`
+	Witness      *[]string `json:"witness" `
+}
+
+type Prevout struct {
+	ScriptPubKeyType    string `json:"scriptpubkey_type"`
+	ScriptPubKey        string `json:"scriptpubkey"`
+	ScriptPubKeyAddress string `json:"scriptpubkey_address"`
+}
+
+type Status struct {
+	Confirmed   bool   `json:"confirmed"`
+	BlockHeight uint64 `json:"block_height"`
+}
+
 // IndexerClient provides some rpc functions which usually cannot be achieved by the standard bitcoin json-rpc methods.
 // The actual implementation will normally rely on an indexer, or third-party API sitting in front of the indexer.
 type IndexerClient interface {
+
+	// GetAddressTxs returns the tx history of the given address.
+	GetAddressTxs(ctx context.Context, address btcutil.Address) ([]Transaction, error)
 
 	// GetUTXOs return all utxos of the given address.
 	GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error)
@@ -39,6 +68,9 @@ type IndexerClient interface {
 
 	// SubmitTx submits the given tx to the blockchain. The tx needs to be signed.
 	SubmitTx(ctx context.Context, tx *wire.MsgTx) error
+
+	// FeeEstimate returns the estimate fees for different confirmation time.
+	FeeEstimate(ctx context.Context) (FeeSuggestion, error)
 }
 
 type electrsIndexerClient struct {
@@ -53,6 +85,33 @@ func NewElectrsIndexerClient(logger *zap.Logger, url string, retryInterval time.
 		url:           url,
 		retryInterval: retryInterval,
 	}
+}
+
+func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address) ([]Transaction, error) {
+	endpoint, err := url.JoinPath(client.url, "address", address.EncodeAddress(), "txs")
+	if err != nil {
+		return nil, err
+	}
+
+	// Send the request
+	txs := []Transaction{}
+	if err := retry(client.logger, ctx, client.retryInterval, func() error {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		// Decode response
+		if err := json.NewDecoder(resp.Body).Decode(&txs); err != nil {
+			return fmt.Errorf("failed to decode UTXOs: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return txs, nil
 }
 
 // GetUTXOs implements the IndexerClient basing on the electrs indexer API.
@@ -171,6 +230,42 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 		}
 		return nil
 	})
+}
+
+func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggestion, error) {
+	endpoint, err := url.JoinPath(client.url, "fee-estimates")
+	if err != nil {
+		return FeeSuggestion{}, err
+	}
+
+	// Send the request
+	var fees FeeSuggestion
+	err = retry(client.logger, ctx, client.retryInterval, func() error {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		feerates := map[string]float64{}
+		if err := json.NewDecoder(resp.Body).Decode(&fees); err != nil {
+			return err
+		}
+		if len(feerates) == 0 {
+			return NewNoRetryError(fmt.Errorf("not enough data"))
+		}
+
+		fees = FeeSuggestion{
+			Minimum: int(math.Ceil(feerates["504"])),
+			Economy: int(math.Ceil(feerates["144"])),
+			Low:     int(math.Ceil(feerates["6"])),
+			Medium:  int(math.Ceil(feerates["3"])),
+			High:    int(math.Ceil(feerates["1"])),
+		}
+
+		return nil
+	})
+	return fees, err
 }
 
 func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {

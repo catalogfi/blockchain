@@ -36,6 +36,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		txhash2, err := testutil.NigiriFaucet(pkAddr2.EncodeAddress())
 		Expect(err).To(BeNil())
 		By(fmt.Sprintf("Funding address2 %v , txid = %v", pkAddr2.EncodeAddress(), txhash2))
+		time.Sleep(5 * time.Second)
 
 		By("Create the multisig script using both public keys")
 		walletScript, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
@@ -125,6 +126,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		txhash2, err := testutil.NigiriFaucet(pkAddr2.EncodeAddress())
 		Expect(err).To(BeNil())
 		By(fmt.Sprintf("Funding address2 %v , txid = %v", pkAddr2.EncodeAddress(), txhash2))
+		time.Sleep(5 * time.Second)
 
 		By("Create the multi sig address using both public keys")
 		walletScript, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
@@ -253,6 +255,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		txhash2, err := testutil.NigiriFaucet(pkAddr2.EncodeAddress())
 		Expect(err).To(BeNil())
 		By(fmt.Sprintf("Funding address2 %v , txid = %v", pkAddr2.EncodeAddress(), txhash2))
+		time.Sleep(5 * time.Second)
 
 		By("Create multi sig script using both public keys")
 		walletScript, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
