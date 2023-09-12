@@ -96,13 +96,10 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(hasChange).Should(BeFalse())
 
 		By("Sign and submit the redeem tx")
-		fetcher := txscript.NewCannedPrevOutputFetcher(walletScript, fundingTx.TxOut[0].Value)
-		sig1, err := txscript.RawTxInWitnessSignature(redeemTx, txscript.NewTxSigHashes(redeemTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, txscript.SigHashAll, privKey1)
-		Expect(err).To(BeNil())
-		sig2, err := txscript.RawTxInWitnessSignature(redeemTx, txscript.NewTxSigHashes(redeemTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, txscript.SigHashAll, privKey2)
-		Expect(err).To(BeNil())
-		err = btc.SetMultisigWitness(redeemTx, pubKey1.SerializeCompressed(), sig1, pubKey2.SerializeCompressed(), sig2)
-		Expect(err).To(BeNil())
+		for i := range redeemInput {
+			err = btc.SignMultisig(redeemTx, i, redeemInput[i].Amount, privKey1, privKey2, txscript.SigHashAll)
+			Expect(err).To(BeNil())
+		}
 		err = client.SubmitTx(redeemTx)
 		Expect(err).To(BeNil())
 		By(fmt.Sprintf("Redeem tx hash = %v", color.YellowString(redeemTx.TxHash().String())))
@@ -183,10 +180,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(err).To(BeNil())
 
 		By("System sign the tx with sighash single")
-		fetcher := txscript.NewCannedPrevOutputFetcher(walletScript, fundingTx.TxOut[0].Value)
-		sig1, err := txscript.RawTxInWitnessSignature(refundTx, txscript.NewTxSigHashes(refundTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, btc.SigHashSingleAnyoneCanPay, privKey1)
-		Expect(err).To(BeNil())
-		sig2, err := txscript.RawTxInWitnessSignature(refundTx, txscript.NewTxSigHashes(refundTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, btc.SigHashSingleAnyoneCanPay, privKey2)
+		err = btc.SignMultisig(refundTx, 0, fundingTx.TxOut[0].Value, privKey1, privKey2, btc.SigHashSingleAnyoneCanPay)
 		Expect(err).To(BeNil())
 
 		By("Fill the tx to cover the fees")
@@ -195,8 +189,6 @@ var _ = Describe("Bitcoin scripts", func() {
 		refundTx.AddTxOut(wire.NewTxOut(fundingTx.TxOut[1].Value-fee, fundingTx.TxOut[1].PkScript))
 
 		By("Sign and submit refund transaction")
-		err = btc.SetMultisigWitness(refundTx, pubKey1.SerializeCompressed(), sig1, pubKey2.SerializeCompressed(), sig2)
-		Expect(err).To(BeNil())
 		pkScript, err := txscript.PayToAddrScript(pkAddr1)
 		Expect(err).To(BeNil())
 		sigScript, err := txscript.SignatureScript(refundTx, 1, pkScript, txscript.SigHashAll, privKey1, true)
@@ -226,14 +218,10 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(hasChange).Should(BeFalse())
 
 		By("Sign and submit the refund spend tx")
-		fetcher = txscript.NewCannedPrevOutputFetcher(refundScript, refundTx.TxOut[0].Value)
-		refundSpendSig, err := txscript.RawTxInWitnessSignature(refundSpendTx, txscript.NewTxSigHashes(refundSpendTx, fetcher), 0, amount, refundScript, txscript.SigHashAll, privKey2)
-		Expect(err).To(BeNil())
-		err = btc.SetRefundSpendWitness(refundSpendTx, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), refundSpendSig, secretHash[:], secret, false, waitTime)
+		err = btc.SignHtlcScript(refundSpendTx, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), secret, secretHash[:], 0, amount, waitTime, privKey2)
 		Expect(err).To(BeNil())
 		err = client.SubmitTx(refundSpendTx)
 		Expect(err).To(BeNil())
-
 		By(fmt.Sprintf("RefundSpendTx tx hash = %v", color.YellowString(refundSpendTx.TxHash().String())))
 	})
 
@@ -311,10 +299,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(err).To(BeNil())
 
 		By("System sign the tx with sighash single")
-		fetcher := txscript.NewCannedPrevOutputFetcher(walletScript, fundingTx.TxOut[0].Value)
-		sig1, err := txscript.RawTxInWitnessSignature(refundTx, txscript.NewTxSigHashes(refundTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, btc.SigHashSingleAnyoneCanPay, privKey1)
-		Expect(err).To(BeNil())
-		sig2, err := txscript.RawTxInWitnessSignature(refundTx, txscript.NewTxSigHashes(refundTx, fetcher), 0, fundingTx.TxOut[0].Value, walletScript, btc.SigHashSingleAnyoneCanPay, privKey2)
+		err = btc.SignMultisig(refundTx, 0, fundingTx.TxOut[0].Value, privKey1, privKey2, btc.SigHashSingleAnyoneCanPay)
 		Expect(err).To(BeNil())
 
 		By("Fill the tx to cover the fees")
@@ -323,8 +308,6 @@ var _ = Describe("Bitcoin scripts", func() {
 		refundTx.AddTxOut(wire.NewTxOut(fundingTx.TxOut[1].Value-fee, fundingTx.TxOut[1].PkScript))
 
 		By("Sign and submit refund transaction")
-		err = btc.SetMultisigWitness(refundTx, pubKey1.SerializeCompressed(), sig1, pubKey2.SerializeCompressed(), sig2)
-		Expect(err).To(BeNil())
 		pkScript, err := txscript.PayToAddrScript(pkAddr1)
 		Expect(err).To(BeNil())
 		sigScript, err := txscript.SignatureScript(refundTx, 1, pkScript, txscript.SigHashAll, privKey1, true)
@@ -359,10 +342,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 		By("Sign the refund spend tx")
 		refundSpendTx.TxIn[0].Sequence = uint32(waitTime)
-		fetcher = txscript.NewCannedPrevOutputFetcher(refundScript, refundTx.TxOut[0].Value)
-		refundSpendSig, err := txscript.RawTxInWitnessSignature(refundSpendTx, txscript.NewTxSigHashes(refundSpendTx, fetcher), 0, amount, refundScript, txscript.SigHashAll, privKey1)
-		Expect(err).To(BeNil())
-		err = btc.SetRefundSpendWitness(refundSpendTx, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), refundSpendSig, secretHash[:], secret, true, waitTime)
+		err = btc.SignHtlcScript(refundSpendTx, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), secret, secretHash[:], 0, amount, waitTime, privKey1)
 		Expect(err).To(BeNil())
 
 		By("You shouldn't be able to spend the refund tx since it doesnt have enough confirmations")

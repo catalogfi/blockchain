@@ -1,9 +1,11 @@
 package btc
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -65,50 +67,61 @@ func NewRefundTx(fundingUtxo UTXO, refundScript []byte) (*wire.MsgTx, error) {
 	return refundTx, nil
 }
 
-// SetMultisigWitness used for setting the witness script for any txs using the instant wallet utxo(redeem, refund)
-func SetMultisigWitness(multisigTx *wire.MsgTx, pubkeyA, sigA, pubKeyB, sigB []byte) error {
-	// assumed that there's only 1 txIn (instant wallet utxo)
-	instantWalletScript, err := MultisigScript(pubkeyA, pubKeyB)
+func SignMultisig(tx *wire.MsgTx, index int, amount int64, key1, key2 *btcec.PrivateKey, hashType txscript.SigHashType) error {
+	multiSigScript, err := MultisigScript(key1.PubKey().SerializeCompressed(), key2.PubKey().SerializeCompressed())
 	if err != nil {
 		return err
 	}
-	witnessStack := wire.TxWitness(make([][]byte, 4))
-	witnessStack[0] = nil
-	witnessStack[1] = sigA
-	witnessStack[2] = sigB
-	witnessStack[3] = instantWalletScript
 
-	multisigTx.TxIn[0].Witness = witnessStack
+	fetcher := txscript.NewCannedPrevOutputFetcher(multiSigScript, amount)
+	sig1, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, multiSigScript, hashType, key1)
+	if err != nil {
+		return err
+	}
+	sig2, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, multiSigScript, hashType, key2)
+	if err != nil {
+		return err
+	}
+	witness := wire.TxWitness(make([][]byte, 4))
+	witness[0] = nil
+	witness[1] = sig1
+	witness[2] = sig2
+	witness[3] = multiSigScript
+
+	tx.TxIn[index].Witness = witness
 	return nil
 }
 
-// SetRefundSpendWitness used for setting witness signature for spending the refunded utxo from the refund script,
-// has 2 possible paths either refund immediately through user secret or refund through timelock.
-func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, signature, refundSecretHash, refundSecret []byte, owner bool, waitTime int64) error {
-	refundScript, err := HtlcScript(btcutil.Hash160(ownerPubkey), btcutil.Hash160(revokerPubkey), refundSecretHash, waitTime)
+func SignHtlcScript(tx *wire.MsgTx, ownerPub, redeemerPub, secret, secretHash []byte, index int, amount, waitTime int64, key *btcec.PrivateKey) error {
+	htlcScript, err := HtlcScript(btcutil.Hash160(ownerPub), btcutil.Hash160(redeemerPub), secretHash[:], waitTime)
 	if err != nil {
 		return err
 	}
 
-	var witnessStack wire.TxWitness
-
-	if owner {
-		// owner
-		witnessStack = make([][]byte, 4)
-		witnessStack[0] = signature
-		witnessStack[1] = ownerPubkey
-		witnessStack[2] = nil
-		witnessStack[3] = refundScript
-	} else {
-		// revoker
-		witnessStack = make([][]byte, 5)
-		witnessStack[0] = signature
-		witnessStack[1] = revokerPubkey
-		witnessStack[2] = refundSecret
-		witnessStack[3] = []byte{0x1}
-		witnessStack[4] = refundScript
+	// Sign the message
+	fetcher := txscript.NewCannedPrevOutputFetcher(htlcScript, amount)
+	sig, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, htlcScript, txscript.SigHashAll, key)
+	if err != nil {
+		return err
 	}
-	refundSpend.TxIn[0].Witness = witnessStack
+
+	// Set the witness
+	if bytes.Equal(key.PubKey().SerializeCompressed(), ownerPub) {
+		witness := make([][]byte, 4)
+		witness[0] = sig
+		witness[1] = ownerPub
+		witness[2] = nil
+		witness[3] = htlcScript
+		tx.TxIn[index].Witness = witness
+	} else {
+		witness := make([][]byte, 5)
+		witness[0] = sig
+		witness[1] = redeemerPub
+		witness[2] = secret
+		witness[3] = []byte{0x1}
+		witness[4] = htlcScript
+		tx.TxIn[index].Witness = witness
+	}
 	return nil
 }
 
