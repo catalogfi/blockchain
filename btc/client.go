@@ -98,16 +98,19 @@ func (client *client) LatestBlock() (int64, string, error) {
 // SubmitTx to the Bitcoin network.
 func (client *client) SubmitTx(tx *wire.MsgTx) error {
 	_, err := client.rpcClient.SendRawTransaction(tx, true)
-	switch {
-	case strings.Contains(err.Error(), "Transaction already in block chain"):
-		return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxAlreadyInBlockchain)
-	case strings.Contains(err.Error(), "bad-txns-inputs-missingorspent"):
-		return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
-	case strings.Contains(err.Error(), "txn-mempool-conflict"):
-		return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrMempoolConflict)
-	default:
-		return err
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "Transaction already in block chain"):
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxAlreadyInBlockchain)
+		case strings.Contains(err.Error(), "bad-txns-inputs-missingorspent"):
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
+		case strings.Contains(err.Error(), "txn-mempool-conflict"):
+			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrMempoolConflict)
+		default:
+			return err
+		}
 	}
+	return nil
 }
 
 func (client *client) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error) {
