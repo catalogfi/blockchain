@@ -15,9 +15,9 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
-// RandomSecret creates a random secret with size [0,32)
+// RandomSecret creates a random secret with size [1,32)
 func RandomSecret() []byte {
-	length := rand.Intn(32)
+	length := rand.Intn(31) + 1
 	data := make([]byte, length)
 
 	_, err := crand.Read(data)

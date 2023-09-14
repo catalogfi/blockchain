@@ -123,24 +123,7 @@ func BuildTx(network *chaincfg.Params, inputs UTXOs, recipients []Recipient, fee
 }
 
 // P2wshAddress returns the P2WSH address of the give script
-func P2wshAddress(script []byte, network *chaincfg.Params) (string, error) {
+func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
 	scriptHash := sha256.Sum256(script)
-	instantWalletAddr, err := btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
-	if err != nil {
-		return "", err
-	}
-	return instantWalletAddr.EncodeAddress(), nil
-}
-
-// SpendingWitness loops through the txs of a particular address and return the spending witness of the address.
-// It will return a nil string slice if no spending tx is found.
-func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
-	for _, tx := range txs {
-		for _, vin := range tx.VINs {
-			if vin.Prevout.ScriptPubKeyAddress == address.EncodeAddress() && vin.Witness != nil {
-				return *vin.Witness
-			}
-		}
-	}
-	return nil
+	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
 }

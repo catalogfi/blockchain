@@ -7,7 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
 const (
@@ -15,6 +19,50 @@ const (
 
 	BlockstreamAPI = "https://blockstream.info/api/fee-estimates"
 )
+
+var (
+	// stack number + stack size * 4 + signature + public key + script size
+	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + 89
+
+	// stack number + stack size * 5 + signature + public key + secret + script size
+	RedeemHtlcRedeemSigScriptSize = func(secretSize int) int {
+		return 1 + 5 + 73 + 33 + secretSize + +1 + 89
+	}
+
+	// stack number + stack size * 4 + signature * 2 + script size
+	RedeemMultisigSigScriptSize = 1 + 4 + 73*2 + 71
+)
+
+// EstimateVirtualSize will return an estimate virtual size of the given unsigned tx. The extraBaseSize will be the signature
+// size of all legacy type utxos and extraSegwitSize will be signature size of all segwit utxos.
+func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int {
+	baseSize := tx.SerializeSizeStripped()
+	baseSize += extraBaseSize
+	swSize := 2 + extraSegwitSize
+	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
+}
+
+// EstimateUtxoSize returns the estimated signature size for a few types of fixed-length utxos.
+func EstimateUtxoSize(address btcutil.Address, n int) int {
+	switch address.(type) {
+	case *btcutil.AddressPubKeyHash:
+		return txsizes.RedeemP2PKHSigScriptSize * n
+	case *btcutil.AddressWitnessPubKeyHash:
+		return txsizes.RedeemP2WPKHInputWitnessWeight * n
+	case *btcutil.AddressTaproot:
+		return txsizes.RedeemP2TRInputWitnessWeight * n
+	default:
+		return 0
+	}
+}
+
+// TxVirtualSize returns the virtual size of a transaction
+func TxVirtualSize(tx *wire.MsgTx) int {
+	size := tx.SerializeSize()
+	baseSize := tx.SerializeSizeStripped()
+	swSize := size - baseSize
+	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
+}
 
 type FeeSuggestion struct {
 	Minimum int `json:"minimumFee"`

@@ -148,3 +148,16 @@ func ParseScriptSigP2PKH(scriptSig []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("invalid script length %v", len(scriptSig))
 	}
 }
+
+// SpendingWitness loops through the txs of a particular address and return the spending witness of the address.
+// It will return a nil string slice if no spending tx is found.
+func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
+	for _, tx := range txs {
+		for _, vin := range tx.VINs {
+			if vin.Prevout.ScriptPubKeyAddress == address.EncodeAddress() && vin.Witness != nil {
+				return *vin.Witness
+			}
+		}
+	}
+	return nil
+}

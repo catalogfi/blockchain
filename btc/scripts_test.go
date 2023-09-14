@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -18,99 +19,119 @@ import (
 )
 
 var _ = Describe("Bitcoin scripts", func() {
-	It("should create a multisig script and redeem from it", func() {
-		By("Initialization (Update these fields if testing on testnet/mainnet)")
-		network := &chaincfg.RegressionNetParams
-		privKey1, pubKey1, pkAddr1, err := testutil.ParseKeys("PRIV_KEY_1", network)
-		Expect(err).To(BeNil())
-		privKey2, pubKey2, pkAddr2, err := testutil.ParseKeys("PRIV_KEY_2", network)
-		Expect(err).To(BeNil())
-		client, err := RegtestClient()
-		Expect(err).To(BeNil())
-		indexer := RegtestIndexer()
+	Context("Multisig script", func() {
+		It("should create a multisig script and redeem from it", func() {
+			By("Initialization (Update these fields if testing on testnet/mainnet)")
+			network := &chaincfg.RegressionNetParams
+			privKey1, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey1 := privKey1.PubKey()
+			pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			privKey2, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey2 := privKey2.PubKey()
+			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			client, err := RegtestClient()
+			Expect(err).To(BeNil())
+			indexer := RegtestIndexer()
 
-		By("funding the addresses")
-		txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
-		Expect(err).To(BeNil())
-		By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
-		txhash2, err := testutil.NigiriFaucet(pkAddr2.EncodeAddress())
-		Expect(err).To(BeNil())
-		By(fmt.Sprintf("Funding address2 %v , txid = %v", pkAddr2.EncodeAddress(), txhash2))
-		time.Sleep(5 * time.Second)
+			By("funding the addresses")
+			txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
+			txhash2, err := testutil.NigiriFaucet(pkAddr2.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address2 %v , txid = %v", pkAddr2.EncodeAddress(), txhash2))
+			time.Sleep(5 * time.Second)
 
-		By("Create the multisig script using both public keys")
-		walletScript, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
-		Expect(err).Should(BeNil())
-		walletAddr, err := btc.P2wshAddress(walletScript, network)
-		Expect(err).Should(BeNil())
-		walletWitnessScript, _ := btc.WitnessScriptHash(walletScript)
-		Expect(txscript.IsPayToWitnessScriptHash(walletWitnessScript)).Should(BeTrue())
+			By("Create the multisig script using both public keys")
+			walletScript, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
+			Expect(err).Should(BeNil())
+			walletAddr, err := btc.P2wshAddress(walletScript, network)
+			Expect(err).Should(BeNil())
+			walletWitnessScript, _ := btc.WitnessScriptHash(walletScript)
+			Expect(txscript.IsPayToWitnessScriptHash(walletWitnessScript)).Should(BeTrue())
 
-		By("Construct the funding tx (pk1 -> instantWallet)")
-		utxos, err := indexer.GetUTXOs(context.Background(), pkAddr1)
-		Expect(err).To(BeNil())
-		amount, fee := int64(1e5), int64(500)
-		fundingInputs, err := btc.PickUTXOs(utxos, amount, fee)
-		Expect(err).To(BeNil())
-		fundingRecipients := []btc.Recipient{
-			{
-				To:     walletAddr,
-				Amount: amount,
-			},
-		}
+			By("Construct the funding tx (pk1 -> instantWallet)")
+			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr1)
+			Expect(err).To(BeNil())
+			amount, fee := int64(1e5), int64(500)
+			fundingInputs, err := btc.PickUTXOs(utxos, amount, fee)
+			Expect(err).To(BeNil())
+			fundingRecipients := []btc.Recipient{
+				{
+					To:     walletAddr.EncodeAddress(),
+					Amount: amount,
+				},
+			}
 
-		fundingTx, _, err := btc.BuildTx(network, fundingInputs, fundingRecipients, fee, pkAddr1)
-		Expect(err).To(BeNil())
-
-		By("Sign and submit the fund tx")
-		for i := range fundingTx.TxIn {
-			// We assume the pkScript is P2PKH
-			pkScript, err := txscript.PayToAddrScript(pkAddr1)
+			fundingTx, _, err := btc.BuildTx(network, fundingInputs, fundingRecipients, fee, pkAddr1)
 			Expect(err).To(BeNil())
 
-			sigScript, err := txscript.SignatureScript(fundingTx, i, pkScript, txscript.SigHashAll, privKey1, true)
+			By("Sign and submit the fund tx")
+			for i := range fundingTx.TxIn {
+				// We assume the pkScript is P2PKH
+				pkScript, err := txscript.PayToAddrScript(pkAddr1)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(fundingTx, i, pkScript, txscript.SigHashAll, privKey1, true)
+				Expect(err).To(BeNil())
+				fundingTx.TxIn[i].SignatureScript = sigScript
+			}
+
+			Expect(client.SubmitTx(fundingTx)).Should(Succeed())
+			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(fundingTx.TxHash().String())))
+			time.Sleep(time.Second)
+
+			By("Redeem the funds in the instant wallet")
+			redeemInput := []btc.UTXO{
+				{
+					TxID:   fundingTx.TxHash().String(),
+					Vout:   0,
+					Amount: amount,
+				},
+			}
+			redeemRecipients := []btc.Recipient{
+				{
+					To:     pkAddr2.EncodeAddress(),
+					Amount: amount - fee,
+				},
+			}
+			redeemTx, hasChange, err := btc.BuildTx(network, redeemInput, redeemRecipients, fee, pkAddr1)
 			Expect(err).To(BeNil())
-			fundingTx.TxIn[i].SignatureScript = sigScript
-		}
+			Expect(hasChange).Should(BeFalse())
+			extraSegwitSize := btc.RedeemMultisigSigScriptSize
+			estimatedSize := btc.EstimateVirtualSize(redeemTx, 0, extraSegwitSize)
 
-		Expect(client.SubmitTx(fundingTx)).Should(Succeed())
-		By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(fundingTx.TxHash().String())))
-		time.Sleep(time.Second)
-
-		By("Redeem the funds in the instant wallet")
-		redeemInput := []btc.UTXO{
-			{
-				TxID:   fundingTx.TxHash().String(),
-				Vout:   0,
-				Amount: amount,
-			},
-		}
-		redeemRecipients := []btc.Recipient{
-			{
-				To:     pkAddr2.EncodeAddress(),
-				Amount: amount - fee,
-			},
-		}
-		redeemTx, hasChange, err := btc.BuildTx(network, redeemInput, redeemRecipients, fee, pkAddr1)
-		Expect(err).To(BeNil())
-		Expect(hasChange).Should(BeFalse())
-
-		By("Sign and submit the redeem tx")
-		for i := range redeemInput {
-			err = btc.SignMultisig(redeemTx, i, redeemInput[i].Amount, privKey1, privKey2, txscript.SigHashAll)
+			By("Sign and submit the redeem tx")
+			for i := range redeemInput {
+				err = btc.SignMultisig(redeemTx, i, redeemInput[i].Amount, privKey1, privKey2, txscript.SigHashAll)
+				Expect(err).To(BeNil())
+			}
+			actualSize := btc.TxVirtualSize(redeemTx)
+			Expect(estimatedSize).Should(BeNumerically(">=", actualSize))
+			By(fmt.Sprintf("Estimated tx size = %v, actual tx size = %v", estimatedSize, actualSize))
+			Expect(estimatedSize - actualSize).Should(BeNumerically("<=", 10))
+			err = client.SubmitTx(redeemTx)
 			Expect(err).To(BeNil())
-		}
-		err = client.SubmitTx(redeemTx)
-		Expect(err).To(BeNil())
-		By(fmt.Sprintf("Redeem tx hash = %v", color.YellowString(redeemTx.TxHash().String())))
+			By(fmt.Sprintf("Redeem tx hash = %v", color.YellowString(redeemTx.TxHash().String())))
+		})
 	})
 
 	It("should create a HTLC script and redeem it using secret", func() {
 		By("Initialization")
 		network := &chaincfg.RegressionNetParams
-		privKey1, pubKey1, pkAddr1, err := testutil.ParseKeys("PRIV_KEY_1", network)
+		privKey1, err := btcec.NewPrivateKey()
 		Expect(err).To(BeNil())
-		privKey2, pubKey2, pkAddr2, err := testutil.ParseKeys("PRIV_KEY_2", network)
+		pubKey1 := privKey1.PubKey()
+		pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
+		Expect(err).To(BeNil())
+		privKey2, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		pubKey2 := privKey2.PubKey()
+		pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 		Expect(err).To(BeNil())
 		client, err := RegtestClient()
 		Expect(err).To(BeNil())
@@ -142,7 +163,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(err).To(BeNil())
 		fundingRecipients := []btc.Recipient{
 			{
-				To:     walletAddr,
+				To:     walletAddr.EncodeAddress(),
 				Amount: amount,
 			},
 		}
@@ -228,9 +249,15 @@ var _ = Describe("Bitcoin scripts", func() {
 	It("should create instant wallet and refund from it after timelock", func() {
 		By("Initialization")
 		network := &chaincfg.RegressionNetParams
-		privKey1, pubKey1, pkAddr1, err := testutil.ParseKeys("PRIV_KEY_1", network)
+		privKey1, err := btcec.NewPrivateKey()
 		Expect(err).To(BeNil())
-		privKey2, pubKey2, pkAddr2, err := testutil.ParseKeys("PRIV_KEY_2", network)
+		pubKey1 := privKey1.PubKey()
+		pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
+		Expect(err).To(BeNil())
+		privKey2, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		pubKey2 := privKey2.PubKey()
+		pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 		Expect(err).To(BeNil())
 		client, err := RegtestClient()
 		Expect(err).To(BeNil())
@@ -261,7 +288,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		Expect(err).To(BeNil())
 		fundingRecipients := []btc.Recipient{
 			{
-				To:     walletAddr,
+				To:     walletAddr.EncodeAddress(),
 				Amount: amount,
 			},
 		}
