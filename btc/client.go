@@ -116,10 +116,13 @@ func (client *client) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, er
 		return nil, err
 	}
 	res, err := client.rpcClient.GetRawTransactionVerbose(hash)
-	if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
-		return nil, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+	if err != nil {
+		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
+			return nil, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+		}
+		return nil, err
 	}
-	return res, err
+	return res, nil
 }
 
 func (client *client) GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error) {
