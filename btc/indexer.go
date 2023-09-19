@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -224,9 +225,17 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 			return err
 		}
 		if resp.StatusCode != http.StatusOK {
-			// todo : check error message if failed
-
-			return fmt.Errorf("failed to send transaction: %s", data)
+			errMessage := strings.ToLower(string(data))
+			switch {
+			case strings.Contains(errMessage, "transaction already in block chain"):
+				return NewNoRetryError(ErrAlreadyInChain)
+			case strings.Contains(errMessage, "bad-txns-inputs-missingorspent"):
+				return NewNoRetryError(ErrTxInputsMissingOrSpent)
+			case strings.Contains(errMessage, "txn-mempool-conflict"):
+				return NewNoRetryError(ErrMempoolConflict)
+			default:
+				return NewNoRetryError(errors.New(string(data)))
+			}
 		}
 		return nil
 	})

@@ -2,6 +2,8 @@ package btc_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -10,6 +12,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/multichain/btc"
 	"github.com/catalogfi/multichain/testutil"
+	"github.com/fatih/color"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -91,6 +94,82 @@ var _ = Describe("Indexer client", func() {
 				}
 			}
 			Expect(has).Should(BeTrue())
+		})
+	})
+
+	Context("errors", func() {
+		It("should return specific errors", func() {
+			By("Initialise a local regnet client")
+			network := &chaincfg.RegressionNetParams
+			indexer := RegtestIndexer()
+
+			By("New address")
+			privKey, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey := privKey.PubKey()
+			pkAddr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+
+			By("funding the addresses")
+			txhash, err := testutil.NigiriFaucet(pkAddr.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr.EncodeAddress(), txhash))
+			time.Sleep(5 * time.Second)
+
+			By("Construct a new tx")
+			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr)
+			Expect(err).To(BeNil())
+			amount, fee := int64(1e5), int64(500)
+			inputs, err := btc.PickUTXOs(utxos, amount, fee)
+			Expect(err).To(BeNil())
+			recipients := []btc.Recipient{
+				{
+					To:     pkAddr.EncodeAddress(),
+					Amount: amount,
+				},
+			}
+			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr)
+			Expect(err).To(BeNil())
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
+
+			By("Submit the transaction")
+			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
+			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(transaction.TxHash().String())))
+			time.Sleep(time.Second)
+
+			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			time.Sleep(1 * time.Second)
+			err = indexer.SubmitTx(context.Background(), transaction)
+			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
+
+			By("Try construct a new transaction spending the same input")
+			recipients1 := []btc.Recipient{
+				{
+					To:     pkAddr.EncodeAddress(),
+					Amount: 2 * amount,
+				},
+			}
+			transaction1, _, err := btc.BuildTx(network, inputs, recipients1, fee, pkAddr)
+			Expect(err).To(BeNil())
+			for i := range transaction1.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction1, i, pkScript, txscript.SigHashAll, privKey, true)
+				Expect(err).To(BeNil())
+				transaction1.TxIn[i].SignatureScript = sigScript
+			}
+			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			err = indexer.SubmitTx(context.Background(), transaction1)
+			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
 	})
 })
