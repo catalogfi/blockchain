@@ -23,7 +23,7 @@ var (
 	ErrMempoolConflict = errors.New("txn-mempool-conflict")
 )
 
-// Client to interact with the bitcoin network. It follows the bitcoind json-rpc interface.
+// Client to interact with the Bitcoin network. This follows the bitcoind JSON-RPC interface.
 type Client interface {
 
 	// Net returns the network params.
@@ -32,7 +32,7 @@ type Client interface {
 	// LatestBlock returns the height and hash of the latest block.
 	LatestBlock() (int64, string, error)
 
-	// SubmitTx to the bitcoin network
+	// SubmitTx to the Bitcoin network.
 	SubmitTx(tx *wire.MsgTx) error
 
 	// GetRawTransaction returns the raw transaction of the given hash.
@@ -84,7 +84,6 @@ func (client *client) Net() *chaincfg.Params {
 	return client.params
 }
 
-// LatestBlock returns the height and hash of the longest blockchain.
 func (client *client) LatestBlock() (int64, string, error) {
 	res, err := client.rpcClient.GetBlockChainInfo()
 	if err != nil {
@@ -93,7 +92,6 @@ func (client *client) LatestBlock() (int64, string, error) {
 	return int64(res.Blocks), res.BestBlockHash, nil
 }
 
-// SubmitTx to the Bitcoin network.
 func (client *client) SubmitTx(tx *wire.MsgTx) error {
 	_, err := client.rpcClient.SendRawTransaction(tx, false)
 	if err != nil {
@@ -156,7 +154,7 @@ func (client *client) GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResul
 	return client.rpcClient.GetTxOut(txhash, vout, true)
 }
 
-// MockClient for testing purpose
+// MockClient for testing purposes.
 type MockClient struct {
 	FuncNet               func() *chaincfg.Params
 	FuncGetUTXOs          func(btcutil.Address) (UTXOs, error)
@@ -168,7 +166,7 @@ type MockClient struct {
 	FuncGetTxOut          func(string, uint32) (*btcjson.GetTxOutResult, error)
 }
 
-// Make sure the MockClient implements the Client interface
+// Make sure the MockClient implements the Client interface.
 var _ Client = NewMockClient()
 
 func NewMockClient() *MockClient {
