@@ -45,7 +45,8 @@ type Client interface {
 	// GetBlockByHash returns the block detail with the given hash.
 	GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error)
 
-	// GetTxOut returns details about an unspent transaction output
+	// GetTxOut returns details about an unspent transaction output. It will return nil result if the utxo has been
+	// spent.
 	GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error)
 }
 

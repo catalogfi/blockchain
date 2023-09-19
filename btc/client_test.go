@@ -180,5 +180,63 @@ var _ = Describe("bitcoin client", func() {
 			err = client.SubmitTx(transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
+
+		It("should return an error when the utxo has been spent", func() {
+			By("Initialization keys ")
+			network := &chaincfg.RegressionNetParams
+			privKey1, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey1 := privKey1.PubKey()
+			pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			privKey2, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey2 := privKey2.PubKey()
+			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			client, err := RegtestClient()
+			Expect(err).To(BeNil())
+			indexer := RegtestIndexer()
+
+			By("Funding the addresses")
+			txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
+			time.Sleep(5 * time.Second)
+
+			By("Build the transaction")
+			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr1)
+			Expect(err).To(BeNil())
+			amount, fee := int64(1e5), int64(500)
+			inputs, err := btc.PickUTXOs(utxos, amount, fee)
+			Expect(err).To(BeNil())
+			recipients := []btc.Recipient{
+				{
+					To:     pkAddr2.EncodeAddress(),
+					Amount: amount,
+				},
+			}
+			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			Expect(err).To(BeNil())
+
+			By("Sign and submit the fund tx")
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr1)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey1, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
+			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
+
+			By("Expect an error if the utxo is spent")
+			time.Sleep(time.Second)
+			for _, input := range inputs {
+				res, err := client.GetTxOut(input.TxID, input.Vout)
+				Expect(err).Should(BeNil())
+				Expect(res).Should(BeNil())
+			}
+		})
 	})
 })
