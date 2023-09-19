@@ -23,8 +23,7 @@ var (
 	ErrMempoolConflict = errors.New("txn-mempool-conflict")
 )
 
-// Client to interact with the bitcoin network. We'll follow the standard bitcoind rpc interface if that meet our
-// requirements.
+// Client to interact with the bitcoin network. It follows the bitcoind json-rpc interface.
 type Client interface {
 
 	// Net returns the network params.
