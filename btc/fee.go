@@ -42,7 +42,8 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
 }
 
-// EstimateUtxoSize returns the estimated signature size for a few types of fixed-length utxos.
+// EstimateUtxoSize returns the estimated signature size for a few types of fixed-length utxos. `n` is the number of
+// utxos you want to estimate from the transaction input.
 func EstimateUtxoSize(address btcutil.Address, n int) int {
 	switch address.(type) {
 	case *btcutil.AddressPubKeyHash:
