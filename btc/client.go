@@ -101,14 +101,14 @@ func (client *client) SubmitTx(tx *wire.MsgTx) error {
 		if errors.As(err, &rpcErr) {
 			switch rpcErr.Code {
 			case btcjson.ErrRPCVerifyAlreadyInChain:
-				return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrAlreadyInChain)
+				return ErrAlreadyInChain
 			case btcjson.ErrRPCTxRejected:
 				if strings.Contains(err.Error(), "txn-mempool-conflict") {
-					return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrMempoolConflict)
+					return ErrMempoolConflict
 				}
 			case btcjson.ErrRPCTxError:
 				if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
-					return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
+					return ErrTxInputsMissingOrSpent
 				}
 			}
 		}
