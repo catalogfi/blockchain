@@ -14,11 +14,9 @@ import (
 )
 
 var (
-	ErrNilResult = errors.New("nil result")
-
 	ErrTxNotFound = errors.New("no such mempool or blockchain transaction")
 
-	ErrTxAlreadyInBlockchain = errors.New("transaction already in block chain")
+	ErrAlreadyInChain = errors.New("transaction already in block chain")
 
 	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
 
@@ -97,18 +95,24 @@ func (client *client) LatestBlock() (int64, string, error) {
 
 // SubmitTx to the Bitcoin network.
 func (client *client) SubmitTx(tx *wire.MsgTx) error {
-	_, err := client.rpcClient.SendRawTransaction(tx, true)
+	_, err := client.rpcClient.SendRawTransaction(tx, false)
 	if err != nil {
-		switch {
-		case strings.Contains(err.Error(), "Transaction already in block chain"):
-			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxAlreadyInBlockchain)
-		case strings.Contains(err.Error(), "bad-txns-inputs-missingorspent"):
-			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
-		case strings.Contains(err.Error(), "txn-mempool-conflict"):
-			return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrMempoolConflict)
-		default:
-			return err
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) {
+			switch rpcErr.Code {
+			case btcjson.ErrRPCVerifyAlreadyInChain:
+				return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrAlreadyInChain)
+			case btcjson.ErrRPCTxRejected:
+				if strings.Contains(err.Error(), "txn-mempool-conflict") {
+					return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrMempoolConflict)
+				}
+			case btcjson.ErrRPCTxError:
+				if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+					return fmt.Errorf(`bad "sendrawtransaction": %w`, ErrTxInputsMissingOrSpent)
+				}
+			}
 		}
+		return err
 	}
 	return nil
 }
