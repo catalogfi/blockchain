@@ -1,21 +1,28 @@
-# blockchain
-[![Tests][tests-badge]][tests-url] 
-The blockchain repo provides things we need to interact with different blockchains 
--  [x] bitcoin 
--  [ ] ethereum 
+# ⛓️ blockchain
 
-## Install 
-The `blockchain` package can be imported directly to your golang project by 
+[![Tests][tests-badge]][tests-url] 
+
+For any Catalog-related blockchain interactions, in Golang.
+-  [x] Bitcoin
+-  [ ] Ethereum
+
+## Install
+
+The `blockchain` package can be imported by running:
 ```shell
 $ go get github.com/catalogfi/blockchain
 ```
 
-## Bitcoin 
-- json-rpc client
+## Bitcoin
 
-This follows the standard bitcoind json-rpc 
+### JSON-RPC
+
+This client follows the standard bitcoind JSON-RPC interface.
+
+Example:
+
 ```go
-    // Initialise the client 
+    // Initialise the client.
     config := &rpcclient.ConnConfig{
         Params:       chaincfg.RegressionNetParams.Name,
         Host:         "0.0.0.0:18443",
@@ -24,20 +31,23 @@ This follows the standard bitcoind json-rpc
         HTTPPostMode: true,
         DisableTLS:   true,
     }
-    client := btc.NewClient(config) 
+    client := btc.NewClient(config)
     
-    // Get the latest block
+    // Get the latest block.
     height, hash, err := client.LatestBlock()
     if err != nil {
     	panic(err)
     }
 ```
 
-- Indexer client
+### Indexer
 
-This follow the electrs indexer API, more details can be found [here](https://github.com/blockstream/esplora/blob/master/API.md)
+The indexer client follows the [electrs indexer API](https://github.com/blockstream/esplora/blob/master/API.md).
+
+Example:
+
 ```go
-    // Initialise the client
+    // Initialise the client.
     logger, _ := zap.NewDevelopment()
     indexer := btc.NewElectrsIndexerClient(logger, host, btc.DefaultRetryInterval)
     
@@ -48,42 +58,37 @@ This follow the electrs indexer API, more details can be found [here](https://gi
     }
 ```
 
-- FeeEstimator
+### Fee estimator
 
-There're a few different implementations for the FeeEstimator 
+Example:
 
 ```go
-     // Mempool
+    // Mempool
     estimator := btc.NewMempoolFeeEstimator(&chaincfg.MainNetParams, btc.MempoolFeeAPI, 15*time.Second)
     fees, err := estimator.FeeSuggestion()
     if err != nil {
         panic(err)
     }
-	
-	// Blockstream 
+    
+    // Blockstream
     estimator := btc.NewBlockstreamFeeEstimator(&chaincfg.MainNetParams, btc.BlockstreamAPI, 15*time.Second)
-    fees, err := estimator.FeeSuggestion()
-	if err != nil {
-        panic(err)
-	} 
-	
-	// Fix fee estimator 
-	estimator := btc.NewFixFeeEstimator(10)
     fees, err := estimator.FeeSuggestion()
     if err != nil {
         panic(err)
     } 
+    
+    // Fixed fee estimator
+    estimator := btc.NewFixedFeeEstimator(10)
+    fees, err := estimator.FeeSuggestion()
+    if err != nil {
+        panic(err)
+    }
 ```
 
-- Bitcoin script 
+### Bitcoin scripts
 
-There're some bitcoin scripts we focus in this package, since they're fundamental to other projects we build in catalog.
-The `MultisigScript` will return a 2-out-2 multisig script and `HtlcScript` will return a HTLC script which is described 
-in [BIP-199](https://github.com/bitcoin/bips/blob/e643d247c8bc086745f3031cdee0899803edea2f/bip-0199.mediawiki#L22). It 
-also has helper function to spend these scripts. 
-
-
-
+- `MultisigScript`: Returns a 2-of-2 multisig script used by the [Guardian](https://docs.catalog.fi/catalog-accounts/instant-wallet/guardian) component.
+- `HtlcScript`: Returns a HTLC script as described in [BIP-199](https://github.com/bitcoin/bips/blob/e643d247c8bc086745f3031cdee0899803edea2f/bip-0199.mediawiki#L22).
 
 [tests-url]: https://github.com/catalogfi/blockchain/actions/workflows/test.yml
 [tests-badge]: https://github.com/catalogfi/blockchain/actions/workflows/test.yml/badge.svg?branch=master
