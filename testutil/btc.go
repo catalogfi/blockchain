@@ -3,17 +3,23 @@ package testutil
 import (
 	"os"
 	"os/exec"
+	"strings"
+
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 )
 
 // NigiriFaucet funds the given address using the `nigiri faucet` command. It will transfer 1 BTC to the target address
 // and automatically generate a new block for the tx. Beware the result will be something like `txId: xxxxx` which is
 // not exactly the transaction hash. You'll need to trim the prefix when parsing the hash.
 func NigiriFaucet(addr string) (string, error) {
-	hash, err := RunOutput("nigiri", "faucet", addr)
+	res, err := RunOutput("nigiri", "faucet", addr)
 	if err != nil {
 		return "", err
 	}
-	return string(hash), nil
+	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "txId:"))
+	return txid, nil
 }
 
 // NigiriNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
@@ -31,4 +37,13 @@ func RunOutput(name string, args ...string) ([]byte, error) {
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
+}
+
+// RandomBtcAddressP2PKH returns a random p2pkh address of the given network.
+func RandomBtcAddressP2PKH(network *chaincfg.Params) (btcutil.Address, error) {
+	key, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
 }

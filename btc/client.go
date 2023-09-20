@@ -1,220 +1,173 @@
 package btc
 
 import (
-	"bytes"
-	"context"
-	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"math/rand"
-	"net/http"
-	"time"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
-	"go.uber.org/zap"
 )
 
-// Client to interact with the bitcoin network. We'll follow the standard bitcoind rpc interface if that meet our
-// requirements.
+var (
+	ErrTxNotFound = errors.New("no such mempool or blockchain transaction")
+
+	ErrAlreadyInChain = errors.New("transaction already in block chain")
+
+	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
+
+	ErrMempoolConflict = errors.New("txn-mempool-conflict")
+)
+
+// Client to interact with the Bitcoin network. This follows the bitcoind JSON-RPC interface.
 type Client interface {
-	IndexerClient
 
 	// Net returns the network params.
 	Net() *chaincfg.Params
 
 	// LatestBlock returns the height and hash of the latest block.
-	LatestBlock(ctx context.Context) (int64, string, error)
+	LatestBlock() (int64, string, error)
 
-	// SubmitTx to the bitcoin network
-	SubmitTx(ctx context.Context, tx wire.MsgTx) error
+	// SubmitTx to the Bitcoin network.
+	SubmitTx(tx *wire.MsgTx) error
 
 	// GetRawTransaction returns the raw transaction of the given hash.
-	GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error)
-	// todo : batch version of this ?
+	GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error)
 
 	// GetBlockByHeight returns the block detail of the given height.
-	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
+	GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error)
+
+	// GetBlockByHash returns the block detail with the given hash.
+	GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error)
+
+	// GetTxOut returns details about an unspent transaction output. It will return nil result if the utxo has been
+	// spent.
+	GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error)
 }
 
 type client struct {
-	opts          ClientOptions
-	logger        *zap.Logger
-	httpClient    *http.Client
-	indexerClient IndexerClient
+	config    *rpcclient.ConnConfig
+	params    *chaincfg.Params
+	rpcClient *rpcclient.Client
 }
 
-func NewClient(opts ClientOptions, logger *zap.Logger, indexerClient IndexerClient) Client {
-	httpClient := new(http.Client)
-	httpClient.Timeout = opts.Timeout
+func NewClient(config *rpcclient.ConnConfig) (Client, error) {
+	c, err := rpcclient.New(config, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var param *chaincfg.Params
+	switch config.Params {
+	case chaincfg.MainNetParams.Name:
+		param = &chaincfg.MainNetParams
+	case chaincfg.TestNet3Params.Name:
+		param = &chaincfg.TestNet3Params
+	case chaincfg.RegressionNetParams.Name:
+		param = &chaincfg.RegressionNetParams
+	default:
+		return nil, fmt.Errorf("rpcclient.New: Unknown chain %s", config.Params)
+	}
 
 	return &client{
-		opts:          opts,
-		logger:        logger,
-		httpClient:    httpClient,
-		indexerClient: indexerClient,
-	}
+		config:    config,
+		params:    param,
+		rpcClient: c,
+	}, nil
 }
 
 func (client *client) Net() *chaincfg.Params {
-	return client.opts.Net
+	return client.params
 }
 
-// GetUTXOs gets all utxos of the given address. This implementation is specified to quickNode.
-func (client *client) GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error) {
-	if client.indexerClient == nil {
-		return nil, fmt.Errorf("GetUTXOs not supported")
-	}
-	return client.indexerClient.GetUTXOs(ctx, address)
-}
-
-// LatestBlock returns the height and hash of the longest blockchain.
-func (client *client) LatestBlock(ctx context.Context) (int64, string, error) {
-	var resp btcjson.GetBlockChainInfoResult
-	if err := client.send(ctx, &resp, "getblockchaininfo"); err != nil {
-		return 0, "", fmt.Errorf("get block count: %v", err)
-	}
-	return int64(resp.Blocks), resp.BestBlockHash, nil
-}
-
-// SubmitTx to the Bitcoin network.
-func (client *client) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
-	var serial bytes.Buffer
-	if err := tx.Serialize(&serial); err != nil {
-		return fmt.Errorf("bad tx: %v", err)
-	}
-	resp := ""
-	if err := client.send(ctx, &resp, "sendrawtransaction", hex.EncodeToString(serial.Bytes())); err != nil {
-		return fmt.Errorf("bad \"sendrawtransaction\": %v", err)
-	}
-	return nil
-}
-
-func (client *client) GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error) {
-	resp := btcjson.TxRawResult{}
-	hash := chainhash.Hash{}
-	copy(hash[:], txhash)
-	if err := client.send(ctx, &resp, "getrawtransaction", hash.String(), 1); err != nil {
-		return resp, fmt.Errorf("bad \"getrawtransaction\": %v", err)
-	}
-	return resp, nil
-}
-
-func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
-	resp := ""
-	if err := client.send(ctx, &resp, "getblockhash", height); err != nil {
-		return nil, fmt.Errorf("bad \"getblockhash\": %v", err)
-	}
-	block := btcjson.GetBlockVerboseResult{}
-	if err := client.send(ctx, &block, "getblock", resp); err != nil {
-		return nil, fmt.Errorf("bad \"getblock\": %v", err)
-	}
-	return &block, nil
-}
-
-func (client *client) send(ctx context.Context, resp interface{}, method string, params ...interface{}) error {
-	// Encode the request.
-	data, err := encodeRequest(method, params)
+func (client *client) LatestBlock() (int64, string, error) {
+	res, err := client.rpcClient.GetBlockChainInfo()
 	if err != nil {
+		return 0, "", err
+	}
+	return int64(res.Blocks), res.BestBlockHash, nil
+}
+
+func (client *client) SubmitTx(tx *wire.MsgTx) error {
+	_, err := client.rpcClient.SendRawTransaction(tx, false)
+	if err != nil {
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) {
+			switch rpcErr.Code {
+			case btcjson.ErrRPCVerifyAlreadyInChain:
+				return ErrAlreadyInChain
+			case btcjson.ErrRPCTxRejected:
+				if strings.Contains(err.Error(), "txn-mempool-conflict") {
+					return ErrMempoolConflict
+				}
+			case btcjson.ErrRPCTxError:
+				if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+					return ErrTxInputsMissingOrSpent
+				}
+			}
+		}
 		return err
 	}
-
-	return retry(client.logger, ctx, client.opts.TimeoutRetry, func() error {
-		// Create request and add basic authentication headers. The context is
-		// not attached to the request, and instead we all each attempt to run
-		// for the timeout duration, and we keep attempting until success, or
-		// the context is done.
-		req, err := http.NewRequest("POST", client.opts.Host, bytes.NewBuffer(data))
-		if err != nil {
-			return fmt.Errorf("building http request: %v", err)
-		}
-		req.SetBasicAuth(client.opts.User, client.opts.Password)
-
-		// Send the request and decode the response.
-		res, err := client.httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("sending http request: %v", err)
-		}
-		defer res.Body.Close()
-		if err := decodeResponse(resp, res.Body); err != nil {
-			return fmt.Errorf("decoding http response: %v", err)
-		}
-		return nil
-	})
-}
-
-func encodeRequest(method string, params []interface{}) ([]byte, error) {
-	rawParams, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("encoding params: %v", err)
-	}
-	req := struct {
-		Version string          `json:"version"`
-		ID      int             `json:"id"`
-		Method  string          `json:"method"`
-		Params  json.RawMessage `json:"params"`
-	}{
-		Version: "2.0",
-		ID:      rand.Int(),
-		Method:  method,
-		Params:  rawParams,
-	}
-	rawReq, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("encoding request: %v", err)
-	}
-	return rawReq, nil
-}
-
-func decodeResponse(resp interface{}, r io.Reader) error {
-	res := struct {
-		Version string           `json:"version"`
-		ID      int              `json:"id"`
-		Result  *json.RawMessage `json:"result"`
-		Error   *json.RawMessage `json:"error"`
-	}{}
-	if err := json.NewDecoder(r).Decode(&res); err != nil {
-		return fmt.Errorf("decoding response: %v", err)
-	}
-	if res.Error != nil {
-		return fmt.Errorf("decoding response: %v", string(*res.Error))
-	}
-	if res.Result == nil {
-		return fmt.Errorf("decoding result: result is nil")
-	}
-	if err := json.Unmarshal(*res.Result, resp); err != nil {
-		return fmt.Errorf("decoding result: %v", err)
-	}
 	return nil
 }
 
-func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {
-	ticker := time.NewTicker(dur)
-	err := f()
-	for err != nil {
-		logger.Debug("retrying", zap.Any("error", err.Error()))
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%v: %v", ctx.Err(), err)
-		case <-ticker.C:
-			err = f()
-		}
+func (client *client) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error) {
+	hash, err := chainhash.NewHash(txhash)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	res, err := client.rpcClient.GetRawTransactionVerbose(hash)
+	if err != nil {
+		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
+			return nil, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+		}
+		return nil, err
+	}
+	return res, nil
 }
 
+func (client *client) GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error) {
+	hash, err := client.rpcClient.GetBlockHash(height)
+	if err != nil {
+		return nil, fmt.Errorf("bad \"getblockhash\": %w", err)
+	}
+	return client.rpcClient.GetBlockVerbose(hash)
+}
+
+func (client *client) GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error) {
+	blockHash, err := chainhash.NewHashFromStr(hash)
+	if err != nil {
+		return nil, err
+	}
+	return client.rpcClient.GetBlockVerbose(blockHash)
+}
+
+func (client *client) GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
+	txhash, err := chainhash.NewHashFromStr(hash)
+	if err != nil {
+		return nil, err
+	}
+	return client.rpcClient.GetTxOut(txhash, vout, true)
+}
+
+// MockClient for testing purposes.
 type MockClient struct {
 	FuncNet               func() *chaincfg.Params
-	FuncGetUTXOs          func(context.Context, btcutil.Address) (UTXOs, error)
-	FuncLatestBlock       func(context.Context) (int64, string, error)
-	FuncSubmitTx          func(context.Context, wire.MsgTx) error
-	FuncGetRawTransaction func(context.Context, []byte) (btcjson.TxRawResult, error)
-	FuncGetBlockByHeight  func(context.Context, int64) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetUTXOs          func(btcutil.Address) (UTXOs, error)
+	FuncLatestBlock       func() (int64, string, error)
+	FuncSubmitTx          func(*wire.MsgTx) error
+	FuncGetRawTransaction func([]byte) (*btcjson.TxRawResult, error)
+	FuncGetBlockByHeight  func(int64) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetBlockByHash    func(string) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetTxOut          func(string, uint32) (*btcjson.GetTxOutResult, error)
 }
+
+// Make sure the MockClient implements the Client interface.
+var _ Client = NewMockClient()
 
 func NewMockClient() *MockClient {
 	return &MockClient{}
@@ -224,22 +177,30 @@ func (m *MockClient) Net() *chaincfg.Params {
 	return m.FuncNet()
 }
 
-func (m *MockClient) GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error) {
-	return m.FuncGetUTXOs(ctx, address)
+func (m *MockClient) GetUTXOs(address btcutil.Address) (UTXOs, error) {
+	return m.FuncGetUTXOs(address)
 }
 
-func (m *MockClient) LatestBlock(ctx context.Context) (int64, string, error) {
-	return m.FuncLatestBlock(ctx)
+func (m *MockClient) LatestBlock() (int64, string, error) {
+	return m.FuncLatestBlock()
 }
 
-func (m *MockClient) SubmitTx(ctx context.Context, tx wire.MsgTx) error {
-	return m.FuncSubmitTx(ctx, tx)
+func (m *MockClient) SubmitTx(tx *wire.MsgTx) error {
+	return m.FuncSubmitTx(tx)
 }
 
-func (m *MockClient) GetRawTransaction(ctx context.Context, txhash []byte) (btcjson.TxRawResult, error) {
-	return m.FuncGetRawTransaction(ctx, txhash)
+func (m *MockClient) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error) {
+	return m.FuncGetRawTransaction(txhash)
 }
 
-func (m *MockClient) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
-	return m.FuncGetBlockByHeight(ctx, height)
+func (m *MockClient) GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error) {
+	return m.FuncGetBlockByHeight(height)
+}
+
+func (m *MockClient) GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error) {
+	return m.FuncGetBlockByHash(hash)
+}
+
+func (m *MockClient) GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
+	return m.FuncGetTxOut(hash, vout)
 }

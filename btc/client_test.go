@@ -3,116 +3,240 @@ package btc_test
 import (
 	"context"
 	"encoding/hex"
-	"os"
+	"errors"
+	"fmt"
 	"reflect"
+	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/multichain/btc"
 	"github.com/catalogfi/multichain/testutil"
-	"go.uber.org/zap"
-
+	"github.com/fatih/color"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("bitcoin client", func() {
+	Context("Client initialization", func() {
+		It("should return an error if providing an unknown chain params", func() {
+			config := &rpcclient.ConnConfig{
+				Params:       "",
+				Host:         "0.0.0.0:18443",
+				HTTPPostMode: true,
+				DisableTLS:   true,
+			}
+			_, err := btc.NewClient(config)
+			Expect(err).ShouldNot(BeNil())
+		})
+	})
+
 	Context("regression local testnet", func() {
 		Context("when using electrs indexer", func() {
 			It("should be able to get all the data without any error", func() {
-				By("Initialise the logger")
-				logger, err := zap.NewDevelopment()
-				Expect(err).To(BeNil())
-
 				By("Initialise a local regnet client")
-				user := testutil.ParseStringEnv("BTC_USER", "")
-				password := testutil.ParseStringEnv("BTC_PASSWORD", "")
-				opts := btc.DefaultClientOptions().WithUser(user).WithPassword(password)
-				indexerClient := btc.NewElectrsIndexerClient(logger, btc.DefaultElectrsIndexerURL)
-				client := btc.NewClient(opts, logger, indexerClient)
+				network := &chaincfg.RegressionNetParams
+				client, err := RegtestClient()
+				Expect(err).To(BeNil())
 
 				By("Net()")
 				Expect(reflect.DeepEqual(client.Net(), &chaincfg.RegressionNetParams)).Should(BeTrue())
 
 				By("LatestBlock()")
-				height, hash, err := client.LatestBlock(context.Background())
+				height, hash, err := client.LatestBlock()
 				Expect(err).To(BeNil())
-				Expect(height).Should(BeNumerically(">", 100))
+				Expect(height).Should(BeNumerically(">=", 100))
 				Expect(len(hash)).Should(Equal(64))
 				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
-				By("GetBlockByHeight()")
-				block, err := client.GetBlockByHeight(context.Background(), 1)
+				By("Create a new tx")
+				addr, err := testutil.RandomBtcAddressP2PKH(network)
 				Expect(err).To(BeNil())
-				Expect(block.Hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
-				Expect(len(block.Tx)).Should(Equal(1))
+				txid, err := testutil.NigiriFaucet(addr.EncodeAddress())
+				Expect(err).To(BeNil())
+				time.Sleep(500 * time.Millisecond)
 
 				By("GetRawTransaction()")
-				txHash, err := chainhash.NewHashFromStr(block.Tx[0])
+				txhash, err := chainhash.NewHashFromStr(txid)
 				Expect(err).To(BeNil())
-				rawTx, err := client.GetRawTransaction(context.Background(), txHash.CloneBytes())
+				rawTx, err := client.GetRawTransaction(txhash.CloneBytes())
 				Expect(err).To(BeNil())
-				Expect(len(rawTx.Hex)).Should(BeNumerically(">", 1))
+				Expect(rawTx.Txid).Should(Equal(txid))
 
-				By("GetUTXOs()")
-				scriptPubkey, err := hex.DecodeString(rawTx.Vout[0].ScriptPubKey.Hex)
+				By("GetBlockByHash()")
+				blockByHash, err := client.GetBlockByHash(rawTx.BlockHash)
 				Expect(err).To(BeNil())
-				_, addrs, _, err := txscript.ExtractPkScriptAddrs(scriptPubkey, &chaincfg.RegressionNetParams)
-				Expect(len(addrs)).Should(Equal(1))
-				utxos, err := client.GetUTXOs(context.Background(), addrs[0])
+				Expect(blockByHash.Hash).Should(Equal(rawTx.BlockHash))
+
+				By("GetBlockByHeight()")
+				blockByHeight, err := client.GetBlockByHeight(blockByHash.Height)
 				Expect(err).To(BeNil())
-				Expect(len(utxos)).Should(BeNumerically(">", 0))
+				Expect(*blockByHeight).Should(Equal(*blockByHash))
+
+				By("GetTxOut()")
+				vout := 0
+				for index, out := range rawTx.Vout {
+					if out.Value == 1 {
+						vout = index
+						break
+					}
+				}
+				txout, err := client.GetTxOut(txid, uint32(vout))
+				Expect(err).To(BeNil())
+				Expect(txout.Value).Should(Equal(float64(1)))
+				scriptPubkey, err := txscript.PayToAddrScript(addr)
+				Expect(err).To(BeNil())
+				Expect(txout.ScriptPubKey.Hex).Should(Equal(hex.EncodeToString(scriptPubkey)))
 			})
 		})
 	})
 
-	Context("bitcoin testnet", func() {
-		Context("when using quicknode api", func() {
-			It("should get the data without any error", func(ctx SpecContext) {
-				By("Initialise the logger")
-				logger, err := zap.NewDevelopment()
+	Context("errors", func() {
+		It("should return specific errors", func() {
+			By("Initialise a local regnet client")
+			network := &chaincfg.RegressionNetParams
+			client, err := RegtestClient()
+			Expect(err).To(BeNil())
+			indexer := RegtestIndexer()
+
+			By("New address")
+			privKey, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey := privKey.PubKey()
+			pkAddr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+
+			By("funding the addresses")
+			txhash, err := testutil.NigiriFaucet(pkAddr.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr.EncodeAddress(), txhash))
+			time.Sleep(5 * time.Second)
+
+			By("Construct a new tx")
+			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr)
+			Expect(err).To(BeNil())
+			amount, fee := int64(1e5), int64(500)
+			inputs, err := btc.PickUTXOs(utxos, amount, fee)
+			Expect(err).To(BeNil())
+			recipients := []btc.Recipient{
+				{
+					To:     pkAddr.EncodeAddress(),
+					Amount: amount,
+				},
+			}
+			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr)
+			Expect(err).To(BeNil())
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
 				Expect(err).To(BeNil())
 
-				By("Initialise a testnet client")
-				host := os.Getenv("BTC_RPC")
-				indexerURL := os.Getenv("BTC_INDEXER_QUICKNODE")
-				indexerClient := btc.NewQuickNodeIndexerClient(logger, indexerURL)
-				opts := btc.DefaultClientOptions().WithNet(&chaincfg.TestNet3Params).WithHost(host)
-				client := btc.NewClient(opts, logger, indexerClient)
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
 
-				By("Net()")
-				Expect(client.Net()).Should(Equal(&chaincfg.TestNet3Params))
+			By("Expect `ErrTxNotFound` before submitting the tx")
+			txid := transaction.TxHash()
+			_, err = client.GetRawTransaction(txid.CloneBytes())
+			Expect(errors.Is(err, btc.ErrTxNotFound)).Should(BeTrue())
 
-				By("LatestBlock()")
-				height, hash, err := client.LatestBlock(context.Background())
-				Expect(err).To(BeNil())
-				Expect(height).Should(BeNumerically(">", 1))
-				Expect(len(hash)).Should(Equal(64))
-				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
+			By("Submit the transaction")
+			Expect(client.SubmitTx(transaction)).Should(Succeed())
+			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(transaction.TxHash().String())))
+			time.Sleep(time.Second)
 
-				By("GetBlockByHeight()")
-				block, err := client.GetBlockByHeight(context.Background(), 2431641)
-				Expect(err).To(BeNil())
-				Expect(block.Hash).Should(Equal("00000000792fb6eaaf9591d0b809c43e6db4ca4a7a34e2543a95b931f6097729"))
-				Expect(len(block.Tx)).Should(Equal(96))
+			By("We should not get any error fetching the tx details")
+			_, err = client.GetRawTransaction(txid.CloneBytes())
+			Expect(err).Should(BeNil())
 
-				By("GetRawTransaction()")
-				txHashStr := "0351dbc63c2331cf7a7f504979a946a9fbff18dfd2dd5e73cb82a9dd0b8eef36"
-				txHash, err := chainhash.NewHashFromStr(txHashStr)
-				Expect(err).To(BeNil())
-				rawTx, err := client.GetRawTransaction(context.Background(), txHash.CloneBytes())
-				Expect(err).To(BeNil())
-				Expect(rawTx.Hex).Should(Equal("0200000001935f334905b4786f296c067408e3ab028c28670dbad8fc6f84b2564645293018000000006a473044022048cc0fb22526365e08c9f71580ac5a9554784d8b2c0b2ee0c6b08a16fac636a802206c680787f9d23ba650e3171434ea8ca7775a305ade07dc00bd7d3d04fd127b76012102ef96baa1bff1890335bd9c0d88d428932e7cb5aee3ddfe1b79be06cd01aa733dfeffffff0269a77857000000001600140712fe0355630e4ffad1003a285bf2f69c13832999f10400000000001600145ce5a037f931b963f87421f447f126d86d781fc8971a2500"))
+			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			time.Sleep(1 * time.Second)
+			err = client.SubmitTx(transaction)
+			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
 
-				By("GetUTXOs()")
-				addr, err := btcutil.DecodeAddress("mvb4nE8firm7abnss9r7j5tra2w7M7uktF", &chaincfg.TestNet3Params)
+			By("Try construct a new transaction spending the same input")
+			recipients1 := []btc.Recipient{
+				{
+					To:     pkAddr.EncodeAddress(),
+					Amount: 2 * amount,
+				},
+			}
+			transaction1, _, err := btc.BuildTx(network, inputs, recipients1, fee, pkAddr)
+			Expect(err).To(BeNil())
+			for i := range transaction1.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
 				Expect(err).To(BeNil())
-				utxos, err := client.GetUTXOs(ctx, addr)
+
+				sigScript, err := txscript.SignatureScript(transaction1, i, pkScript, txscript.SigHashAll, privKey, true)
 				Expect(err).To(BeNil())
-				Expect(len(utxos)).Should(BeNumerically(">", 1))
-			})
+				transaction1.TxIn[i].SignatureScript = sigScript
+			}
+			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			err = client.SubmitTx(transaction1)
+			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
+		})
+
+		It("should return an error when the utxo has been spent", func() {
+			By("Initialization keys ")
+			network := &chaincfg.RegressionNetParams
+			privKey1, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey1 := privKey1.PubKey()
+			pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			privKey2, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			pubKey2 := privKey2.PubKey()
+			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
+			Expect(err).To(BeNil())
+			client, err := RegtestClient()
+			Expect(err).To(BeNil())
+			indexer := RegtestIndexer()
+
+			By("Funding the addresses")
+			txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
+			time.Sleep(5 * time.Second)
+
+			By("Build the transaction")
+			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr1)
+			Expect(err).To(BeNil())
+			amount, fee := int64(1e5), int64(500)
+			inputs, err := btc.PickUTXOs(utxos, amount, fee)
+			Expect(err).To(BeNil())
+			recipients := []btc.Recipient{
+				{
+					To:     pkAddr2.EncodeAddress(),
+					Amount: amount,
+				},
+			}
+			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			Expect(err).To(BeNil())
+
+			By("Sign and submit the fund tx")
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr1)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey1, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
+			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
+
+			By("Expect an error if the utxo is spent")
+			time.Sleep(time.Second)
+			for _, input := range inputs {
+				res, err := client.GetTxOut(input.TxID, input.Vout)
+				Expect(err).Should(BeNil())
+				Expect(res).Should(BeNil())
+			}
 		})
 	})
 })

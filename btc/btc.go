@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	// DefaultBTCVersion is the version field set in the bitcoin transaction. Since some of the script ops are only
-	// supported in version 2. All functions in this package to build a tx will use this version number.
+	// DefaultBTCVersion is the Bitcoin transaction version used by this package. Some script operations are only
+	// supported in version 2.
 	DefaultBTCVersion = 2
 
-	// DustAmount is the minimum amount we'll accept for an UTXO.
+	// DustAmount is the minimum transaction amount accepted by Bitcoin miners.
 	DustAmount = 546
 
-	// SigHashSingleAnyoneCanPay is an alias for the `txscript.SigHashSingle | txscript.SigHashAnyOneCanPay`
+	// SigHashSingleAnyoneCanPay is an alias for the signature hash types: `txscript.SigHashSingle |
+	// txscript.SigHashAnyOneCanPay`.
 	SigHashSingleAnyoneCanPay = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
 )
 
@@ -123,11 +124,7 @@ func BuildTx(network *chaincfg.Params, inputs UTXOs, recipients []Recipient, fee
 }
 
 // P2wshAddress returns the P2WSH address of the give script
-func P2wshAddress(script []byte, network *chaincfg.Params) (string, error) {
+func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
 	scriptHash := sha256.Sum256(script)
-	instantWalletAddr, err := btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
-	if err != nil {
-		return "", err
-	}
-	return instantWalletAddr.EncodeAddress(), nil
+	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
 }
