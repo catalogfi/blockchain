@@ -12,8 +12,8 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/catalogfi/multichain/btc"
-	"github.com/catalogfi/multichain/testutil"
+	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/testutil"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
