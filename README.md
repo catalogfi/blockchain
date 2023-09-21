@@ -1,6 +1,7 @@
 # ⛓️ blockchain
 
-[![Tests][tests-badge]][tests-url] 
+[![Tests][tests-badge]][tests-url]
+[![Go Coverage](https://github.com/catalogfi/blockchain/wiki/coverage.svg)](https://raw.githack.com/wiki/catalogfi/blockchain/coverage.html)
 
 For any Catalog-related blockchain interactions, in Golang.
 -  [x] Bitcoin
