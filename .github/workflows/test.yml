@@ -14,8 +14,13 @@ jobs:
               run: curl https://getnigiri.vulpem.com | bash
             - name : Start nigiri
               run: nigiri start
-            - name: generate test generate coverage
-              run: go test ./... -coverprofile=./cover.out
+            - name: Update coverage report
+              uses: ncruces/go-coverage-report@v0
+              with:
+                  report: 'true'
+                  amend: 'true'
+                  reuse-go: 'true'
+                  continue-on-error: 'true'
               env:
                   BTC_USER: "admin1"
                   BTC_PASSWORD: "123"
