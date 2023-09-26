@@ -5,7 +5,7 @@ import (
 	"testing/quick"
 
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/catalogfi/multichain/btc"
+	"github.com/catalogfi/blockchain/btc"
 	"github.com/tyler-smith/go-bip39"
 
 	. "github.com/onsi/ginkgo/v2"
