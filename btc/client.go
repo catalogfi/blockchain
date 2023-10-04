@@ -1,12 +1,12 @@
 package btc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -23,30 +23,30 @@ var (
 	ErrMempoolConflict = errors.New("txn-mempool-conflict")
 )
 
-// Client to interact with the Bitcoin network. This follows the bitcoind JSON-RPC interface.
+// Client to interact with the Bitcoin network. It's implementation uses standard bitcoind JSON-RPC behind the scene.
 type Client interface {
 
 	// Net returns the network params.
 	Net() *chaincfg.Params
 
 	// LatestBlock returns the height and hash of the latest block.
-	LatestBlock() (int64, string, error)
+	LatestBlock(ctx context.Context) (int64, string, error)
 
 	// SubmitTx to the Bitcoin network.
-	SubmitTx(tx *wire.MsgTx) error
+	SubmitTx(ctx context.Context, tx *wire.MsgTx) error
 
 	// GetRawTransaction returns the raw transaction of the given hash.
-	GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error)
+	GetRawTransaction(ctx context.Context, hash *chainhash.Hash) (*btcjson.TxRawResult, error)
 
 	// GetBlockByHeight returns the block detail of the given height.
-	GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error)
+	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
 
 	// GetBlockByHash returns the block detail with the given hash.
-	GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error)
+	GetBlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
 
 	// GetTxOut returns details about an unspent transaction output. It will return nil result if the utxo has been
 	// spent.
-	GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error)
+	GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error)
 }
 
 type client struct {
@@ -84,17 +84,68 @@ func (client *client) Net() *chaincfg.Params {
 	return client.params
 }
 
-func (client *client) LatestBlock() (int64, string, error) {
-	res, err := client.rpcClient.GetBlockChainInfo()
-	if err != nil {
+func (client *client) LatestBlock(ctx context.Context) (int64, string, error) {
+	future := client.rpcClient.GetBlockChainInfoAsync()
+	results := make(chan *btcjson.GetBlockChainInfoResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return 0, "", fmt.Errorf("LatestBlock : %w", ctx.Err())
+	case err := <-errs:
 		return 0, "", err
+	case result := <-results:
+		return int64(result.Blocks), result.BestBlockHash, nil
 	}
-	return int64(res.Blocks), res.BestBlockHash, nil
 }
 
-func (client *client) SubmitTx(tx *wire.MsgTx) error {
-	_, err := client.rpcClient.SendRawTransaction(tx, false)
-	if err != nil {
+func (client *client) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
+	// The SendRawTransactionAsync is not technically asynchronous,
+	// we need to have an extra channel for it.
+	futureChan := make(chan rpcclient.FutureSendRawTransactionResult, 1)
+	go func() {
+		defer close(futureChan)
+		future := client.rpcClient.SendRawTransactionAsync(tx, false)
+		futureChan <- future
+	}()
+
+	var future rpcclient.FutureSendRawTransactionResult
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("SubmitTx : %w", ctx.Err())
+	case future = <-futureChan:
+	}
+
+	results := make(chan *chainhash.Hash, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("SubmitTx : %w", ctx.Err())
+	case err := <-errs:
+		// Parse the error based on the error code and message
 		var rpcErr *btcjson.RPCError
 		if errors.As(err, &rpcErr) {
 			switch rpcErr.Code {
@@ -111,96 +162,122 @@ func (client *client) SubmitTx(tx *wire.MsgTx) error {
 			}
 		}
 		return err
+	case _ = <-results:
+		return nil
 	}
-	return nil
 }
 
-func (client *client) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error) {
-	hash, err := chainhash.NewHash(txhash)
-	if err != nil {
-		return nil, err
-	}
-	res, err := client.rpcClient.GetRawTransactionVerbose(hash)
-	if err != nil {
-		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
-			return nil, fmt.Errorf(`bad "getrawtransaction": %w`, ErrTxNotFound)
+func (client *client) GetRawTransaction(ctx context.Context, txhash *chainhash.Hash) (*btcjson.TxRawResult, error) {
+	future := client.rpcClient.GetRawTransactionVerboseAsync(txhash)
+	results := make(chan *btcjson.TxRawResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
 		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetRawTransaction : %w", ctx.Err())
+	case err := <-errs:
+		// Parse the error based on the error code and message
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) {
+			switch rpcErr.Code {
+			case btcjson.ErrRPCInvalidAddressOrKey:
+				if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
+					return nil, ErrTxNotFound
+				}
+			}
+		}
+
 		return nil, err
+	case result := <-results:
+		return result, nil
 	}
-	return res, nil
 }
 
-func (client *client) GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error) {
-	hash, err := client.rpcClient.GetBlockHash(height)
-	if err != nil {
-		return nil, fmt.Errorf("bad \"getblockhash\": %w", err)
-	}
-	return client.rpcClient.GetBlockVerbose(hash)
-}
+func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
+	future := client.rpcClient.GetBlockHashAsync(height)
+	results := make(chan *chainhash.Hash, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
 
-func (client *client) GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error) {
-	blockHash, err := chainhash.NewHashFromStr(hash)
-	if err != nil {
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetBlockByHeight : %w", ctx.Err())
+	case err := <-errs:
 		return nil, err
+	case hash := <-results:
+		return client.GetBlockByHash(ctx, hash)
 	}
-	return client.rpcClient.GetBlockVerbose(blockHash)
 }
 
-func (client *client) GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
-	txhash, err := chainhash.NewHashFromStr(hash)
-	if err != nil {
+func (client *client) GetBlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+	future := client.rpcClient.GetBlockVerboseAsync(hash)
+	results := make(chan *btcjson.GetBlockVerboseResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetBlockByHash : %w", ctx.Err())
+	case err := <-errs:
 		return nil, err
+	case result := <-results:
+		return result, nil
 	}
-	return client.rpcClient.GetTxOut(txhash, vout, true)
 }
 
-// MockClient for testing purposes.
-type MockClient struct {
-	FuncNet               func() *chaincfg.Params
-	FuncGetUTXOs          func(btcutil.Address) (UTXOs, error)
-	FuncLatestBlock       func() (int64, string, error)
-	FuncSubmitTx          func(*wire.MsgTx) error
-	FuncGetRawTransaction func([]byte) (*btcjson.TxRawResult, error)
-	FuncGetBlockByHeight  func(int64) (*btcjson.GetBlockVerboseResult, error)
-	FuncGetBlockByHash    func(string) (*btcjson.GetBlockVerboseResult, error)
-	FuncGetTxOut          func(string, uint32) (*btcjson.GetTxOutResult, error)
-}
+func (client *client) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error) {
+	future := client.rpcClient.GetTxOutAsync(hash, vout, true)
+	results := make(chan *btcjson.GetTxOutResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
 
-// Make sure the MockClient implements the Client interface.
-var _ Client = NewMockClient()
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
 
-func NewMockClient() *MockClient {
-	return &MockClient{}
-}
-
-func (m *MockClient) Net() *chaincfg.Params {
-	return m.FuncNet()
-}
-
-func (m *MockClient) GetUTXOs(address btcutil.Address) (UTXOs, error) {
-	return m.FuncGetUTXOs(address)
-}
-
-func (m *MockClient) LatestBlock() (int64, string, error) {
-	return m.FuncLatestBlock()
-}
-
-func (m *MockClient) SubmitTx(tx *wire.MsgTx) error {
-	return m.FuncSubmitTx(tx)
-}
-
-func (m *MockClient) GetRawTransaction(txhash []byte) (*btcjson.TxRawResult, error) {
-	return m.FuncGetRawTransaction(txhash)
-}
-
-func (m *MockClient) GetBlockByHeight(height int64) (*btcjson.GetBlockVerboseResult, error) {
-	return m.FuncGetBlockByHeight(height)
-}
-
-func (m *MockClient) GetBlockByHash(hash string) (*btcjson.GetBlockVerboseResult, error) {
-	return m.FuncGetBlockByHash(hash)
-}
-
-func (m *MockClient) GetTxOut(hash string, vout uint32) (*btcjson.GetTxOutResult, error) {
-	return m.FuncGetTxOut(hash, vout)
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetTxOut : %w", ctx.Err())
+	case err := <-errs:
+		return nil, err
+	case result := <-results:
+		return result, nil
+	}
 }

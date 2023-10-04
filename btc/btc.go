@@ -1,7 +1,6 @@
 package btc
 
 import (
-	"crypto/sha256"
 	"crypto/sha512"
 	"fmt"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -61,70 +61,78 @@ func GenerateSystemPrivKey(mnemonic string, userPubkeyHex []byte) (*btcec.Privat
 	return masterKey.ECPrivKey()
 }
 
-// PickUTXOs will find enough utxos which are enough to cover the target amount and fee.
-func PickUTXOs(utxos []UTXO, amount, fee int64) ([]UTXO, error) {
-	var inputs UTXOs
-	inputAmount := int64(0)
-	for _, utxo := range utxos {
-		inputAmount += utxo.Amount
-		inputs = append(inputs, utxo)
-		if inputAmount >= amount+fee {
-			break
-		}
-	}
-	if inputAmount < amount+fee {
-		return nil, fmt.Errorf("not enough funds")
-	}
-	return inputs, nil
-}
-
-// BuildTx creates an unsigned txs with the given inputs and outputs. It will add an output to the `fromAddress` if
-// there's any change left. The returned boolean will indicate if there's a change utxo.
-func BuildTx(network *chaincfg.Params, inputs UTXOs, recipients []Recipient, fee int64, fromAddress btcutil.Address) (*wire.MsgTx, bool, error) {
+// BuildTransaction is helper function for building a bitcoin transaction. It uses the `feeEstimator` to get the current
+// fee rates. `inputs` will be a list of utxos that required to be included in the transaction. `extraBaseSize` and
+// `extraSegwitSize` will be the extra base/segwit size of the `inputs`. `utxos` is a list of transaction will be picked
+// to cover the output amount and fees. If there's any change, it will be sent back to the `changeAddr`.
+func BuildTransaction(feeRate int, network *chaincfg.Params, inputs, utxos []UTXO,
+	recipients []Recipient, extraBaseSize, extraSegwitSize int, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultBTCVersion)
 	totalIn, totalOut := int64(0), int64(0)
 
-	// Inputs
+	// Adding required inputs
 	for _, utxo := range inputs {
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
 		tx.AddTxIn(txIn)
 		totalIn += utxo.Amount
 	}
-
-	// Outputs
 	for _, recipient := range recipients {
 		toAddress, err := btcutil.DecodeAddress(recipient.To, network)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		toScript, err := txscript.PayToAddrScript(toAddress)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		tx.AddTxOut(wire.NewTxOut(recipient.Amount, toScript))
 		totalOut += recipient.Amount
 	}
 
-	// If there's any leftover, we send it back to fromAddress.
-	changeTx := false
-	if totalIn-totalOut-fee > DustAmount {
-		fromScript, err := txscript.PayToAddrScript(fromAddress)
+	// Keep adding utxos until we have enough funds to cover the output amount
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
-		changeTx = true
-		tx.AddTxOut(wire.NewTxOut(totalIn-totalOut-fee, fromScript))
+		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
+		tx.AddTxIn(txIn)
+		totalIn += utxo.Amount
+		extraBaseSize += txsizes.RedeemP2PKHSigScriptSize
+
+		// Check the fees when we have enough inputs to cover the outputs
+		if totalIn > totalOut {
+			vs := EstimateVirtualSize(tx, extraBaseSize, extraSegwitSize)
+			fees := int64(vs * feeRate)
+
+			// If the amount is enough to cover the outputs and fees
+			if totalIn > totalOut+fees {
+				// Add a change utxo to the output if the change amount is greater than the dust
+				if totalIn-totalOut-fees > DustAmount {
+					changeScript, err := txscript.PayToAddrScript(changeAddr)
+					if err != nil {
+						return nil, err
+					}
+					tx.AddTxOut(wire.NewTxOut(0, changeScript))
+
+					// Estimate the fees again as we add a new output
+					vs := EstimateVirtualSize(tx, extraBaseSize, extraSegwitSize)
+					fees := int64(vs * feeRate)
+
+					// Adjust the change utxo amount if it's still enough, delete it otherwise
+					if totalIn-totalOut-fees > DustAmount {
+						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
+					} else {
+						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
+					}
+				}
+				return tx, nil
+			}
+		}
 	}
-
-	return tx, changeTx, nil
-}
-
-// P2wshAddress returns the P2WSH address of the give script
-func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
-	scriptHash := sha256.Sum256(script)
-	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
+	return nil, fmt.Errorf("funds not enough")
 }

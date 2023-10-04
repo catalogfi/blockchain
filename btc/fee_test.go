@@ -12,7 +12,9 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/catalogfi/blockchain/testutil"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -176,7 +178,7 @@ var _ = Describe("bitcoin fees", func() {
 			pubKey2 := privKey2.PubKey()
 			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			indexer := RegtestIndexer()
+			indexer := btctest.RegtestIndexer()
 
 			By("Funding the addresses")
 			txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
@@ -187,20 +189,18 @@ var _ = Describe("bitcoin fees", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr1)
 			Expect(err).To(BeNil())
-			amount, fee := int64(1e5), int64(500)
-			inputs, err := btc.PickUTXOs(utxos, amount, fee)
-			Expect(err).To(BeNil())
+			amount, feeRate := int64(1e5), 10
 			recipients := []btc.Recipient{
 				{
 					To:     pkAddr2.EncodeAddress(),
 					Amount: amount,
 				},
 			}
-			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
-			extraBaseSize := btc.EstimateUtxoSize(pkAddr1, len(transaction.TxIn))
+			extraBaseSize := txsizes.RedeemP2PKHSigScriptSize * len(transaction.TxIn)
 			estimatedSize := btc.EstimateVirtualSize(transaction, extraBaseSize, 0)
 
 			By("Sign and submit the fund tx")
@@ -231,7 +231,7 @@ var _ = Describe("bitcoin fees", func() {
 			pubKey2 := privKey2.PubKey()
 			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			indexer := RegtestIndexer()
+			indexer := btctest.RegtestIndexer()
 
 			By("Create the multisig script using both public keys")
 			multisig, err := btc.MultisigScript(pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed())
@@ -250,16 +250,18 @@ var _ = Describe("bitcoin fees", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(context.Background(), multisigAddr)
 			Expect(err).To(BeNil())
-			amount, fee := int64(1e5), int64(500)
-			inputs, err := btc.PickUTXOs(utxos, amount, fee)
-			Expect(err).To(BeNil())
+			amounts := map[string]int64{}
+			for _, utxo := range utxos {
+				amounts[utxo.TxID] = utxo.Amount
+			}
+			amount, feeRate := int64(1e5), 10
 			recipients := []btc.Recipient{
 				{
 					To:     pkAddr2.EncodeAddress(),
 					Amount: amount,
 				},
 			}
-			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -268,7 +270,8 @@ var _ = Describe("bitcoin fees", func() {
 
 			By("Sign and submit the fund tx")
 			for i := range transaction.TxIn {
-				err = btc.SignMultisig(transaction, 0, inputs[i].Amount, privKey1, privKey2, txscript.SigHashAll)
+				inputAmount := amounts[transaction.TxIn[i].PreviousOutPoint.Hash.String()]
+				err = btc.SignMultisig(transaction, 0, inputAmount, privKey1, privKey2, txscript.SigHashAll)
 				Expect(err).To(BeNil())
 			}
 			actualSize := btc.TxVirtualSize(transaction)
@@ -292,7 +295,7 @@ var _ = Describe("bitcoin fees", func() {
 			pubKey2 := privKey2.PubKey()
 			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			indexer := RegtestIndexer()
+			indexer := btctest.RegtestIndexer()
 
 			By("Create the multisig script using both public keys")
 			secret := testutil.RandomSecret()
@@ -312,16 +315,18 @@ var _ = Describe("bitcoin fees", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(context.Background(), htlcAddr)
 			Expect(err).To(BeNil())
-			amount, fee := int64(1e5), int64(500)
-			inputs, err := btc.PickUTXOs(utxos, amount, fee)
-			Expect(err).To(BeNil())
+			amounts := map[string]int64{}
+			for _, utxo := range utxos {
+				amounts[utxo.TxID] = utxo.Amount
+			}
+			amount, feeRate := int64(1e5), 10
 			recipients := []btc.Recipient{
 				{
 					To:     pkAddr2.EncodeAddress(),
 					Amount: amount,
 				},
 			}
-			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -330,7 +335,8 @@ var _ = Describe("bitcoin fees", func() {
 
 			By("Sign and submit the fund tx")
 			for i := range transaction.TxIn {
-				err = btc.SignHtlcScript(transaction, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), secret, secretHash[:], i, inputs[i].Amount, waitTime, privKey2)
+				inputAmount := amounts[transaction.TxIn[i].PreviousOutPoint.Hash.String()]
+				err = btc.SignHtlcScript(transaction, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), secret, secretHash[:], i, inputAmount, waitTime, privKey2)
 				Expect(err).To(BeNil())
 			}
 			actualSize := btc.TxVirtualSize(transaction)
@@ -354,7 +360,7 @@ var _ = Describe("bitcoin fees", func() {
 			pubKey2 := privKey2.PubKey()
 			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			indexer := RegtestIndexer()
+			indexer := btctest.RegtestIndexer()
 
 			By("Create the multisig script using both public keys")
 			secret := testutil.RandomSecret()
@@ -374,16 +380,18 @@ var _ = Describe("bitcoin fees", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(context.Background(), htlcAddr)
 			Expect(err).To(BeNil())
-			amount, fee := int64(1e5), int64(500)
-			inputs, err := btc.PickUTXOs(utxos, amount, fee)
-			Expect(err).To(BeNil())
+			amounts := map[string]int64{}
+			for _, utxo := range utxos {
+				amounts[utxo.TxID] = utxo.Amount
+			}
+			amount, feeRate := int64(1e5), 10
 			recipients := []btc.Recipient{
 				{
 					To:     pkAddr2.EncodeAddress(),
 					Amount: amount,
 				},
 			}
-			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -399,7 +407,8 @@ var _ = Describe("bitcoin fees", func() {
 			By("Sign and submit the fund tx")
 			for i := range transaction.TxIn {
 				transaction.TxIn[i].Sequence = uint32(waitTime)
-				err = btc.SignHtlcScript(transaction, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), nil, secretHash[:], i, inputs[i].Amount, waitTime, privKey1)
+				inputAmount := amounts[transaction.TxIn[i].PreviousOutPoint.Hash.String()]
+				err = btc.SignHtlcScript(transaction, pubKey1.SerializeCompressed(), pubKey2.SerializeCompressed(), nil, secretHash[:], i, inputAmount, waitTime, privKey1)
 				Expect(err).To(BeNil())
 			}
 			actualSize := btc.TxVirtualSize(transaction)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -206,4 +207,10 @@ func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
 		}
 	}
 	return nil
+}
+
+// P2wshAddress returns the P2WSH address of the give script
+func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
+	scriptHash := sha256.Sum256(script)
+	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/catalogfi/blockchain/testutil"
 	"github.com/fatih/color"
 	. "github.com/onsi/ginkgo/v2"
@@ -23,7 +24,7 @@ var _ = Describe("Indexer client", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("Initialise the electrs client")
 			network := &chaincfg.RegressionNetParams
-			client := RegtestIndexer()
+			client := btctest.RegtestIndexer()
 
 			By("GetUTXOs()")
 			key, err := btcec.NewPrivateKey()
@@ -38,7 +39,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(len(utxos)).Should(BeNumerically(">=", 1))
 			exist := false
 			for _, utxo := range utxos {
-				if utxo.TxID == txid {
+				if utxo.TxID == txid.String() {
 					exist = true
 					break
 				}
@@ -51,24 +52,20 @@ var _ = Describe("Indexer client", func() {
 			Expect(tip).Should(BeNumerically(">=", 100))
 
 			By("GetTx()")
-			tx, err := client.GetTx(context.Background(), txid)
+			tx, err := client.GetTx(context.Background(), txid.String())
 			Expect(err).To(BeNil())
-			Expect(tx.TxID).Should(Equal(txid))
+			Expect(tx.TxID).Should(Equal(txid.String()))
 			Expect(tx.Status.Confirmed).Should(BeTrue())
 
 			By("SubmitTx()")
-			total := int64(0)
-			for _, utxo := range utxos {
-				total += utxo.Amount
-			}
-			fee := int64(1000)
+			amount, feeRate := int64(1e6), 10
 			recipients := []btc.Recipient{
 				{
 					To:     addr.String(),
-					Amount: total - fee,
+					Amount: amount,
 				},
 			}
-			rawTx, _, err := btc.BuildTx(network, utxos, recipients, fee, addr)
+			rawTx, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, addr)
 			Expect(err).To(BeNil())
 			for i := range rawTx.TxIn {
 				pkScript, err := txscript.PayToAddrScript(addr)
@@ -89,7 +86,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(err).To(BeNil())
 			has := false
 			for _, tx := range txs {
-				if tx.TxID == txid {
+				if tx.TxID == txid.String() {
 					has = true
 				}
 			}
@@ -101,7 +98,7 @@ var _ = Describe("Indexer client", func() {
 		It("should return specific errors", func() {
 			By("Initialise a local regnet client")
 			network := &chaincfg.RegressionNetParams
-			indexer := RegtestIndexer()
+			indexer := btctest.RegtestIndexer()
 
 			By("New address")
 			privKey, err := btcec.NewPrivateKey()
@@ -119,16 +116,14 @@ var _ = Describe("Indexer client", func() {
 			By("Construct a new tx")
 			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr)
 			Expect(err).To(BeNil())
-			amount, fee := int64(1e5), int64(500)
-			inputs, err := btc.PickUTXOs(utxos, amount, fee)
-			Expect(err).To(BeNil())
+			amount, feeRate := int64(1e6), 10
 			recipients := []btc.Recipient{
 				{
 					To:     pkAddr.EncodeAddress(),
 					Amount: amount,
 				},
 			}
-			transaction, _, err := btc.BuildTx(network, inputs, recipients, fee, pkAddr)
+			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
@@ -157,7 +152,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: 2 * amount,
 				},
 			}
-			transaction1, _, err := btc.BuildTx(network, inputs, recipients1, fee, pkAddr)
+			transaction1, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients1, 0, 0, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction1.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)

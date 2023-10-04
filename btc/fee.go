@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
 const (
@@ -40,21 +38,6 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	baseSize += extraBaseSize
 	swSize := 2 + extraSegwitSize
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
-}
-
-// EstimateUtxoSize returns the estimated signature size for a few fixed-length utxo types. `n` is the number of
-// utxos from the transaction input.
-func EstimateUtxoSize(address btcutil.Address, n int) int {
-	switch address.(type) {
-	case *btcutil.AddressPubKeyHash:
-		return txsizes.RedeemP2PKHSigScriptSize * n
-	case *btcutil.AddressWitnessPubKeyHash:
-		return txsizes.RedeemP2WPKHInputWitnessWeight * n
-	case *btcutil.AddressTaproot:
-		return txsizes.RedeemP2TRInputWitnessWeight * n
-	default:
-		return 0
-	}
 }
 
 // TxVirtualSize returns the virtual size of a transaction
