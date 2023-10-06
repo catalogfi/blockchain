@@ -47,6 +47,33 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
+// IsHtlc returns if the given script is a HTLC script.
+func IsHtlc(script []byte) bool {
+	if len(script) != 89 {
+		return false
+	}
+
+	return script[0] == txscript.OP_IF &&
+		script[1] == txscript.OP_SHA256 &&
+		// Skip script[2:34] which is the secret hash
+		script[35] == txscript.OP_EQUALVERIFY &&
+		script[36] == txscript.OP_DUP &&
+		script[37] == txscript.OP_HASH160 &&
+		// script[38:59] is the public key hash
+		script[38] == 0x14 &&
+		script[59] == txscript.OP_ELSE &&
+		// Skip script[60:61] which is the wait time
+		script[61] == txscript.OP_CHECKSEQUENCEVERIFY &&
+		script[62] == txscript.OP_DROP &&
+		script[63] == txscript.OP_DUP &&
+		script[64] == txscript.OP_HASH160 &&
+		// script[65:86] is the public key hash
+		script[65] == 0x14 &&
+		script[86] == txscript.OP_ENDIF &&
+		script[87] == txscript.OP_EQUALVERIFY &&
+		script[88] == txscript.OP_CHECKSIG
+}
+
 // NewRefundTx is helper function to build the refund tx. It assumes the input has only one utxo which is the given
 // funding utxo, and the output will be the refundScript.
 func NewRefundTx(fundingUtxo UTXO, refundScript []byte) (*wire.MsgTx, error) {

@@ -187,6 +187,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		// pk2 can redeem the funds if knowing the secret
 		refundScript, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], waitTime)
 		Expect(err).To(BeNil())
+		Expect(btc.IsHtlc(refundScript)).Should(BeTrue())
 		inputUtxo := btc.UTXO{
 			TxID:   fundingTx.TxHash().String(),
 			Vout:   0,
@@ -310,6 +311,7 @@ var _ = Describe("Bitcoin scripts", func() {
 		// pk2 can redeem the funds if knowing the secret
 		refundScript, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], waitTime)
 		Expect(err).To(BeNil())
+		Expect(btc.IsHtlc(refundScript)).Should(BeTrue())
 		inputUtxo := btc.UTXO{
 			TxID:   fundingTx.TxHash().String(),
 			Vout:   0,
