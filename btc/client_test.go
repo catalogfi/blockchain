@@ -310,7 +310,7 @@ var _ = Describe("bitcoin client", func() {
 
 			By("Restart nigiri for other test")
 			Expect(testutil.NigiriStart()).Should(Succeed())
-			time.Sleep(5 * time.Second)
+			time.Sleep(10 * time.Second)
 		})
 	})
 })

@@ -1,11 +1,9 @@
 package btc
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -13,7 +11,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// MultisigScript generates a 2-out-2 multisig script for instant wallet.
+// MultisigScript generates a 2-out-2 multisig script.
 func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
 	return txscript.NewScriptBuilder().
 		AddOp(txscript.OP_2).
@@ -24,7 +22,8 @@ func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
 		Script()
 }
 
-// HtlcScript generates a HTLC script for refunding purpose.
+// HtlcScript generates a HTLC script following BIP-199.
+// (https://github.com/bitcoin/bips/blob/master/bip-0199.mediawiki#summary)
 func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) ([]byte, error) {
 	return txscript.NewScriptBuilder().
 		AddOp(txscript.OP_IF).
@@ -59,15 +58,15 @@ func IsHtlc(script []byte) bool {
 		script[35] == txscript.OP_EQUALVERIFY &&
 		script[36] == txscript.OP_DUP &&
 		script[37] == txscript.OP_HASH160 &&
-		// script[38:59] is the public key hash
+		// script[38:59] is the redeemer's public key hash
 		script[38] == 0x14 &&
 		script[59] == txscript.OP_ELSE &&
-		// Skip script[60:61] which is the wait time
+		// Skip script[60] which is the wait time
 		script[61] == txscript.OP_CHECKSEQUENCEVERIFY &&
 		script[62] == txscript.OP_DROP &&
 		script[63] == txscript.OP_DUP &&
 		script[64] == txscript.OP_HASH160 &&
-		// script[65:86] is the public key hash
+		// script[65:86] is the owner's public key hash
 		script[65] == 0x14 &&
 		script[86] == txscript.OP_ENDIF &&
 		script[87] == txscript.OP_EQUALVERIFY &&
@@ -95,110 +94,38 @@ func NewRefundTx(fundingUtxo UTXO, refundScript []byte) (*wire.MsgTx, error) {
 	return refundTx, nil
 }
 
-// SetMultisigWitness used for setting the witness script for any txs using the instant wallet utxo(redeem, refund)
-func SetMultisigWitness(multisigTx *wire.MsgTx, pubkeyA, sigA, pubKeyB, sigB []byte) error {
-	// assumed that there's only 1 txIn (instant wallet utxo)
-	instantWalletScript, err := MultisigScript(pubkeyA, pubKeyB)
-	if err != nil {
-		return err
-	}
+// MultisigWitness used for generating the witness script for spending a multisig utxo.
+func MultisigWitness(script, sigA, sigB []byte) wire.TxWitness {
 	witnessStack := wire.TxWitness(make([][]byte, 4))
 	witnessStack[0] = nil
 	witnessStack[1] = sigA
 	witnessStack[2] = sigB
-	witnessStack[3] = instantWalletScript
-
-	multisigTx.TxIn[0].Witness = witnessStack
-	return nil
+	witnessStack[3] = script
+	return witnessStack
 }
 
-func SignMultisig(tx *wire.MsgTx, index int, amount int64, key1, key2 *btcec.PrivateKey, hashType txscript.SigHashType) error {
-	multiSigScript, err := MultisigScript(key1.PubKey().SerializeCompressed(), key2.PubKey().SerializeCompressed())
-	if err != nil {
-		return err
-	}
-
-	fetcher := txscript.NewCannedPrevOutputFetcher(multiSigScript, amount)
-	sig1, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, multiSigScript, hashType, key1)
-	if err != nil {
-		return err
-	}
-	sig2, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, multiSigScript, hashType, key2)
-	if err != nil {
-		return err
-	}
-	witness := wire.TxWitness(make([][]byte, 4))
-	witness[0] = nil
-	witness[1] = sig1
-	witness[2] = sig2
-	witness[3] = multiSigScript
-
-	tx.TxIn[index].Witness = witness
-	return nil
-}
-
-// SetRefundSpendWitness used for setting witness signature for spending the refunded utxo from the refund script,
-// has 2 possible paths either refund immediately through user secret or refund through timelock.
-func SetRefundSpendWitness(refundSpend *wire.MsgTx, ownerPubkey, revokerPubkey, signature, refundSecretHash, refundSecret, op []byte, waitTime int64) error {
-	// assumed that there's only 1 txIn (instant wallet utxo)
-	refundScript, err := HtlcScript(ownerPubkey, revokerPubkey, refundSecretHash, waitTime)
-	if err != nil {
-		return err
-	}
-
+// HtlcWitness returns the witness for spending the htlc script, it has 2 possible paths either refund immediately
+// through user secret or refund after timelock.
+func HtlcWitness(script, pub, signature, secret []byte, redeem bool) wire.TxWitness {
 	var witnessStack wire.TxWitness
-
-	// else condition for instant revokation
-	if op == nil {
+	if redeem {
+		witnessStack = make([][]byte, 5)
+		witnessStack[0] = signature
+		witnessStack[1] = pub
+		witnessStack[2] = secret
+		witnessStack[3] = []byte{0x1}
+		witnessStack[4] = script
+	} else {
 		witnessStack = make([][]byte, 4)
 		witnessStack[0] = signature
-		witnessStack[1] = refundSecret
+		witnessStack[1] = pub
 		witnessStack[2] = nil
-		witnessStack[3] = refundScript
-	} else {
-		// for users normal refund flow
-		witnessStack = make([][]byte, 3)
-		witnessStack[0] = signature
-		witnessStack[1] = []byte{0x1}
-		witnessStack[2] = refundScript
+		witnessStack[3] = script
 	}
-	refundSpend.TxIn[0].Witness = witnessStack
-	return nil
+	return witnessStack
 }
 
-func SignHtlcScript(tx *wire.MsgTx, ownerPub, redeemerPub, secret, secretHash []byte, index int, amount, waitTime int64, key *btcec.PrivateKey) error {
-	htlcScript, err := HtlcScript(btcutil.Hash160(ownerPub), btcutil.Hash160(redeemerPub), secretHash[:], waitTime)
-	if err != nil {
-		return err
-	}
-
-	// Sign the message
-	fetcher := txscript.NewCannedPrevOutputFetcher(htlcScript, amount)
-	sig, err := txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, amount, htlcScript, txscript.SigHashAll, key)
-	if err != nil {
-		return err
-	}
-
-	// Set the witness
-	if bytes.Equal(key.PubKey().SerializeCompressed(), ownerPub) {
-		witness := make([][]byte, 4)
-		witness[0] = sig
-		witness[1] = ownerPub
-		witness[2] = nil
-		witness[3] = htlcScript
-		tx.TxIn[index].Witness = witness
-	} else {
-		witness := make([][]byte, 5)
-		witness[0] = sig
-		witness[1] = redeemerPub
-		witness[2] = secret
-		witness[3] = []byte{0x1}
-		witness[4] = htlcScript
-		tx.TxIn[index].Witness = witness
-	}
-	return nil
-}
-
+// WitnessScriptHash returns the hash of the witness script.
 func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
 	builder := txscript.NewScriptBuilder()
 

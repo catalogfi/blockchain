@@ -1,6 +1,8 @@
 package btctest
 
 import (
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/catalogfi/blockchain/btc"
@@ -31,4 +33,18 @@ func RegtestIndexer() btc.IndexerClient {
 	}
 	url := testutil.ParseStringEnv("BTC_INDEXER_ELECTRS_REGNET", "")
 	return btc.NewElectrsIndexerClient(logger, url, btc.DefaultRetryInterval)
+}
+
+// NewBtcKey generates a new bitcoin private key.
+func NewBtcKey(network *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressPubKeyHash, error) {
+	key, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	pubKey := key.PubKey()
+	addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, addr, nil
 }
