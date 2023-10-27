@@ -197,7 +197,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -262,7 +262,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.MultisigUpdater, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -335,7 +335,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.HtlcUpdater(len(secret)), pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -346,7 +346,7 @@ var _ = Describe("bitcoin fees", func() {
 			for i := range transaction.TxIn {
 				sig, err := txscript.RawTxInWitnessSignature(transaction, txscript.NewTxSigHashes(transaction, fetcher), i, utxos[i].Amount, htlc, txscript.SigHashAll, privKey2)
 				Expect(err).To(BeNil())
-				transaction.TxIn[i].Witness = btc.HtlcWitness(htlc, privKey2.PubKey().SerializeCompressed(), sig, secret, true)
+				transaction.TxIn[i].Witness = btc.HtlcWitness(htlc, privKey2.PubKey().SerializeCompressed(), sig, secret)
 			}
 			actualSize := btc.TxVirtualSize(transaction)
 			Expect(estimatedSize).Should(BeNumerically(">=", actualSize))
@@ -403,7 +403,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.HtlcUpdater(0), pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -423,7 +423,7 @@ var _ = Describe("bitcoin fees", func() {
 			for i := range transaction.TxIn {
 				sig, err := txscript.RawTxInWitnessSignature(transaction, txscript.NewTxSigHashes(transaction, fetcher), i, utxos[i].Amount, htlc, txscript.SigHashAll, privKey1)
 				Expect(err).To(BeNil())
-				transaction.TxIn[i].Witness = btc.HtlcWitness(htlc, privKey1.PubKey().SerializeCompressed(), sig, nil, false)
+				transaction.TxIn[i].Witness = btc.HtlcWitness(htlc, privKey1.PubKey().SerializeCompressed(), sig, nil)
 			}
 			actualSize := btc.TxVirtualSize(transaction)
 			Expect(estimatedSize).Should(BeNumerically(">=", actualSize))

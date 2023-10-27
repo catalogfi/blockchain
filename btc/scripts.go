@@ -106,9 +106,9 @@ func MultisigWitness(script, sigA, sigB []byte) wire.TxWitness {
 
 // HtlcWitness returns the witness for spending the htlc script, it has 2 possible paths either refund immediately
 // through user secret or refund after timelock.
-func HtlcWitness(script, pub, signature, secret []byte, redeem bool) wire.TxWitness {
+func HtlcWitness(script, pub, signature, secret []byte) wire.TxWitness {
 	var witnessStack wire.TxWitness
-	if redeem {
+	if len(secret) != 0 {
 		witnessStack = make([][]byte, 5)
 		witnessStack[0] = signature
 		witnessStack[1] = pub

@@ -19,7 +19,6 @@ import (
 )
 
 var _ = Describe("Indexer client", func() {
-
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("Initialise the electrs client")
@@ -65,7 +64,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			rawTx, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, addr)
+			rawTx, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, addr)
 			Expect(err).To(BeNil())
 			for i := range rawTx.TxIn {
 				pkScript, err := txscript.PayToAddrScript(addr)
@@ -123,7 +122,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
@@ -152,7 +151,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: 2 * amount,
 				},
 			}
-			transaction1, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients1, 0, 0, pkAddr)
+			transaction1, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients1, btc.P2pkhUpdater, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction1.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
