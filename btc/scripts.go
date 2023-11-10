@@ -47,7 +47,7 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 }
 
 func isNumOpCode(opcode byte) bool {
-	return opcode >= 0x52 && opcode <= 0x60
+	return opcode >= 0x51 && opcode <= 0x60
 }
 
 func isPushDataOpCode(opcode byte) bool {
