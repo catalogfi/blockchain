@@ -46,31 +46,62 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
+func isNumOpCode(opcode byte) bool {
+	return opcode >= 0x52 && opcode <= 0x60
+}
+
+func isPushDataOpCode(opcode byte) bool {
+	return opcode >= 0x01 && opcode <= 0x4e
+}
+
 // IsHtlc returns if the given script is a HTLC script.
 func IsHtlc(script []byte) bool {
-	if len(script) != 89 {
+	// 0xff is used to represent a data of variable length
+	validHtlc := []byte{
+		txscript.OP_IF,
+		txscript.OP_SHA256,
+		0x20, // to ensure secret hash is not more than 32 bytes
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_DUP,
+		txscript.OP_HASH160,
+		0x14, // to ensure address is not more than 20 bytes
+		txscript.OP_ELSE,
+		0xff, // to accomodate variable encoding for wait time, a number
+		txscript.OP_CHECKSEQUENCEVERIFY,
+		txscript.OP_DROP,
+		txscript.OP_DUP,
+		txscript.OP_HASH160,
+		0x14, // to ensure address is not more than 20 bytes
+		txscript.OP_ENDIF,
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_CHECKSIG,
+	}
+	// script version is 0
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	if !tokenizer.Next() {
 		return false
 	}
-
-	return script[0] == txscript.OP_IF &&
-		script[1] == txscript.OP_SHA256 &&
-		// Skip script[2:34] which is the secret hash
-		script[35] == txscript.OP_EQUALVERIFY &&
-		script[36] == txscript.OP_DUP &&
-		script[37] == txscript.OP_HASH160 &&
-		// script[38:59] is the redeemer's public key hash
-		script[38] == 0x14 &&
-		script[59] == txscript.OP_ELSE &&
-		// Skip script[60] which is the wait time
-		script[61] == txscript.OP_CHECKSEQUENCEVERIFY &&
-		script[62] == txscript.OP_DROP &&
-		script[63] == txscript.OP_DUP &&
-		script[64] == txscript.OP_HASH160 &&
-		// script[65:86] is the owner's public key hash
-		script[65] == 0x14 &&
-		script[86] == txscript.OP_ENDIF &&
-		script[87] == txscript.OP_EQUALVERIFY &&
-		script[88] == txscript.OP_CHECKSIG
+	for i, opCode := range validHtlc {
+		if !(tokenizer.Opcode() == opCode || opCode == 0xff) {
+			return false
+		}
+		if opCode == 0xff {
+			for tokenizer.Opcode() != validHtlc[i+1] {
+				if !(isNumOpCode(tokenizer.Opcode()) || isPushDataOpCode(tokenizer.Opcode())) {
+					return false
+				}
+				if !tokenizer.Next() {
+					return false
+				}
+			}
+			continue
+		}
+		if !tokenizer.Next() && i != len(validHtlc)-1 {
+			return false
+		}
+	}
+	return true
 }
 
 // NewRefundTx is helper function to build the refund tx. It assumes the input has only one utxo which is the given

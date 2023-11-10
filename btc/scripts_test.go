@@ -310,7 +310,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			By("Construct a tx which transferring funds from multisig to the HTLC")
 			secret := testutil.RandomSecret()
 			secretHash := sha256.Sum256(secret)
-			waitTime := int64(6)
+			waitTime := int64(20)
 			// pk1 can redeem the funds after expiry
 			// pk2 can redeem the funds if knowing the secret
 			htlcScript, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], waitTime)
