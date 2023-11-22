@@ -135,7 +135,7 @@ var _ = Describe("bitcoin client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
@@ -176,7 +176,7 @@ var _ = Describe("bitcoin client", func() {
 				},
 			}
 
-			transaction1, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients1, 0, 0, pkAddr)
+			transaction1, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients1, btc.P2pkhUpdater, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction1.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
@@ -227,7 +227,7 @@ var _ = Describe("bitcoin client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, nil, utxos, recipients, 0, 0, pkAddr1)
+			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
