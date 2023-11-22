@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -418,6 +419,106 @@ var _ = Describe("Bitcoin scripts", func() {
 			err = client.SubmitTx(ctx, htlcSpendTx)
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Htlc SpendTx tx hash = %v", color.YellowString(htlcSpendTx.TxHash().String())))
+		})
+
+	})
+
+	Context("IsHtlc function", func() {
+		Context("Wait time", func() {
+			It("should check the opCode", func() {
+				By("Initialization")
+				network := &chaincfg.RegressionNetParams
+				privKey1, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				privKey2, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
+
+				By("Testing different waitTime values")
+				secret := testutil.RandomSecret()
+				secretHash := sha256.Sum256(secret)
+				for i := int64(1); i <= int64(16); i++ {
+					htlcScript, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], i)
+					Expect(err).To(BeNil())
+					Expect(btc.IsHtlc(htlcScript)).Should(BeTrue())
+
+					htlcScript1, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], 1<<i-1)
+					Expect(err).To(BeNil())
+					Expect(btc.IsHtlc(htlcScript1)).Should(BeTrue())
+				}
+			})
+
+			It("should reject number too big", func() {
+				By("Initialization")
+				network := &chaincfg.RegressionNetParams
+				privKey1, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				privKey2, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
+
+				By("Manually construct the htlc script")
+				secret := testutil.RandomSecret()
+				secretHash := sha256.Sum256(secret)
+				waitTime := int64(math.MaxUint16 + 1)
+				htlcScript, err := txscript.NewScriptBuilder().
+					AddOp(txscript.OP_IF).
+					AddOp(txscript.OP_SHA256).
+					AddData(secretHash[:]).
+					AddOp(txscript.OP_EQUALVERIFY).
+					AddOp(txscript.OP_DUP).
+					AddOp(txscript.OP_HASH160).
+					AddData(btcutil.Hash160(pubKey2.SerializeCompressed())).
+					AddOp(txscript.OP_ELSE).
+					AddInt64(waitTime).
+					AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+					AddOp(txscript.OP_DROP).
+					AddOp(txscript.OP_DUP).
+					AddOp(txscript.OP_HASH160).
+					AddData(btcutil.Hash160(pubKey1.SerializeCompressed())).
+					AddOp(txscript.OP_ENDIF).
+					AddOp(txscript.OP_EQUALVERIFY).
+					AddOp(txscript.OP_CHECKSIG).
+					Script()
+				Expect(err).To(BeNil())
+				Expect(btc.IsHtlc(htlcScript)).Should(BeFalse())
+			})
+
+			It("should reject if the opCode is not valid", func() {
+				By("Initialization")
+				network := &chaincfg.RegressionNetParams
+				privKey1, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				privKey2, _, err := btctest.NewBtcKey(network)
+				Expect(err).To(BeNil())
+				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
+
+				By("Manually construct the htlc script")
+				secret := testutil.RandomSecret()
+				secretHash := sha256.Sum256(secret)
+				waitTime := int64(math.MaxUint32)
+				htlcScript, err := txscript.NewScriptBuilder().
+					AddOp(txscript.OP_IF).
+					AddOp(txscript.OP_SHA256).
+					AddData(secretHash[:]).
+					AddOp(txscript.OP_EQUALVERIFY).
+					AddOp(txscript.OP_DUP).
+					AddOp(txscript.OP_HASH160).
+					AddData(btcutil.Hash160(pubKey2.SerializeCompressed())).
+					AddOp(txscript.OP_ELSE).
+					AddInt64(waitTime).
+					AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+					AddOp(txscript.OP_DROP).
+					AddOp(txscript.OP_DUP).
+					AddOp(txscript.OP_HASH160).
+					AddData(btcutil.Hash160(pubKey1.SerializeCompressed())).
+					AddOp(txscript.OP_ENDIF).
+					AddOp(txscript.OP_EQUALVERIFY).
+					AddOp(txscript.OP_CHECKSIG).
+					Script()
+				Expect(err).To(BeNil())
+				Expect(btc.IsHtlc(htlcScript)).Should(BeFalse())
+			})
 		})
 	})
 })

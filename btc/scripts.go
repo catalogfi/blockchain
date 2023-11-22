@@ -3,6 +3,7 @@ package btc
 import (
 	"crypto/sha256"
 	"fmt"
+	"math"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -10,6 +11,8 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 )
+
+var ErrInvalidLockTime = fmt.Errorf("invalid lock-time")
 
 // MultisigScript generates a 2-out-2 multisig script.
 func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
@@ -25,6 +28,9 @@ func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
 // HtlcScript generates a HTLC script following BIP-199.
 // (https://github.com/bitcoin/bips/blob/master/bip-0199.mediawiki#summary)
 func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) ([]byte, error) {
+	if waitTime > math.MaxUint16 || waitTime < 0 {
+		return nil, ErrInvalidLockTime
+	}
 	return txscript.NewScriptBuilder().
 		AddOp(txscript.OP_IF).
 		AddOp(txscript.OP_SHA256).
@@ -46,31 +52,57 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
+// isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.
+// Since we require the timelock to be an integer (max_uint16), so we interpret maximum 3 bytes.
+func isWaitTimeOpCode(opCode byte) bool {
+	return (opCode >= txscript.OP_1 && opCode <= txscript.OP_16) ||
+		(opCode >= txscript.OP_DATA_1 && opCode <= txscript.OP_DATA_3)
+}
+
 // IsHtlc returns if the given script is a HTLC script.
 func IsHtlc(script []byte) bool {
-	if len(script) != 89 {
-		return false
+	// 0xff is used to represent a data of variable length
+	validHtlc := []byte{
+		txscript.OP_IF,
+		txscript.OP_SHA256,
+		txscript.OP_DATA_32,
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_DUP,
+		txscript.OP_HASH160,
+		txscript.OP_DATA_20,
+		txscript.OP_ELSE,
+		0xff,
+		txscript.OP_CHECKSEQUENCEVERIFY,
+		txscript.OP_DROP,
+		txscript.OP_DUP,
+		txscript.OP_HASH160,
+		txscript.OP_DATA_20,
+		txscript.OP_ENDIF,
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_CHECKSIG,
 	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
 
-	return script[0] == txscript.OP_IF &&
-		script[1] == txscript.OP_SHA256 &&
-		// Skip script[2:34] which is the secret hash
-		script[35] == txscript.OP_EQUALVERIFY &&
-		script[36] == txscript.OP_DUP &&
-		script[37] == txscript.OP_HASH160 &&
-		// script[38:59] is the redeemer's public key hash
-		script[38] == 0x14 &&
-		script[59] == txscript.OP_ELSE &&
-		// Skip script[60] which is the wait time
-		script[61] == txscript.OP_CHECKSEQUENCEVERIFY &&
-		script[62] == txscript.OP_DROP &&
-		script[63] == txscript.OP_DUP &&
-		script[64] == txscript.OP_HASH160 &&
-		// script[65:86] is the owner's public key hash
-		script[65] == 0x14 &&
-		script[86] == txscript.OP_ENDIF &&
-		script[87] == txscript.OP_EQUALVERIFY &&
-		script[88] == txscript.OP_CHECKSIG
+	for _, opCode := range validHtlc {
+		if !tokenizer.Next() {
+			return false
+		}
+		// Extra check for the lock time
+		if opCode == 0xff {
+			if !isWaitTimeOpCode(tokenizer.Opcode()) {
+				return false
+			}
+			lockTime := decodeLocktime(tokenizer.Data())
+			if lockTime > math.MaxUint16 || lockTime < 0 {
+				return false
+			}
+			continue
+		}
+		if tokenizer.Opcode() != opCode {
+			return false
+		}
+	}
+	return tokenizer.Done()
 }
 
 // NewRefundTx is helper function to build the refund tx. It assumes the input has only one utxo which is the given
@@ -167,4 +199,31 @@ func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
 func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
 	scriptHash := sha256.Sum256(script)
 	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
+}
+
+// modified from https://github.com/btcsuite/btcd/blob/4171854739fa2590a99c486341209d3aea8404dc/txscript/scriptnum.go#L198
+func decodeLocktime(v []byte) int64 {
+	// Zero is encoded as an empty byte slice.
+	if len(v) == 0 {
+		return 0
+	}
+
+	// Decode from little endian.
+	var result int64
+	for i, val := range v {
+		result |= int64(val) << uint8(8*i)
+	}
+
+	// When the most significant byte of the input bytes has the sign bit
+	// set, the result is negative.  So, remove the sign bit from the result
+	// and make it negative.
+	if v[len(v)-1]&0x80 != 0 {
+		// The maximum length of v has already been determined to be 4
+		// above, so uint8 is enough to cover the max possible shift
+		// value of 24.
+		result &= ^(int64(0x80) << uint8(8*(len(v)-1)))
+		return -result
+	}
+
+	return result
 }
