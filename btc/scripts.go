@@ -53,7 +53,7 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 }
 
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.
-// Since we require the timelock to be an integer (max_uint16), so we interpret maximum 5 bytes.
+// Since we require the timelock to be an integer (max_uint16), so we interpret maximum 3 bytes.
 func isWaitTimeOpCode(opCode byte) bool {
 	return (opCode >= txscript.OP_1 && opCode <= txscript.OP_16) ||
 		(opCode >= txscript.OP_DATA_1 && opCode <= txscript.OP_DATA_3)
@@ -98,7 +98,7 @@ func IsHtlc(script []byte) bool {
 			}
 			continue
 		}
-		if !(tokenizer.Opcode() == opCode) {
+		if tokenizer.Opcode() != opCode {
 			return false
 		}
 	}
