@@ -105,6 +105,12 @@ func NewMockIndexerClient() *MockIndexerClient {
 	return &MockIndexerClient{}
 }
 
+func NewMockIndexerClientWrapper(indexer btc.IndexerClient) *MockIndexerClient {
+	return &MockIndexerClient{
+		Indexer: indexer,
+	}
+}
+
 func (client MockIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address) ([]btc.Transaction, error) {
 	if client.FuncGetAddressTxs != nil {
 		return client.FuncGetAddressTxs(ctx, address)
