@@ -4,11 +4,13 @@ import (
 	"crypto/sha512"
 	"fmt"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
@@ -115,8 +117,20 @@ func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, u
 	totalIn, totalOut := int64(0), int64(0)
 	base, segwit := inputs.BaseSize, inputs.SegwitSize
 
+	// Calculate the minimum utxo value we want to add to the tx.
+	// This is to prevent adding a dust utxo and cause the tx use more fees.
+	minUtxoValue := 0
+	if sizeUpdater != nil {
+		minBase, minSegwit := sizeUpdater()
+		minVS := minBase + (minSegwit+3)/blockchain.WitnessScaleFactor
+		minUtxoValue = minVS * feeRate
+	}
 	// Adding required inputs
 	for _, utxo := range inputs.VIN {
+		// Skip the utxo if the amount is not large enough.
+		if utxo.Amount <= int64(minUtxoValue) {
+			continue
+		}
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return nil, err
@@ -217,4 +231,15 @@ func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, u
 	}
 
 	return nil, fmt.Errorf("funds not enough")
+}
+
+func BuildRbfTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, utxos []UTXO, recipients []Recipient, sizeUpdater func() (int, int), changeAddr btcutil.Address) (*wire.MsgTx, error) {
+	tx, err := BuildTransaction(feeRate, network, inputs, utxos, recipients, sizeUpdater, changeAddr)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tx.TxIn {
+		tx.TxIn[i].Sequence = mempool.MaxRBFSequence
+	}
+	return tx, nil
 }
