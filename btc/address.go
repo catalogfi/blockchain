@@ -26,7 +26,7 @@ func PublicKeyAddress(pub *btcec.PublicKey, network *chaincfg.Params, addressTyp
 	case AddressP2PKH:
 		return btcutil.NewAddressPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
 	case AddressP2WPKH:
-		return btcutil.NewAddressWitnessScriptHash(btcutil.Hash160(pub.SerializeCompressed()), network)
+		return btcutil.NewAddressWitnessPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
 	case AddressTaproot:
 		// todo: add taproot address
 		panic("todo")
