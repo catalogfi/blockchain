@@ -19,7 +19,7 @@ var (
 	AddressTaproot AddressType = "P2TR"
 )
 
-func PublicKeyAddress(pub btcec.PublicKey, network *chaincfg.Params, addressType AddressType) (btcutil.Address, error) {
+func PublicKeyAddress(pub *btcec.PublicKey, network *chaincfg.Params, addressType AddressType) (btcutil.Address, error) {
 	switch addressType {
 	case AddressP2PK:
 		return btcutil.NewAddressPubKey(pub.SerializeCompressed(), network)
