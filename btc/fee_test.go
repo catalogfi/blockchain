@@ -1,9 +1,12 @@
 package btc_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/catalogfi/blockchain/testutil"
+	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -162,6 +166,104 @@ var _ = Describe("bitcoin fees", func() {
 				Expect(fees.Medium).Should(Equal(fee))
 				Expect(fees.High).Should(Equal(fee))
 			})
+		})
+	})
+
+	Context("Testing too long chain", func() {
+		XIt("should return an error", func(ctx context.Context) {
+			By("Initialization (Update these fields if testing on testnet/mainnet)")
+			network := &chaincfg.RegressionNetParams
+			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network)
+			Expect(err).To(BeNil())
+			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network)
+			Expect(err).To(BeNil())
+			indexer := btctest.RegtestIndexer()
+
+			By("Funding the addresses")
+			txhash1, err := testutil.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
+			By(fmt.Sprintf("address2 %v , txid = %v", p2pkhAddr2.EncodeAddress(), txhash1))
+			time.Sleep(5 * time.Second)
+
+			utxos, err := indexer.GetUTXOs(context.Background(), p2pkhAddr1)
+			Expect(err).To(BeNil())
+
+			var inputTx string
+			for i := 0; i < 25; i++ {
+				feeRate := 10
+				rawInputs := btc.RawInputs{
+					VIN:        utxos,
+					BaseSize:   txsizes.RedeemP2PKHSigScriptSize * len(utxos),
+					SegwitSize: 0,
+				}
+				var recipients []btc.Recipient
+				if i == 10 {
+					recipients = append(recipients, btc.Recipient{
+						To:     p2pkhAddr2.EncodeAddress(),
+						Amount: 1e6,
+					})
+				}
+
+				transaction, err := btc.BuildTransaction(feeRate, network, rawInputs, utxos, recipients, btc.P2pkhUpdater, p2pkhAddr1)
+				Expect(err).To(BeNil())
+
+				for i := range transaction.TxIn {
+					pkScript, err := txscript.PayToAddrScript(p2pkhAddr1)
+					Expect(err).To(BeNil())
+
+					sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey1, true)
+					Expect(err).To(BeNil())
+					transaction.TxIn[i].SignatureScript = sigScript
+				}
+				Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
+				By(fmt.Sprintf("txhash %v = %v", i+1, color.YellowString(transaction.TxHash().String())))
+
+				vout := uint32(0)
+				if i == 10 {
+					vout = uint32(1)
+					inputTx = transaction.TxHash().String()
+				}
+				utxos = []btc.UTXO{
+					{
+						TxID:   transaction.TxHash().String(),
+						Vout:   vout,
+						Amount: transaction.TxOut[vout].Value,
+					},
+				}
+			}
+
+			// Try contruct a new transaction
+			rawInputs := btc.RawInputs{
+				VIN: []btc.UTXO{
+					{
+						TxID:   inputTx,
+						Vout:   0,
+						Amount: 1e6,
+					},
+				},
+				BaseSize:   txsizes.RedeemP2PKHSigScriptSize,
+				SegwitSize: 0,
+			}
+
+			transaction, err := btc.BuildTransaction(10, network, rawInputs, nil, nil, nil, p2pkhAddr2)
+			Expect(err).To(BeNil())
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(p2pkhAddr2)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey2, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
+			buffer := bytes.NewBuffer([]byte{})
+			if err := transaction.Serialize(buffer); err != nil {
+				panic(err)
+			}
+			log.Print(hex.EncodeToString(buffer.Bytes()))
+			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
+			By(fmt.Sprintf("txhash = %v", color.YellowString(transaction.TxHash().String())))
+
 		})
 	})
 

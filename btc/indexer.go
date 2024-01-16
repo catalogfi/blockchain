@@ -27,9 +27,10 @@ const (
 )
 
 type Transaction struct {
-	TxID   string `json:"txid"`
-	VINs   []VIN  `json:"vin"`
-	Status Status `json:"status"`
+	TxID   string    `json:"txid"`
+	VINs   []VIN     `json:"vin"`
+	VOUTs  []Prevout `json:"vout"`
+	Status Status    `json:"status"`
 }
 
 type VIN struct {
