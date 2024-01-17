@@ -191,7 +191,7 @@ var _ = Describe("bitcoin client", func() {
 				Expect(err).To(BeNil())
 				transaction1.TxIn[i].SignatureScript = sigScript
 			}
-			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})

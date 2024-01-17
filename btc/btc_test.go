@@ -3,6 +3,7 @@ package btc_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"testing/quick"
 	"time"
@@ -101,6 +102,78 @@ var _ = Describe("Bitcoin", func() {
 			}
 			Expect(indexer.SubmitTx(ctx, transaction1)).Should(Succeed())
 			color.Green("Replacement tx = %v", transaction1.TxHash().String())
+		})
+
+		It("should get an error when trying to replace a mined tx", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+
+			By("Initialise a local regnet client")
+			network := &chaincfg.RegressionNetParams
+			client, err := btctest.RegtestClient()
+			Expect(err).To(BeNil())
+			indexer := btctest.RegtestIndexer()
+
+			By("New address")
+			privKey, pkAddr, err := btctest.NewBtcKey(network)
+			Expect(err).To(BeNil())
+
+			_, toAddr, err := btctest.NewBtcKey(network)
+			Expect(err).To(BeNil())
+
+			By("funding the addresses")
+			txhash, err := testutil.NigiriFaucet(pkAddr.EncodeAddress())
+			Expect(err).To(BeNil())
+			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr.EncodeAddress(), txhash))
+			time.Sleep(5 * time.Second)
+
+			By("Construct a new tx")
+			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
+			Expect(err).To(BeNil())
+			amount, feeRate := int64(1e5), 5
+			recipients := []btc.Recipient{
+				{
+					To:     toAddr.EncodeAddress(),
+					Amount: amount,
+				},
+			}
+			transaction, err := btc.BuildRbfTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			Expect(err).To(BeNil())
+
+			By("Sign the transaction inputs")
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+			}
+
+			By("Submit the transaction")
+			Expect(client.SubmitTx(ctx, transaction)).Should(Succeed())
+			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(transaction.TxHash().String())))
+			time.Sleep(time.Second)
+
+			By("Build a new tx with higher fee")
+			feeRate += 2
+			transaction, err = btc.BuildRbfTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			Expect(err).To(BeNil())
+
+			By("Sign the transaction inputs")
+			for i := range transaction.TxIn {
+				pkScript, err := txscript.PayToAddrScript(pkAddr)
+				Expect(err).To(BeNil())
+
+				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
+				Expect(err).To(BeNil())
+				transaction.TxIn[i].SignatureScript = sigScript
+				Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			}
+
+			By("Submit the transaction again and it should be rejected")
+			err = client.SubmitTx(ctx, transaction)
+			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
 	})
 })
