@@ -9,6 +9,7 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -46,6 +47,19 @@ func TxVirtualSize(tx *wire.MsgTx) int {
 	baseSize := tx.SerializeSizeStripped()
 	swSize := size - baseSize
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
+}
+
+// TotalFee returns the total amount fees used by the given tx.
+func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int64 {
+	fees := int64(0)
+	for _, in := range tx.TxIn {
+		output := fetcher.FetchPrevOutput(in.PreviousOutPoint)
+		fees += output.Value
+	}
+	for _, out := range tx.TxOut {
+		fees -= out.Value
+	}
+	return fees
 }
 
 type FeeSuggestion struct {
