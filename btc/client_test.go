@@ -97,6 +97,11 @@ var _ = Describe("bitcoin client", func() {
 				scriptPubkey, err := txscript.PayToAddrScript(addr)
 				Expect(err).To(BeNil())
 				Expect(txout.ScriptPubKey.Hex).Should(Equal(hex.EncodeToString(scriptPubkey)))
+
+				By("GetNetworkInfo()")
+				netInfo, err := client.GetNetworkInfo(ctx)
+				Expect(err).To(BeNil())
+				Expect(netInfo.RelayFee).Should(BeNumerically(">=", 0))
 			})
 		})
 	})

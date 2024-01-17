@@ -23,6 +23,7 @@ type MockClient struct {
 	FuncGetBlockByHeight  func(context.Context, int64) (*btcjson.GetBlockVerboseResult, error)
 	FuncGetBlockByHash    func(context.Context, *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
 	FuncGetTxOut          func(context.Context, *chainhash.Hash, uint32) (*btcjson.GetTxOutResult, error)
+	FuncGetNetworkInfo    func(ctx context.Context) (*btcjson.GetNetworkInfoResult, error)
 }
 
 // Make sure the MockClient implements the Client interface
@@ -85,6 +86,13 @@ func (m *MockClient) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout ui
 		return m.FuncGetTxOut(ctx, hash, vout)
 	}
 	return m.Client.GetTxOut(ctx, hash, vout)
+}
+
+func (m *MockClient) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error) {
+	if m.FuncGetNetworkInfo != nil {
+		return m.FuncGetNetworkInfo(ctx)
+	}
+	return m.Client.GetNetworkInfo(ctx)
 }
 
 // MockIndexerClient for testing purpose

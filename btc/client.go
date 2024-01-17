@@ -47,6 +47,9 @@ type Client interface {
 	// GetTxOut returns details about an unspent transaction output. It will return nil result if the utxo has been
 	// spent.
 	GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error)
+
+	// GetNetworkInfo returns the network configuration of the node we connect to.
+	GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error)
 }
 
 type client struct {
@@ -275,6 +278,32 @@ func (client *client) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout u
 	select {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("GetTxOut : %w", ctx.Err())
+	case err := <-errs:
+		return nil, err
+	case result := <-results:
+		return result, nil
+	}
+}
+
+func (client *client) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error) {
+	future := client.rpcClient.GetNetworkInfoAsync()
+	results := make(chan *btcjson.GetNetworkInfoResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetNetworkInfo : %w", ctx.Err())
 	case err := <-errs:
 		return nil, err
 	case result := <-results:
