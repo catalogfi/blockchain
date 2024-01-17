@@ -50,7 +50,7 @@ func TxVirtualSize(tx *wire.MsgTx) int {
 }
 
 // TotalFee returns the total amount fees used by the given tx.
-func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int64 {
+func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int {
 	fees := int64(0)
 	for _, in := range tx.TxIn {
 		output := fetcher.FetchPrevOutput(in.PreviousOutPoint)
@@ -59,7 +59,7 @@ func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int64 {
 	for _, out := range tx.TxOut {
 		fees -= out.Value
 	}
-	return fees
+	return int(fees)
 }
 
 type FeeSuggestion struct {
