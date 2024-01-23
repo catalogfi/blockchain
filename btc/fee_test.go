@@ -73,21 +73,21 @@ var _ = Describe("bitcoin fees", func() {
 				estimatorTestnet := btc.NewMempoolFeeEstimator(&chaincfg.TestNet3Params, "", 15*time.Second)
 				fees, err := estimatorTestnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(2))
-				Expect(fees.Economy).Should(Equal(2))
-				Expect(fees.Low).Should(Equal(2))
-				Expect(fees.Medium).Should(Equal(2))
-				Expect(fees.High).Should(Equal(2))
+				Expect(fees.Minimum).Should(Equal(1))
+				Expect(fees.Economy).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(1))
+				Expect(fees.Medium).Should(Equal(1))
+				Expect(fees.High).Should(Equal(1))
 
 				By("Regnet")
 				estimatorRegnet := btc.NewMempoolFeeEstimator(&chaincfg.RegressionNetParams, "", 15*time.Second)
 				fees, err = estimatorRegnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(2))
-				Expect(fees.Economy).Should(Equal(2))
-				Expect(fees.Low).Should(Equal(2))
-				Expect(fees.Medium).Should(Equal(2))
-				Expect(fees.High).Should(Equal(2))
+				Expect(fees.Minimum).Should(Equal(1))
+				Expect(fees.Economy).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(1))
+				Expect(fees.Medium).Should(Equal(1))
+				Expect(fees.High).Should(Equal(1))
 			})
 		})
 
@@ -136,21 +136,21 @@ var _ = Describe("bitcoin fees", func() {
 				estimatorTestnet := btc.NewBlockstreamFeeEstimator(&chaincfg.TestNet3Params, "", 15*time.Second)
 				fees, err := estimatorTestnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(2))
-				Expect(fees.Economy).Should(Equal(2))
-				Expect(fees.Low).Should(Equal(2))
-				Expect(fees.Medium).Should(Equal(2))
-				Expect(fees.High).Should(Equal(2))
+				Expect(fees.Minimum).Should(Equal(1))
+				Expect(fees.Economy).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(1))
+				Expect(fees.Medium).Should(Equal(1))
+				Expect(fees.High).Should(Equal(1))
 
 				By("Regnet")
 				estimatorRegnet := btc.NewBlockstreamFeeEstimator(&chaincfg.RegressionNetParams, "", 15*time.Second)
 				fees, err = estimatorRegnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(2))
-				Expect(fees.Economy).Should(Equal(2))
-				Expect(fees.Low).Should(Equal(2))
-				Expect(fees.Medium).Should(Equal(2))
-				Expect(fees.High).Should(Equal(2))
+				Expect(fees.Minimum).Should(Equal(1))
+				Expect(fees.Economy).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(1))
+				Expect(fees.Medium).Should(Equal(1))
+				Expect(fees.High).Should(Equal(1))
 			})
 		})
 
@@ -205,7 +205,7 @@ var _ = Describe("bitcoin fees", func() {
 					})
 				}
 
-				transaction, err := btc.BuildTransaction(feeRate, network, rawInputs, utxos, recipients, btc.P2pkhUpdater, p2pkhAddr1)
+				transaction, err := btc.BuildTransaction(network, feeRate, rawInputs, utxos, btc.P2pkhUpdater, recipients, p2pkhAddr1)
 				Expect(err).To(BeNil())
 
 				for i := range transaction.TxIn {
@@ -233,7 +233,7 @@ var _ = Describe("bitcoin fees", func() {
 				}
 			}
 
-			// Try contruct a new transaction
+			// Try construct a new transaction
 			rawInputs := btc.RawInputs{
 				VIN: []btc.UTXO{
 					{
@@ -246,7 +246,7 @@ var _ = Describe("bitcoin fees", func() {
 				SegwitSize: 0,
 			}
 
-			transaction, err := btc.BuildTransaction(10, network, rawInputs, nil, nil, nil, p2pkhAddr2)
+			transaction, err := btc.BuildTransaction(network, 10, rawInputs, nil, nil, nil, p2pkhAddr2)
 			Expect(err).To(BeNil())
 			for i := range transaction.TxIn {
 				pkScript, err := txscript.PayToAddrScript(p2pkhAddr2)
@@ -263,7 +263,6 @@ var _ = Describe("bitcoin fees", func() {
 			log.Print(hex.EncodeToString(buffer.Bytes()))
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 			By(fmt.Sprintf("txhash = %v", color.YellowString(transaction.TxHash().String())))
-
 		})
 	})
 
@@ -299,7 +298,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr1)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -364,7 +363,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.MultisigUpdater, pkAddr1)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.MultisigUpdater, recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -437,7 +436,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.HtlcUpdater(len(secret)), pkAddr1)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.HtlcUpdater(len(secret)), recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")
@@ -505,7 +504,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.HtlcUpdater(0), pkAddr1)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.HtlcUpdater(0), recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Estimate the tx size before signing")

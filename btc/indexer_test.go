@@ -64,7 +64,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			rawTx, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, addr)
+			rawTx, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, addr)
 			Expect(err).To(BeNil())
 			for i := range rawTx.TxIn {
 				pkScript, err := txscript.PayToAddrScript(addr)
@@ -122,7 +122,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
@@ -151,7 +151,7 @@ var _ = Describe("Indexer client", func() {
 					Amount: 2 * amount,
 				},
 			}
-			transaction1, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients1, btc.P2pkhUpdater, pkAddr)
+			transaction1, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients1, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction1.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)

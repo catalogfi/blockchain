@@ -62,7 +62,7 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			fundingTx, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, fundingRecipients, btc.P2pkhUpdater, p2pkhAddr1)
+			fundingTx, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the funding tx")
@@ -87,18 +87,12 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			redeemRecipients := []btc.Recipient{
-				{
-					To:     p2pkhAddr2.EncodeAddress(),
-					Amount: 0,
-				},
-			}
 			rawInputs := btc.RawInputs{
 				VIN:        redeemInput,
 				BaseSize:   0,
 				SegwitSize: btc.RedeemMultisigSigScriptSize,
 			}
-			redeemTx, err := btc.BuildTransaction(feeRate, network, rawInputs, nil, redeemRecipients, nil, nil)
+			redeemTx, err := btc.BuildTransaction(network, feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the redeem tx")
@@ -162,7 +156,7 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			fundingTx, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, fundingRecipients, btc.P2pkhUpdater, p2pkhAddr1)
+			fundingTx, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the funding tx")
@@ -237,18 +231,12 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			htlcSpendRecipients := []btc.Recipient{
-				{
-					To:     p2pkhAddr2.EncodeAddress(),
-					Amount: 0,
-				},
-			}
 			rawInputs := btc.RawInputs{
 				VIN:        htlcSpendInputs,
 				BaseSize:   0,
 				SegwitSize: btc.RedeemHtlcRedeemSigScriptSize(len(secret)),
 			}
-			htlcSpendTx, err := btc.BuildTransaction(feeRate, network, rawInputs, nil, htlcSpendRecipients, nil, nil)
+			htlcSpendTx, err := btc.BuildTransaction(network, feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the tx")
@@ -302,7 +290,7 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			fundingTx, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, fundingRecipients, btc.P2pkhUpdater, p2pkhAddr1)
+			fundingTx, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
@@ -383,18 +371,12 @@ var _ = Describe("Bitcoin scripts", func() {
 					Amount: amount,
 				},
 			}
-			htlcSpendRecipients := []btc.Recipient{
-				{
-					To:     p2pkhAddr2.EncodeAddress(),
-					Amount: 0,
-				},
-			}
 			rawInputs := btc.RawInputs{
 				VIN:        htlcSpendInput,
 				BaseSize:   0,
 				SegwitSize: btc.RedeemHtlcRefundSigScriptSize,
 			}
-			htlcSpendTx, err := btc.BuildTransaction(feeRate, network, rawInputs, nil, htlcSpendRecipients, nil, nil)
+			htlcSpendTx, err := btc.BuildTransaction(network, feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
 			Expect(err).To(BeNil())
 
 			By("Sign the htlc spend tx")
@@ -419,8 +401,8 @@ var _ = Describe("Bitcoin scripts", func() {
 			err = client.SubmitTx(ctx, htlcSpendTx)
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Htlc SpendTx tx hash = %v", color.YellowString(htlcSpendTx.TxHash().String())))
+			Expect(testutil.NigiriNewBlock()).Should(Succeed())
 		})
-
 	})
 
 	Context("IsHtlc function", func() {

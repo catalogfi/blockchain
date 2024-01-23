@@ -20,14 +20,17 @@ const (
 )
 
 var (
+	// RedeemHtlcRefundSigScriptSize is an estimate of the sigScript size when refunding an htlc script
 	// stack number + stack size * 4 + signature + public key + script size
 	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + 89
 
+	// RedeemHtlcRedeemSigScriptSize is an estimate of the sigScript size when redeeming an htlc script
 	// stack number + stack size * 5 + signature + public key + secret + script size
 	RedeemHtlcRedeemSigScriptSize = func(secretSize int) int {
 		return 1 + 5 + 73 + 33 + secretSize + +1 + 89
 	}
 
+	// RedeemMultisigSigScriptSize is an estimate of the sigScript size from an 2-of-2 multisig script
 	// stack number + stack size * 4 + signature * 2 + script size
 	RedeemMultisigSigScriptSize = 1 + 4 + 73*2 + 71
 )
@@ -41,7 +44,7 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
 }
 
-// TxVirtualSize returns the virtual size of a transaction
+// TxVirtualSize returns the virtual size of a transaction.
 func TxVirtualSize(tx *wire.MsgTx) int {
 	size := tx.SerializeSize()
 	baseSize := tx.SerializeSizeStripped()
@@ -116,7 +119,7 @@ func (f *mempoolFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		return f.last, nil
 	} else {
 		return FeeSuggestion{
-			2, 2, 2, 2, 2,
+			1, 1, 1, 1, 1,
 		}, nil
 	}
 }
@@ -174,7 +177,7 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		}
 		return f.last, nil
 	} else {
-		return FeeSuggestion{2, 2, 2, 2, 2}, nil
+		return FeeSuggestion{1, 1, 1, 1, 1}, nil
 	}
 }
 

@@ -2,6 +2,7 @@ package btc
 
 import (
 	"crypto/sha512"
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -29,6 +30,10 @@ const (
 	// txscript.SigHashAnyOneCanPay`.
 	SigHashSingleAnyoneCanPay = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
 )
+
+// SizeUpdater returns the base and segwit size of signing a particular type of utxo. This is used by the tx building
+// function to estimate the fee.
+type SizeUpdater func() (int, int)
 
 var (
 	P2pkhUpdater = func() (int, int) {
@@ -81,7 +86,7 @@ func GenerateSystemPrivKey(mnemonic string, userPubkeyHex []byte) (*btcec.Privat
 		masterKey, err = hdkeychain.NewMaster(seed, &chaincfg.MainNetParams)
 		if err != nil {
 			// Very small chance to happen
-			if err == hdkeychain.ErrUnusableSeed {
+			if errors.Is(err, hdkeychain.ErrUnusableSeed) {
 				continue
 			}
 			return nil, err
@@ -110,33 +115,28 @@ func NewRawInputs() RawInputs {
 // fees. `inputs` will be a list of utxos that required to be included in the transaction, it comes with the base and
 // segwit size of the signature for fee-estimation purpose. `utxos` is a list of transaction will be picked
 // to cover the output amount and fees. We assume the utxos all comes from a single address. The `sizeUpdater` function
-// returns the base and segwit size of each utxo from the utxos. If there's any change, it will be sent back to the
+// returns the base and segwit size of each utxo from the `utxos`. If there's any change, it will be sent back to the
 // `changeAddr`.
-func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, utxos []UTXO, recipients []Recipient, sizeUpdater func() (int, int), changeAddr btcutil.Address) (*wire.MsgTx, error) {
+func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultBTCVersion)
 	totalIn, totalOut := int64(0), int64(0)
 	base, segwit := inputs.BaseSize, inputs.SegwitSize
 
-	// Calculate the minimum utxo value we want to add to the tx.
-	// This is to prevent adding a dust utxo and cause the tx use more fees.
-	minUtxoValue := 0
-	if sizeUpdater != nil {
-		minBase, minSegwit := sizeUpdater()
-		minVS := minBase + (minSegwit+3)/blockchain.WitnessScaleFactor
-		minUtxoValue = minVS * feeRate
-	}
-	// Adding required inputs
+	// Adding required inputs and output
 	for _, utxo := range inputs.VIN {
-		// Skip the utxo if the amount is not large enough.
-		if utxo.Amount <= int64(minUtxoValue) {
-			continue
-		}
+		// // Skip the utxo if the amount is not large enough.
+		// if utxo.Amount <= int64(minUtxoValue) {
+		// 	continue
+		// }
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return nil, err
 		}
 		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
 		tx.AddTxIn(txIn)
+		if utxo.Amount == 0 {
+			return nil, fmt.Errorf("utxo amount is not set")
+		}
 		totalIn += utxo.Amount
 	}
 	for _, recipient := range recipients {
@@ -154,46 +154,41 @@ func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, u
 
 	// Function to check if the input amount is greater than or equal to the output amount plus fees
 	valueCheck := func() (bool, error) {
-		if totalIn > totalOut {
-			vs := EstimateVirtualSize(tx, base, segwit)
-			fees := int64(vs * feeRate)
+		if totalIn <= totalOut {
+			return false, nil
+		}
 
-			// If the amount is enough to cover the outputs and fees
-			if totalIn > totalOut+fees {
-				// Add a change utxo to the output if the change amount is greater than the dust
-				if totalIn-totalOut-fees > DustAmount {
-					if changeAddr != nil {
-						changeScript, err := txscript.PayToAddrScript(changeAddr)
-						if err != nil {
-							return false, err
-						}
-						tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
+		vs := EstimateVirtualSize(tx, base, segwit)
+		fees := int64(vs * feeRate)
 
-						// Estimate the fees again as we add a new output
-						vs := EstimateVirtualSize(tx, base, segwit)
-						fees := int64(vs * feeRate)
+		// If the amount is enough to cover the outputs and fees
+		if totalIn > totalOut+fees {
+			// Add a change utxo to the output if the change amount is greater than the dust
+			if totalIn-totalOut-fees > DustAmount {
+				if changeAddr != nil {
+					changeScript, err := txscript.PayToAddrScript(changeAddr)
+					if err != nil {
+						return false, err
+					}
+					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
 
-						// Adjust the change utxo amount if it's still enough, delete it otherwise
-						if totalIn-totalOut-fees > DustAmount {
-							tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
-						} else {
-							tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
-						}
+					// Estimate the fees again as we add a new output
+					vs := EstimateVirtualSize(tx, base, segwit)
+					fees := int64(vs * feeRate)
+
+					// Adjust the change utxo amount if it's still enough, delete it otherwise
+					if totalIn-totalOut-fees > DustAmount {
+						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
 					} else {
-						// Or adjust one of the output amount which is pending
-						for i, out := range tx.TxOut {
-							if out.Value == 0 {
-								tx.TxOut[i].Value = totalIn - totalOut - fees
-								break
-							}
-						}
+						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
 					}
 				}
-				return true, nil
 			}
-		}
-		return false, nil
 
+			return true, nil
+		}
+
+		return false, nil
 	}
 
 	// Check if the existing inputs are enough and we might not need to add extra utxos
@@ -205,14 +200,25 @@ func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, u
 		return tx, nil
 	}
 
+	// Calculate the minimum utxo value we want to add to the tx.
+	// This is to prevent adding a dust utxo and cause the tx use more fees.
+	minUtxoValue := 0
+	if sizeUpdater != nil {
+		minBase, minSegwit := sizeUpdater()
+		minVS := minBase + (minSegwit+3)/blockchain.WitnessScaleFactor
+		minUtxoValue = minVS * feeRate
+	}
+
 	// Keep adding utxos until we have enough funds to cover the output amount
 	for _, utxo := range utxos {
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return nil, err
 		}
-		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
-		tx.AddTxIn(txIn)
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
+		if utxo.Amount <= int64(minUtxoValue) {
+			return nil, fmt.Errorf("utxo amount is not set")
+		}
 		totalIn += utxo.Amount
 		if sizeUpdater != nil {
 			additionalBaseSize, additionalSegwitSize := sizeUpdater()
@@ -233,8 +239,8 @@ func BuildTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, u
 	return nil, fmt.Errorf("funds not enough")
 }
 
-func BuildRbfTransaction(feeRate int, network *chaincfg.Params, inputs RawInputs, utxos []UTXO, recipients []Recipient, sizeUpdater func() (int, int), changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx, err := BuildTransaction(feeRate, network, inputs, utxos, recipients, sizeUpdater, changeAddr)
+func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+	tx, err := BuildTransaction(network, feeRate, inputs, utxos, sizeUpdater, recipients, changeAddr)
 	if err != nil {
 		return nil, err
 	}

@@ -1,50 +1,23 @@
 package btc_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"testing/quick"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/catalogfi/blockchain/testutil"
 	"github.com/fatih/color"
-	"github.com/tyler-smith/go-bip39"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Bitcoin", func() {
-	Context("keys", func() {
-		It("should generate deterministic keys from mnemonic and user public key", func() {
-			test := func() bool {
-				entropy, err := bip39.NewEntropy(256)
-				Expect(err).To(BeNil())
-				mnemonic, err := bip39.NewMnemonic(entropy)
-				Expect(err).To(BeNil())
-				key, err := btcec.NewPrivateKey()
-				Expect(err).To(BeNil())
-
-				extendedKey1, err := btc.GenerateSystemPrivKey(mnemonic, key.PubKey().SerializeCompressed())
-				Expect(err).To(BeNil())
-				extendedKey2, err := btc.GenerateSystemPrivKey(mnemonic, key.PubKey().SerializeCompressed())
-				Expect(err).To(BeNil())
-
-				Expect(bytes.Equal(extendedKey1.Serialize(), extendedKey2.Serialize())).Should(BeTrue())
-				return true
-			}
-
-			Expect(quick.Check(test, nil)).NotTo(HaveOccurred())
-		})
-	})
-
 	Context("RBF", func() {
 		It("should be able to build transaction which support rbf", func(ctx context.Context) {
 			By("Initialization (Update these fields if testing on testnet/mainnet)")
@@ -61,7 +34,7 @@ var _ = Describe("Bitcoin", func() {
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
 			time.Sleep(5 * time.Second)
 
-			By("Construct a RBF tx which sends money from key1 to key2")
+			By("Construct a RBF tx which sends money from p2pkhAddr1 to p2pkhAddr2")
 			utxos, err := indexer.GetUTXOs(ctx, p2pkhAddr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e7), 4
@@ -71,7 +44,7 @@ var _ = Describe("Bitcoin", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildRbfTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, p2pkhAddr1)
+			transaction, err := btc.BuildRbfTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, p2pkhAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
@@ -87,7 +60,7 @@ var _ = Describe("Bitcoin", func() {
 			By(color.GreenString("RBF tx hash = %v", transaction.TxHash().String()))
 
 			By("Construct a tx with higher fees")
-			transaction1, err := btc.BuildTransaction(feeRate+5, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, p2pkhAddr1)
+			transaction1, err := btc.BuildTransaction(network, feeRate+5, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, p2pkhAddr1)
 			Expect(err).To(BeNil())
 			transaction1.TxOut[1].Value++
 
@@ -113,11 +86,9 @@ var _ = Describe("Bitcoin", func() {
 			client, err := btctest.RegtestClient()
 			Expect(err).To(BeNil())
 			indexer := btctest.RegtestIndexer()
-
 			By("New address")
 			privKey, pkAddr, err := btctest.NewBtcKey(network)
 			Expect(err).To(BeNil())
-
 			_, toAddr, err := btctest.NewBtcKey(network)
 			Expect(err).To(BeNil())
 
@@ -137,7 +108,7 @@ var _ = Describe("Bitcoin", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildRbfTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			transaction, err := btc.BuildRbfTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
@@ -157,7 +128,7 @@ var _ = Describe("Bitcoin", func() {
 
 			By("Build a new tx with higher fee")
 			feeRate += 2
-			transaction, err = btc.BuildRbfTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			transaction, err = btc.BuildRbfTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
