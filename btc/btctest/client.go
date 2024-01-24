@@ -98,7 +98,7 @@ func (m *MockClient) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInf
 // MockIndexerClient for testing purpose
 type MockIndexerClient struct {
 	Indexer               btc.IndexerClient
-	FuncGetAddressTxs     func(context.Context, btcutil.Address) ([]btc.Transaction, error)
+	FuncGetAddressTxs     func(context.Context, btcutil.Address, string) ([]btc.Transaction, error)
 	FuncGetUTXOs          func(context.Context, btcutil.Address) (btc.UTXOs, error)
 	FuncGetTipBlockHeight func(ctx context.Context) (uint64, error)
 	FuncGetTx             func(context.Context, string) (btc.Transaction, error)
@@ -119,11 +119,11 @@ func NewMockIndexerClientWrapper(indexer btc.IndexerClient) *MockIndexerClient {
 	}
 }
 
-func (client MockIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address) ([]btc.Transaction, error) {
+func (client MockIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address, lastSeenTxid string) ([]btc.Transaction, error) {
 	if client.FuncGetAddressTxs != nil {
-		return client.FuncGetAddressTxs(ctx, address)
+		return client.FuncGetAddressTxs(ctx, address, lastSeenTxid)
 	}
-	return client.Indexer.GetAddressTxs(ctx, address)
+	return client.Indexer.GetAddressTxs(ctx, address, lastSeenTxid)
 }
 
 func (client MockIndexerClient) GetUTXOs(ctx context.Context, address btcutil.Address) (btc.UTXOs, error) {

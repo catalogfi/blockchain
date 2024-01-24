@@ -81,7 +81,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(err.Error()).Should(ContainSubstring("not enough data"))
 
 			By("GetAddressTxs()")
-			txs, err := client.GetAddressTxs(context.Background(), addr)
+			txs, err := client.GetAddressTxs(context.Background(), addr, "")
 			Expect(err).To(BeNil())
 			has := false
 			for _, tx := range txs {
