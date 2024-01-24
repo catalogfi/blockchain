@@ -58,7 +58,7 @@ type Status struct {
 type IndexerClient interface {
 
 	// GetAddressTxs returns the tx history of the given address.
-	GetAddressTxs(ctx context.Context, address btcutil.Address) ([]Transaction, error)
+	GetAddressTxs(ctx context.Context, address btcutil.Address, lastSeenTxid string) ([]Transaction, error)
 
 	// GetUTXOs return all utxos of the given address.
 	GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error)
@@ -90,10 +90,16 @@ func NewElectrsIndexerClient(logger *zap.Logger, url string, retryInterval time.
 	}
 }
 
-func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address) ([]Transaction, error) {
+func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address btcutil.Address, lastSeenTxid string) ([]Transaction, error) {
 	endpoint, err := url.JoinPath(client.url, "address", address.EncodeAddress(), "txs")
 	if err != nil {
 		return nil, err
+	}
+	if lastSeenTxid != "" {
+		endpoint, err = url.JoinPath(client.url, "address", address.EncodeAddress(), "txs", "chain", lastSeenTxid)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Send the request
