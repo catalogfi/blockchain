@@ -45,6 +45,7 @@ type Prevout struct {
 	ScriptPubKeyType    string `json:"scriptpubkey_type"`
 	ScriptPubKey        string `json:"scriptpubkey"`
 	ScriptPubKeyAddress string `json:"scriptpubkey_address"`
+	Value               int    `json:"value"`
 }
 
 type Status struct {
