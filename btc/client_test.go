@@ -8,8 +8,6 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -97,6 +95,11 @@ var _ = Describe("bitcoin client", func() {
 				scriptPubkey, err := txscript.PayToAddrScript(addr)
 				Expect(err).To(BeNil())
 				Expect(txout.ScriptPubKey.Hex).Should(Equal(hex.EncodeToString(scriptPubkey)))
+
+				By("GetNetworkInfo()")
+				netInfo, err := client.GetNetworkInfo(ctx)
+				Expect(err).To(BeNil())
+				Expect(netInfo.RelayFee).Should(BeNumerically(">=", 0))
 			})
 		})
 	})
@@ -113,10 +116,7 @@ var _ = Describe("bitcoin client", func() {
 			indexer := btctest.RegtestIndexer()
 
 			By("New address")
-			privKey, err := btcec.NewPrivateKey()
-			Expect(err).To(BeNil())
-			pubKey := privKey.PubKey()
-			pkAddr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
+			privKey, pkAddr, err := btctest.NewBtcKey(network)
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
@@ -135,7 +135,7 @@ var _ = Describe("bitcoin client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
@@ -176,7 +176,7 @@ var _ = Describe("bitcoin client", func() {
 				},
 			}
 
-			transaction1, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients1, btc.P2pkhUpdater, pkAddr)
+			transaction1, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients1, pkAddr)
 			Expect(err).To(BeNil())
 			for i := range transaction1.TxIn {
 				pkScript, err := txscript.PayToAddrScript(pkAddr)
@@ -186,7 +186,7 @@ var _ = Describe("bitcoin client", func() {
 				Expect(err).To(BeNil())
 				transaction1.TxIn[i].SignatureScript = sigScript
 			}
-			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
+			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
@@ -197,15 +197,9 @@ var _ = Describe("bitcoin client", func() {
 
 			By("Initialization keys ")
 			network := &chaincfg.RegressionNetParams
-			privKey1, err := btcec.NewPrivateKey()
+			privKey1, pkAddr1, err := btctest.NewBtcKey(network)
 			Expect(err).To(BeNil())
-			pubKey1 := privKey1.PubKey()
-			pkAddr1, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey1.SerializeCompressed()), network)
-			Expect(err).To(BeNil())
-			privKey2, err := btcec.NewPrivateKey()
-			Expect(err).To(BeNil())
-			pubKey2 := privKey2.PubKey()
-			pkAddr2, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey2.SerializeCompressed()), network)
+			_, pkAddr2, err := btctest.NewBtcKey(network)
 			Expect(err).To(BeNil())
 			client, err := btctest.RegtestClient()
 			Expect(err).To(BeNil())
@@ -227,7 +221,7 @@ var _ = Describe("bitcoin client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(feeRate, network, btc.NewRawInputs(), utxos, recipients, btc.P2pkhUpdater, pkAddr1)
+			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
