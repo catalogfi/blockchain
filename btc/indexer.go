@@ -27,18 +27,21 @@ const (
 )
 
 type Transaction struct {
-	TxID   string    `json:"txid"`
-	VINs   []VIN     `json:"vin"`
-	VOUTs  []Prevout `json:"vout"`
-	Status Status    `json:"status"`
+	TxID     string    `json:"txid"`
+	Version  int       `json:"version"`
+	LockTime int       `json:"lock_time"`
+	VINs     []VIN     `json:"vin"`
+	VOUTs    []Prevout `json:"vout"`
+	Status   Status    `json:"status"`
 }
 
 type VIN struct {
-	TxID         string    `json:"txid"`
-	Vout         int       `json:"vout"`
-	Prevout      Prevout   `json:"prevout"`
-	ScriptSigAsm string    `json:"scriptsig_asm"`
-	Witness      *[]string `json:"witness" `
+	TxID      string    `json:"txid"`
+	Vout      int       `json:"vout"`
+	Prevout   Prevout   `json:"prevout"`
+	ScriptSig string    `json:"scriptsig"`
+	Witness   *[]string `json:"witness"`
+	Sequence  int       `json:"sequence"`
 }
 
 type Prevout struct {
