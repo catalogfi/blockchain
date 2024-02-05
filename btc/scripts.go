@@ -12,6 +12,17 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+var (
+	// MaxmiumHtlcSize is the maximum size of an HTLC script. It assumes each public key hash is 20 bytes and the secret
+	// hash is 32 bytes. Details calculation is
+	//      OpCode * 13 + PublicKeyHash *2 + SecretHash + timelock(maximum 65535)
+	MaxmiumHtlcSize = 13 + (20+1)*2 + (32 + 1) + (3 + 1)
+
+	// NormalHtlcSize is a more accurate way to estimate the htlc script size, since the timelock will be between
+	// [128, 32767] most of our use cases.
+	NormalHtlcSize = 13 + (20+1)*2 + (32 + 1) + (2 + 1)
+)
+
 var ErrInvalidLockTime = fmt.Errorf("invalid lock-time")
 
 // MultisigScript generates a 2-out-2 multisig script.
