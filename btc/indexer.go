@@ -55,6 +55,7 @@ type Status struct {
 	Confirmed   bool   `json:"confirmed"`
 	BlockHeight uint64 `json:"block_height"`
 	BlockHash   string `json:"block_hash"`
+	BlockTime   uint64 `json:"block_time"`
 }
 
 // IndexerClient provides some rpc functions which usually cannot be achieved by the standard bitcoin json-rpc methods.

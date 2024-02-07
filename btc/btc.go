@@ -61,15 +61,10 @@ var (
 type UTXOs []UTXO
 
 type UTXO struct {
-	TxID   string      `json:"txid"`
-	Vout   uint32      `json:"vout"`
-	Amount int64       `json:"value"`
-	Status *UtxoStatus `json:"status"`
-}
-
-type UtxoStatus struct {
-	Confirmed   bool   `json:"confirmed"`
-	BlockHeight uint64 `json:"block_height"`
+	TxID   string  `json:"txid"`
+	Vout   uint32  `json:"vout"`
+	Amount int64   `json:"value"`
+	Status *Status `json:"status"`
 }
 
 type Recipient struct {
