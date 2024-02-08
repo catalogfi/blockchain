@@ -72,14 +72,19 @@ var _ = Describe("bitcoin client", func() {
 				By("GetBlockByHash()")
 				blockHash, err := chainhash.NewHashFromStr(rawTx.BlockHash)
 				Expect(err).To(BeNil())
-				blockByHash, err := client.GetBlockByHash(ctx, blockHash)
+				block, err := client.GetBlock(ctx, blockHash)
 				Expect(err).To(BeNil())
-				Expect(blockByHash.Hash).Should(Equal(rawTx.BlockHash))
+				Expect(block.Hash).Should(Equal(rawTx.BlockHash))
 
-				By("GetBlockByHeight()")
-				blockByHeight, err := client.GetBlockByHeight(ctx, blockByHash.Height)
+				By("GetBlockHash()")
+				bHash, err := client.GetBlockHash(ctx, block.Height)
 				Expect(err).To(BeNil())
-				Expect(*blockByHeight).Should(Equal(*blockByHash))
+				Expect(bHash).Should(Equal(rawTx.BlockHash))
+
+				By("GetBlockVerbose()")
+				blockVerbose, err := client.GetBlockVerbose(ctx, blockHash)
+				Expect(err).To(BeNil())
+				Expect(blockVerbose.Hash).Should(Equal(rawTx.BlockHash))
 
 				By("GetTxOut()")
 				vout := 0
@@ -278,15 +283,21 @@ var _ = Describe("bitcoin client", func() {
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
-			By("GetBlockByHash()")
+			By("GetBlock()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
-			_, err = client.GetBlockByHash(ctx, hash)
+			_, err = client.GetBlock(ctx, hash)
+			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			cancel()
+
+			By("GetBlockVerbose()")
+			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+			_, err = client.GetBlockVerbose(ctx, hash)
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
 			By("GetBlockByHeight()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
-			_, err = client.GetBlockByHeight(ctx, 1)
+			_, err = client.GetBlockHash(ctx, 1)
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
