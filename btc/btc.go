@@ -206,14 +206,16 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 
 	// Keep adding utxos until we have enough funds to cover the output amount
 	for _, utxo := range utxos {
+		// Skip dust utxo
+		if utxo.Amount < int64(minUtxoValue) {
+			continue
+		}
+
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return nil, err
 		}
 		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
-		if utxo.Amount <= int64(minUtxoValue) {
-			return nil, fmt.Errorf("utxo amount is not set")
-		}
 		totalIn += utxo.Amount
 		if sizeUpdater != nil {
 			additionalBaseSize, additionalSegwitSize := sizeUpdater()
