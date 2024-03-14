@@ -22,12 +22,12 @@ const (
 var (
 	// RedeemHtlcRefundSigScriptSize is an estimate of the sigScript size when refunding an htlc script
 	// stack number + stack size * 4 + signature + public key + script size
-	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + 89
+	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + NormalHtlcSize
 
 	// RedeemHtlcRedeemSigScriptSize is an estimate of the sigScript size when redeeming an htlc script
 	// stack number + stack size * 5 + signature + public key + secret + script size
 	RedeemHtlcRedeemSigScriptSize = func(secretSize int) int {
-		return 1 + 5 + 73 + 33 + secretSize + +1 + 89
+		return 1 + 5 + 73 + 33 + secretSize + +1 + NormalHtlcSize
 	}
 
 	// RedeemMultisigSigScriptSize is an estimate of the sigScript size from an 2-of-2 multisig script

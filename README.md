@@ -61,30 +61,125 @@ Example:
 
 ### Fee estimator
 
+There're a few commonly used fee estimator for you to give you an estimate of the current network. Beware these are 
+mostly for mainnet, as min relay fees usually is enough for testnet and regnet. 
+> The result is in `sats/vB`
+
 Example:
 
 ```go
-    // Mempool
+    // Mempool uses the mempool's public fee estimation api (https://mempool.space/docs/api/rest#get-recommended-fees). 
+    // It returns currently suggested fees for new transactions. It's safe for concurrent use and you can define a 
+    // duration for how long you want to cache the result to avoid spamming the requests.
     estimator := btc.NewMempoolFeeEstimator(&chaincfg.MainNetParams, btc.MempoolFeeAPI, 15*time.Second)
     fees, err := estimator.FeeSuggestion()
     if err != nil {
         panic(err)
     }
     
-    // Blockstream
+    // Blockstream uses the blockstream api and returns a fee estimation basing on the past blocks. 
     estimator := btc.NewBlockstreamFeeEstimator(&chaincfg.MainNetParams, btc.BlockstreamAPI, 15*time.Second)
     fees, err := estimator.FeeSuggestion()
     if err != nil {
         panic(err)
     } 
     
-    // Fixed fee estimator
+    // If you know the exact fee rate you want, you can use the FixedFeeEstimator which will always returns the provided 
+    // fee rate. 
     estimator := btc.NewFixedFeeEstimator(10)
     fees, err := estimator.FeeSuggestion()
     if err != nil {
         panic(err)
     }
 ```
+
+### Build a bitcoin transaction 
+
+One of the important use case for this library is to build a bitcoin transaction. We use the `BuildTransaction` function 
+to do this most of time. Don't be scared by the number of parameters of this function. These parameters can be divided 
+into three categories. 
+
+1. General 
+- `network` is the network where this tx is built on. 
+- `feeRate` is a minimum feeRate you want to use for the tx. Usually the actual tx will be a little over the feeRate due 
+  to the estimation will always use the upperbound. 
+2. Inputs 
+- `inputs` are the utxos you want to spend in the tx, this means they are guaranteed to be included in the tx. You'll 
+  need to provide the estimate size of these utxos. Use the default value `NewRawInputs()` if you don't have any utxo 
+  want to be specified
+- `utxos` is the available utxos we can add to the inputs if the `inputs` amount is not enough to cover the output. 
+  It simply adds the utxo with the given order from the list. Use the `nil` value if you don't have this. 
+- `sizeUpdater` describes how much sizes each of the `utxos` will add to the tx. It assumes all the `utxos` are coming 
+  from the same address. There are predefined `sizeUpdate` for you to grab and use. i.e. `P2pkhUpdater` and `P2wpkhUpdater`
+  Use the `nil` value if `utxos` is nil. 
+3. Outputs
+- `recipients` defines who will receive the funds, like the `inputs`, all the recipients will be guaranteed to receive
+  the provided amount. 
+- `changeAddr` is where you want to send the change to. Usually this will be the sender's address and the change will be
+  sent back to him.
+
+Some examples
+
+1. Transfer 0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
+```go
+    // Fetch available utxos of the address 
+    utxos, err := indexer.GetUTXOs(ctx, sender)
+	if err != nil {
+	    panic(err)	
+    }
+    recipients := []btc.Recipient{
+        {
+            To:     "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+            Amount: 1e7,
+        },
+    }
+	
+    transaction, err := btc.BuildTransaction(&chaincfg.MainNetParams, 20, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, sender)
+    Expect(err).To(BeNil())
+```
+
+2. Spend an utxo and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
+
+```go
+
+    rawInputs := btc.RawInputs{
+        VIN:        utxos,
+        BaseSize:   txsizes.RedeemP2PKHSigScriptSize * len(utxos),
+        SegwitSize: 0,
+    }
+	sender := "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+	
+    transaction, err := btc.BuildTransaction(&chaincfg.MainNetParams, 20, rawInputs, nil, nil, nil, sender)
+    Expect(err).To(BeNil())
+```
+
+3. Redeem an htcl and send  0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` and rest to sender
+
+```go
+    htlcUtxos := []btc.UTXO{
+        {
+            TxID:   txid,
+            Vout:   vout,
+            Amount: amount,
+        },
+    }
+    rawInputs := btc.RawInputs{
+        VIN:        htlcUtxos,
+        BaseSize:   0,
+        SegwitSize: btc.RedeemHtlcRefundSigScriptSize,
+    }
+    recipients := []btc.Recipient{
+        {
+            To:     "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+            Amount: 1e7,
+        },
+    }
+	
+    transaction, err := btc.BuildTransaction(&chaincfg.MainNetParams, 20, rawInputs, nil, nil, recipients, sender)
+    Expect(err).To(BeNil())
+```
+
+
 
 ### Bitcoin scripts
 

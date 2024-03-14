@@ -1,50 +1,76 @@
 package btctest
 
 import (
+	crand "crypto/rand"
+	"fmt"
+	"math/rand"
+	"os"
+	"os/exec"
+	"strings"
+
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/testutil"
-	"go.uber.org/zap"
+	"github.com/fatih/color"
 )
 
-// RegtestClient initialises a btc.Client could be used with a local regression testnet.
-// This uses some default setting of the client options and assumes all ENVs exist and not null.
-func RegtestClient() (btc.Client, error) {
-	user := testutil.ParseStringEnv("BTC_USER", "")
-	password := testutil.ParseStringEnv("BTC_PASSWORD", "")
-	config := &rpcclient.ConnConfig{
-		Params:       chaincfg.RegressionNetParams.Name,
-		Host:         "0.0.0.0:18443",
-		User:         user,
-		Pass:         password,
-		HTTPPostMode: true,
-		DisableTLS:   true,
-	}
-	return btc.NewClient(config)
-}
-
-func RegtestIndexer() btc.IndexerClient {
-	logger, err := zap.NewDevelopment()
-	if err != nil {
-		panic(err)
-	}
-	url := testutil.ParseStringEnv("BTC_INDEXER_ELECTRS_REGNET", "")
-	return btc.NewElectrsIndexerClient(logger, url, btc.DefaultRetryInterval)
-}
+const (
+	DefaultRegtestHost = "0.0.0.0:18443"
+)
 
 // NewBtcKey generates a new bitcoin private key.
-func NewBtcKey(network *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressPubKeyHash, error) {
+func NewBtcKey(network *chaincfg.Params, addrType waddrmgr.AddressType) (*btcec.PrivateKey, btcutil.Address, error) {
 	key, err := btcec.NewPrivateKey()
 	if err != nil {
 		return nil, nil, err
 	}
-	pubKey := key.PubKey()
-	addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
+	addr, err := btc.PublicKeyAddress(network, addrType, key.PubKey())
 	if err != nil {
 		return nil, nil, err
 	}
 	return key, addr, nil
+}
+
+// RandomSecret creates a random secret with size [1,32)
+func RandomSecret() []byte {
+	length := rand.Intn(31) + 1
+	data := make([]byte, length)
+
+	_, err := crand.Read(data)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
+// NigiriFaucet funds the given address using the `nigiri faucet` command. It will transfer 1 BTC to the target address
+// and automatically generate a new block for the tx. It returns the txid of the funding transaction.
+func NigiriFaucet(addr string) (*chainhash.Hash, error) {
+	res, err := RunOutput("nigiri", "faucet", addr)
+	if err != nil {
+		return nil, err
+	}
+	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "txId:"))
+	color.Green(fmt.Sprintf("Funding address1 %v , txid = %v", addr, txid))
+	return chainhash.NewHashFromStr(txid)
+}
+
+// NigiriNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
+// confirmations. It uses the `nigiri faucet` command to generate a new block, the receiver address is a dummy address
+// which shouldn't affect our testing
+func NigiriNewBlock() error {
+	addr := "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
+	_, err := RunOutput("nigiri", "faucet", addr)
+	return err
+}
+
+// RunOutput the command and catch the output
+func RunOutput(name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	return cmd.Output()
 }

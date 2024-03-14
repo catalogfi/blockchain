@@ -27,18 +27,21 @@ const (
 )
 
 type Transaction struct {
-	TxID   string    `json:"txid"`
-	VINs   []VIN     `json:"vin"`
-	VOUTs  []Prevout `json:"vout"`
-	Status Status    `json:"status"`
+	TxID     string    `json:"txid"`
+	Version  int       `json:"version"`
+	LockTime int       `json:"lock_time"`
+	VINs     []VIN     `json:"vin"`
+	VOUTs    []Prevout `json:"vout"`
+	Status   Status    `json:"status"`
 }
 
 type VIN struct {
-	TxID         string    `json:"txid"`
-	Vout         int       `json:"vout"`
-	Prevout      Prevout   `json:"prevout"`
-	ScriptSigAsm string    `json:"scriptsig_asm"`
-	Witness      *[]string `json:"witness" `
+	TxID      string    `json:"txid"`
+	Vout      int       `json:"vout"`
+	Prevout   Prevout   `json:"prevout"`
+	ScriptSig string    `json:"scriptsig"`
+	Witness   *[]string `json:"witness"`
+	Sequence  int       `json:"sequence"`
 }
 
 type Prevout struct {
@@ -49,9 +52,12 @@ type Prevout struct {
 }
 
 type Status struct {
-	Confirmed   bool   `json:"confirmed"`
-	BlockHeight uint64 `json:"block_height"`
-	BlockHash   string `json:"block_hash"`
+	Confirmed bool `json:"confirmed"`
+
+	// Following fields will be non-nil when `Confirmed` is true
+	BlockHeight *uint64 `json:"block_height"`
+	BlockHash   *string `json:"block_hash"`
+	BlockTime   *uint64 `json:"block_time"`
 }
 
 // IndexerClient provides some rpc functions which usually cannot be achieved by the standard bitcoin json-rpc methods.

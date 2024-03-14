@@ -17,6 +17,6 @@ jobs:
             - name: generate test generate coverage
               run: go test ./... -coverprofile=./cover.out
               env:
-                  BTC_USER: "admin1"
-                  BTC_PASSWORD: "123"
-                  BTC_INDEXER_ELECTRS_REGNET: "http://0.0.0.0:30000"
+                  BTC_REGNET_USERNAME: "admin1"
+                  BTC_REGNET_PASSWORD: "123"
+                  BTC_REGNET_INDEXER: "http://0.0.0.0:30000"
