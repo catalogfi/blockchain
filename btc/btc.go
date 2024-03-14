@@ -1,27 +1,25 @@
 package btc
 
 import (
-	"crypto/sha512"
-	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
-	"golang.org/x/crypto/pbkdf2"
 )
 
 const (
-	// DefaultBTCVersion is the Bitcoin transaction version used by this package. Some script operations are only
+	// DefaultTxVersion is the Bitcoin transaction version used by this package. Some script operations are only
 	// supported in version 2.
-	DefaultBTCVersion = 2
+	DefaultTxVersion = 2
 
 	// DustAmount is the minimum transaction amount accepted by Bitcoin miners.
 	DustAmount = 546
@@ -72,26 +70,6 @@ type Recipient struct {
 	Amount int64  `json:"amount"`
 }
 
-func GenerateSystemPrivKey(mnemonic string, userPubkeyHex []byte) (*btcec.PrivateKey, error) {
-	seed := pbkdf2.Key([]byte(mnemonic), append([]byte("mnemonic"), userPubkeyHex...), 2048, 64, sha512.New)
-	var masterKey *hdkeychain.ExtendedKey
-	var err error
-	for {
-		// Network parameter doesn't affect key generation, so we use mainnet params here.
-		masterKey, err = hdkeychain.NewMaster(seed, &chaincfg.MainNetParams)
-		if err != nil {
-			// Very small chance to happen
-			if errors.Is(err, hdkeychain.ErrUnusableSeed) {
-				continue
-			}
-			return nil, err
-		}
-		break
-	}
-
-	return masterKey.ECPrivKey()
-}
-
 type RawInputs struct {
 	VIN        []UTXO
 	BaseSize   int
@@ -106,14 +84,14 @@ func NewRawInputs() RawInputs {
 	}
 }
 
-// BuildTransaction is helper function for building a bitcoin transaction. It uses the given `feeRate` to calculate
+// BuildTransaction is a helper function for building a bitcoin transaction. It uses the given `feeRate` to calculate
 // fees. `inputs` will be a list of utxos that required to be included in the transaction, it comes with the base and
 // segwit size of the signature for fee-estimation purpose. `utxos` is a list of transaction will be picked
 // to cover the output amount and fees. We assume the utxos all comes from a single address. The `sizeUpdater` function
 // returns the base and segwit size of each utxo from the `utxos`. If there's any change, it will be sent back to the
 // `changeAddr`.
 func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx := wire.NewMsgTx(DefaultBTCVersion)
+	tx := wire.NewMsgTx(DefaultTxVersion)
 	totalIn, totalOut := int64(0), int64(0)
 	base, segwit := inputs.BaseSize, inputs.SegwitSize
 
@@ -236,6 +214,8 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 	return nil, fmt.Errorf("funds not enough")
 }
 
+// BuildRbfTransaction is similar to `BuildTransaction`, the only difference is it updates the sequence of all the tx
+// inputs to `mempool.MaxRBFSequence`, so the tx is RBF-compatible.
 func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx, err := BuildTransaction(network, feeRate, inputs, utxos, sizeUpdater, recipients, changeAddr)
 	if err != nil {
@@ -245,4 +225,44 @@ func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs
 		tx.TxIn[i].Sequence = mempool.MaxRBFSequence
 	}
 	return tx, nil
+}
+
+// SignP2pkhTx is a helper function to sign inputs from a p2pkh address. It uses `txscript.SigHashAll` and compressed
+// public key as default.
+func SignP2pkhTx(network *chaincfg.Params, key *btcec.PrivateKey, tx *wire.MsgTx) error {
+	addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
+	if err != nil {
+		return err
+	}
+	for i := range tx.TxIn {
+		pkScript, err := txscript.PayToAddrScript(addr)
+		if err != nil {
+			return err
+		}
+
+		sigScript, err := txscript.SignatureScript(tx, i, pkScript, txscript.SigHashAll, key, true)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[i].SignatureScript = sigScript
+	}
+	return nil
+}
+
+// PublicKeyAddress is a helper function which calculates the address of the given public key. This function only
+// supports address types are derived from a public key.
+func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, pub *btcec.PublicKey) (btcutil.Address, error) {
+	switch addrType {
+	case waddrmgr.RawPubKey:
+		return btcutil.NewAddressPubKey(pub.SerializeCompressed(), network)
+	case waddrmgr.PubKeyHash:
+		return btcutil.NewAddressPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
+	case waddrmgr.WitnessPubKey:
+		return btcutil.NewAddressWitnessPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
+	case waddrmgr.TaprootPubKey:
+		tapKey := txscript.ComputeTaprootKeyNoScript(pub)
+		return btcutil.NewAddressTaproot(schnorr.SerializePubKey(tapKey), network)
+	default:
+		return nil, fmt.Errorf("unsupported address type")
+	}
 }

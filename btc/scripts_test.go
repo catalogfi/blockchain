@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
-	"github.com/catalogfi/blockchain/testutil"
 	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -24,24 +23,18 @@ import (
 var _ = Describe("Bitcoin scripts", func() {
 	Context("Multisig script", func() {
 		It("should create a multisig script and can be used by user", func(ctx context.Context) {
-			By("Initialization (Update these fields if testing on testnet/mainnet)")
-			network := &chaincfg.RegressionNetParams
-			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network)
+			By("Initialise keys")
+			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network)
+			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
-			client, err := btctest.RegtestClient()
-			Expect(err).To(BeNil())
-			indexer := btctest.RegtestIndexer()
 
 			By("Funding the addresses")
-			txhash1, err := testutil.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
-			txhash2, err := testutil.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			_, err = btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address2 %v , txid = %v", p2pkhAddr2.EncodeAddress(), txhash2))
 			time.Sleep(5 * time.Second)
 
 			By("Create the multisig script using both public keys")
@@ -118,21 +111,17 @@ var _ = Describe("Bitcoin scripts", func() {
 	Context("HTLC script", func() {
 		It("should create a HTLC script and redeem it using secret", func(ctx context.Context) {
 			By("Initialization (Update these fields if testing on testnet/mainnet)")
-			network := &chaincfg.RegressionNetParams
-			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network)
+			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network)
+			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
-			client, err := btctest.RegtestClient()
-			Expect(err).To(BeNil())
-			indexer := btctest.RegtestIndexer()
 
 			By("Funding the addresses")
-			txhash1, err := testutil.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			txhash1, err := btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
-			txhash2, err := testutil.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			txhash2, err := btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address2 %v , txid = %v", p2pkhAddr2.EncodeAddress(), txhash2))
 			time.Sleep(5 * time.Second)
@@ -173,7 +162,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			time.Sleep(time.Second)
 
 			By("Construct a tx which transferring funds from multisig to the HTLC")
-			secret := testutil.RandomSecret()
+			secret := btctest.RandomSecret()
 			secretHash := sha256.Sum256(secret)
 			waitTime := int64(6)
 			// pk1 can redeem the funds after expiry
@@ -186,7 +175,7 @@ var _ = Describe("Bitcoin scripts", func() {
 				Vout:   0,
 				Amount: amount,
 			}
-			transferTx := wire.NewMsgTx(btc.DefaultBTCVersion)
+			transferTx := wire.NewMsgTx(btc.DefaultTxVersion)
 			txID, err := chainhash.NewHashFromStr(inputUtxo.TxID)
 			Expect(err).To(BeNil())
 			transferTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txID, inputUtxo.Vout), nil, nil))
@@ -252,23 +241,17 @@ var _ = Describe("Bitcoin scripts", func() {
 
 		It("should create a HTLC script and refund from it after timelock", func(ctx context.Context) {
 			By("Initialization (Update these fields if testing on testnet/mainnet)")
-			network := &chaincfg.RegressionNetParams
-			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network)
+			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network)
+			privKey2, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
-			client, err := btctest.RegtestClient()
-			Expect(err).To(BeNil())
-			indexer := btctest.RegtestIndexer()
 
 			By("Funding the addresses")
-			txhash1, err := testutil.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
-			txhash2, err := testutil.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			_, err = btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address2 %v , txid = %v", p2pkhAddr2.EncodeAddress(), txhash2))
 			time.Sleep(5 * time.Second)
 
 			By("Create the multi-sig address using both public keys")
@@ -307,7 +290,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			time.Sleep(time.Second)
 
 			By("Construct a tx which transferring funds from multisig to the HTLC")
-			secret := testutil.RandomSecret()
+			secret := btctest.RandomSecret()
 			secretHash := sha256.Sum256(secret)
 			waitTime := int64(6)
 			// pk1 can redeem the funds after expiry
@@ -320,7 +303,7 @@ var _ = Describe("Bitcoin scripts", func() {
 				Vout:   0,
 				Amount: amount,
 			}
-			transferTx := wire.NewMsgTx(btc.DefaultBTCVersion)
+			transferTx := wire.NewMsgTx(btc.DefaultTxVersion)
 			txID, err := chainhash.NewHashFromStr(inputUtxo.TxID)
 			Expect(err).To(BeNil())
 			transferTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txID, inputUtxo.Vout), nil, nil))
@@ -359,7 +342,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			By("Mine some blocks")
 			for i := int64(0); i < waitTime-1; i++ {
-				Expect(testutil.NigiriNewBlock()).Should(Succeed())
+				Expect(btctest.NigiriNewBlock()).Should(Succeed())
 			}
 			time.Sleep(time.Second)
 
@@ -395,13 +378,13 @@ var _ = Describe("Bitcoin scripts", func() {
 			Expect(err.Error()).Should(ContainSubstring("non-BIP68-final"))
 
 			By("Mine a new block and we should be able to submit the htlc spend tx")
-			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.NigiriNewBlock()).Should(Succeed())
 			time.Sleep(time.Second)
 
 			err = client.SubmitTx(ctx, htlcSpendTx)
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Htlc SpendTx tx hash = %v", color.YellowString(htlcSpendTx.TxHash().String())))
-			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.NigiriNewBlock()).Should(Succeed())
 		})
 	})
 
@@ -409,15 +392,14 @@ var _ = Describe("Bitcoin scripts", func() {
 		Context("Wait time", func() {
 			It("should check the opCode", func() {
 				By("Initialization")
-				network := &chaincfg.RegressionNetParams
-				privKey1, _, err := btctest.NewBtcKey(network)
+				privKey1, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				privKey2, _, err := btctest.NewBtcKey(network)
+				privKey2, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
 				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 				By("Testing different waitTime values")
-				secret := testutil.RandomSecret()
+				secret := btctest.RandomSecret()
 				secretHash := sha256.Sum256(secret)
 				for i := int64(1); i <= int64(16); i++ {
 					htlcScript, err := btc.HtlcScript(btcutil.Hash160(pubKey1.SerializeCompressed()), btcutil.Hash160(pubKey2.SerializeCompressed()), secretHash[:], i)
@@ -432,15 +414,14 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			It("should reject number too big", func() {
 				By("Initialization")
-				network := &chaincfg.RegressionNetParams
-				privKey1, _, err := btctest.NewBtcKey(network)
+				privKey1, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				privKey2, _, err := btctest.NewBtcKey(network)
+				privKey2, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
 				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 				By("Manually construct the htlc script")
-				secret := testutil.RandomSecret()
+				secret := btctest.RandomSecret()
 				secretHash := sha256.Sum256(secret)
 				waitTime := int64(math.MaxUint16 + 1)
 				htlcScript, err := txscript.NewScriptBuilder().
@@ -468,15 +449,14 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			It("should reject if the opCode is not valid", func() {
 				By("Initialization")
-				network := &chaincfg.RegressionNetParams
-				privKey1, _, err := btctest.NewBtcKey(network)
+				privKey1, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				privKey2, _, err := btctest.NewBtcKey(network)
+				privKey2, _, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
 				pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 				By("Manually construct the htlc script")
-				secret := testutil.RandomSecret()
+				secret := btctest.RandomSecret()
 				secretHash := sha256.Sum256(secret)
 				waitTime := int64(math.MaxUint32)
 				htlcScript, err := txscript.NewScriptBuilder().
