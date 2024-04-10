@@ -38,11 +38,14 @@ type Client interface {
 	// GetRawTransaction returns the raw transaction of the given hash.
 	GetRawTransaction(ctx context.Context, hash *chainhash.Hash) (*btcjson.TxRawResult, error)
 
-	// GetBlockByHeight returns the block detail of the given height.
-	GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error)
+	// GetBlockHash returns the block hash of the given height.
+	GetBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error)
 
-	// GetBlockByHash returns the block detail with the given hash.
-	GetBlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
+	// GetBlock returns the block detail with the given hash.
+	GetBlock(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
+
+	// GetBlockVerbose returns the block detail with the given hash. It has more detailed info about txs than `GetBlock`
+	GetBlockVerbose(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error)
 
 	// GetTxOut returns details about an unspent transaction output. It will return nil result if the utxo has been
 	// spent.
@@ -207,7 +210,7 @@ func (client *client) GetRawTransaction(ctx context.Context, txhash *chainhash.H
 	}
 }
 
-func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
+func (client *client) GetBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
 	future := client.rpcClient.GetBlockHashAsync(height)
 	results := make(chan *chainhash.Hash, 1)
 	errs := make(chan error, 1)
@@ -229,13 +232,39 @@ func (client *client) GetBlockByHeight(ctx context.Context, height int64) (*btcj
 	case err := <-errs:
 		return nil, err
 	case hash := <-results:
-		return client.GetBlockByHash(ctx, hash)
+		return hash, nil
 	}
 }
 
-func (client *client) GetBlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+func (client *client) GetBlock(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
 	future := client.rpcClient.GetBlockVerboseAsync(hash)
 	results := make(chan *btcjson.GetBlockVerboseResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetBlockByHash : %w", ctx.Err())
+	case err := <-errs:
+		return nil, err
+	case result := <-results:
+		return result, nil
+	}
+}
+
+func (client *client) GetBlockVerbose(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error) {
+	future := client.rpcClient.GetBlockVerboseTxAsync(hash)
+	results := make(chan *btcjson.GetBlockVerboseTxResult, 1)
 	errs := make(chan error, 1)
 	go func() {
 		defer close(results)

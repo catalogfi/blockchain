@@ -13,9 +13,9 @@ import (
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
-	"github.com/catalogfi/blockchain/testutil"
 	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,7 +27,7 @@ var _ = Describe("bitcoin client", func() {
 		It("should return an error if providing an unknown chain params", func() {
 			config := &rpcclient.ConnConfig{
 				Params:       "",
-				Host:         "0.0.0.0:18443",
+				Host:         btctest.DefaultRegtestHost,
 				HTTPPostMode: true,
 				DisableTLS:   true,
 			}
@@ -38,15 +38,7 @@ var _ = Describe("bitcoin client", func() {
 
 	Context("regression local testnet", func() {
 		Context("when using the Client", func() {
-			It("should be able to get all the data without any error", func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				defer cancel()
-
-				By("Initialise a local regnet client")
-				network := &chaincfg.RegressionNetParams
-				client, err := btctest.RegtestClient()
-				Expect(err).To(BeNil())
-
+			It("should be able to get all the data without any error", func(ctx context.Context) {
 				By("Net()")
 				Expect(reflect.DeepEqual(client.Net(), &chaincfg.RegressionNetParams)).Should(BeTrue())
 
@@ -58,9 +50,9 @@ var _ = Describe("bitcoin client", func() {
 				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
 				By("Create a new tx")
-				addr, err := testutil.RandomBtcAddressP2PKH(network)
+				_, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				txid, err := testutil.NigiriFaucet(addr.EncodeAddress())
+				txid, err := btctest.NigiriFaucet(addr.EncodeAddress())
 				Expect(err).To(BeNil())
 				time.Sleep(500 * time.Millisecond)
 
@@ -72,14 +64,19 @@ var _ = Describe("bitcoin client", func() {
 				By("GetBlockByHash()")
 				blockHash, err := chainhash.NewHashFromStr(rawTx.BlockHash)
 				Expect(err).To(BeNil())
-				blockByHash, err := client.GetBlockByHash(ctx, blockHash)
+				block, err := client.GetBlock(ctx, blockHash)
 				Expect(err).To(BeNil())
-				Expect(blockByHash.Hash).Should(Equal(rawTx.BlockHash))
+				Expect(block.Hash).Should(Equal(rawTx.BlockHash))
 
-				By("GetBlockByHeight()")
-				blockByHeight, err := client.GetBlockByHeight(ctx, blockByHash.Height)
+				By("GetBlockHash()")
+				bHash, err := client.GetBlockHash(ctx, block.Height)
 				Expect(err).To(BeNil())
-				Expect(*blockByHeight).Should(Equal(*blockByHash))
+				Expect(bHash.String()).Should(Equal(rawTx.BlockHash))
+
+				By("GetBlockVerbose()")
+				blockVerbose, err := client.GetBlockVerbose(ctx, blockHash)
+				Expect(err).To(BeNil())
+				Expect(blockVerbose.Hash).Should(Equal(rawTx.BlockHash))
 
 				By("GetTxOut()")
 				vout := 0
@@ -105,24 +102,14 @@ var _ = Describe("bitcoin client", func() {
 	})
 
 	Context("errors", func() {
-		It("should return specific errors", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-
-			By("Initialise a local regnet client")
-			network := &chaincfg.RegressionNetParams
-			client, err := btctest.RegtestClient()
-			Expect(err).To(BeNil())
-			indexer := btctest.RegtestIndexer()
-
+		It("should return specific errors", func(ctx context.Context) {
 			By("New address")
-			privKey, pkAddr, err := btctest.NewBtcKey(network)
+			privKey, pkAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			txhash, err := testutil.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr.EncodeAddress(), txhash))
 			time.Sleep(5 * time.Second)
 
 			By("Construct a new tx")
@@ -139,14 +126,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
-			for i := range transaction.TxIn {
-				pkScript, err := txscript.PayToAddrScript(pkAddr)
-				Expect(err).To(BeNil())
-
-				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
-				Expect(err).To(BeNil())
-				transaction.TxIn[i].SignatureScript = sigScript
-			}
+			Expect(btc.SignP2pkhTx(network, privKey, transaction)).Should(Succeed())
 
 			By("Expect `ErrTxNotFound` before submitting the tx")
 			txid := transaction.TxHash()
@@ -163,7 +143,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).Should(BeNil())
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.NigiriNewBlock()).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = client.SubmitTx(ctx, transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
@@ -178,35 +158,26 @@ var _ = Describe("bitcoin client", func() {
 
 			transaction1, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			for i := range transaction1.TxIn {
-				pkScript, err := txscript.PayToAddrScript(pkAddr)
-				Expect(err).To(BeNil())
+			Expect(btc.SignP2pkhTx(network, privKey, transaction1)).Should(Succeed())
 
-				sigScript, err := txscript.SignatureScript(transaction1, i, pkScript, txscript.SigHashAll, privKey, true)
-				Expect(err).To(BeNil())
-				transaction1.TxIn[i].SignatureScript = sigScript
-			}
 			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
 
-		It("should return an error when the utxo has been spent", func() {
+		It("should return an error when the utxo has been spent", func(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
 			By("Initialization keys ")
 			network := &chaincfg.RegressionNetParams
-			privKey1, pkAddr1, err := btctest.NewBtcKey(network)
+			privKey1, pkAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			_, pkAddr2, err := btctest.NewBtcKey(network)
+			_, pkAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			client, err := btctest.RegtestClient()
-			Expect(err).To(BeNil())
-			indexer := btctest.RegtestIndexer()
 
 			By("Funding the addresses")
-			txhash1, err := testutil.NigiriFaucet(pkAddr1.EncodeAddress())
+			txhash1, err := btctest.NigiriFaucet(pkAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
 			time.Sleep(5 * time.Second)
@@ -225,14 +196,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			for i := range transaction.TxIn {
-				pkScript, err := txscript.PayToAddrScript(pkAddr1)
-				Expect(err).To(BeNil())
-
-				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey1, true)
-				Expect(err).To(BeNil())
-				transaction.TxIn[i].SignatureScript = sigScript
-			}
+			Expect(btc.SignP2pkhTx(network, privKey1, transaction)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("Expect an error if the utxo is spent")
@@ -247,22 +211,17 @@ var _ = Describe("bitcoin client", func() {
 
 	Context("when the server is offline", func() {
 		It("should err out when the context is done", func() {
-			By("Stop nigiri before the test")
-			Expect(testutil.NigiriStop()).Should(Succeed())
-
-			By("Initialise a local regnet client")
-			network := &chaincfg.RegressionNetParams
-			user := testutil.ParseStringEnv("BTC_USER", "")
-			password := testutil.ParseStringEnv("BTC_PASSWORD", "")
+			By("Simulate a client pointing to a offline server")
 			config := &rpcclient.ConnConfig{
 				Params:       network.Name,
-				Host:         "0.0.0.0:18443",
-				User:         user,
-				Pass:         password,
+				Host:         "0.0.0.0:18444",
+				User:         btcUsername,
+				Pass:         btcPassword,
 				HTTPPostMode: true,
 				DisableTLS:   true,
 			}
 			client, err := btc.NewClient(config)
+			Expect(err).Should(BeNil())
 
 			By("LatestBlock()")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -278,15 +237,21 @@ var _ = Describe("bitcoin client", func() {
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
-			By("GetBlockByHash()")
+			By("GetBlock()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
-			_, err = client.GetBlockByHash(ctx, hash)
+			_, err = client.GetBlock(ctx, hash)
+			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			cancel()
+
+			By("GetBlockVerbose()")
+			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+			_, err = client.GetBlockVerbose(ctx, hash)
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
 			By("GetBlockByHeight()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
-			_, err = client.GetBlockByHeight(ctx, 1)
+			_, err = client.GetBlockHash(ctx, 1)
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
 
@@ -301,10 +266,6 @@ var _ = Describe("bitcoin client", func() {
 			err = client.SubmitTx(ctx, new(wire.MsgTx))
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
-
-			By("Restart nigiri for other test")
-			Expect(testutil.NigiriStart()).Should(Succeed())
-			time.Sleep(10 * time.Second)
 		})
 	})
 })

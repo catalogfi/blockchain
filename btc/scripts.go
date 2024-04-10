@@ -7,9 +7,19 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+)
+
+var (
+	// MaxmiumHtlcSize is the maximum size of an HTLC script. It assumes each public key hash is 20 bytes and the secret
+	// hash is 32 bytes. Details calculation is
+	//      OpCode * 13 + PublicKeyHash *2 + SecretHash + timelock(maximum 65535)
+	MaxmiumHtlcSize = 13 + (20+1)*2 + (32 + 1) + (3 + 1)
+
+	// NormalHtlcSize is a more accurate way to estimate the htlc script size, since the timelock will be between
+	// [128, 32767] most of our use cases.
+	NormalHtlcSize = 13 + (20+1)*2 + (32 + 1) + (2 + 1)
 )
 
 var ErrInvalidLockTime = fmt.Errorf("invalid lock-time")
@@ -105,27 +115,6 @@ func IsHtlc(script []byte) bool {
 	return tokenizer.Done()
 }
 
-// NewRefundTx is helper function to build the refund tx. It assumes the input has only one utxo which is the given
-// funding utxo, and the output will be the refundScript.
-func NewRefundTx(fundingUtxo UTXO, refundScript []byte) (*wire.MsgTx, error) {
-	refundTx := wire.NewMsgTx(DefaultBTCVersion)
-
-	// Input
-	txID, err := chainhash.NewHashFromStr(fundingUtxo.TxID)
-	if err != nil {
-		return nil, err
-	}
-	refundTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(txID, fundingUtxo.Vout), nil, nil))
-
-	// Output
-	payScript, err := WitnessScriptHash(refundScript)
-	if err != nil {
-		return nil, err
-	}
-	refundTx.AddTxOut(wire.NewTxOut(fundingUtxo.Amount, payScript))
-	return refundTx, nil
-}
-
 // MultisigWitness used for generating the witness script for spending a multisig utxo.
 func MultisigWitness(script, sigA, sigB []byte) wire.TxWitness {
 	witnessStack := wire.TxWitness(make([][]byte, 4))
@@ -165,34 +154,6 @@ func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
 	scriptHash := sha256.Sum256(witnessScript)
 	builder.AddData(scriptHash[:])
 	return builder.Script()
-}
-
-// ParseScriptSigP2PKH gets the signature and public key from a P2PKH scriptSig.
-func ParseScriptSigP2PKH(scriptSig []byte) ([]byte, []byte, error) {
-	// The scriptSig should be (length + （sig 70/71/72 + sighash） + length + pubkey)
-	switch len(scriptSig) {
-	case 1 + 71 + 1 + 33:
-		return scriptSig[1:72], scriptSig[73:], nil
-	case 1 + 72 + 1 + 33:
-		return scriptSig[1:73], scriptSig[74:], nil
-	case 1 + 73 + 1 + 33:
-		return scriptSig[1:74], scriptSig[75:], nil
-	default:
-		return nil, nil, fmt.Errorf("invalid script length %v", len(scriptSig))
-	}
-}
-
-// SpendingWitness loops through the txs of a particular address and return the spending witness of the address.
-// It will return a nil string slice if no spending tx is found.
-func SpendingWitness(address btcutil.Address, txs []Transaction) []string {
-	for _, tx := range txs {
-		for _, vin := range tx.VINs {
-			if vin.Prevout.ScriptPubKeyAddress == address.EncodeAddress() && vin.Witness != nil {
-				return *vin.Witness
-			}
-		}
-	}
-	return nil
 }
 
 // P2wshAddress returns the P2WSH address of the give script

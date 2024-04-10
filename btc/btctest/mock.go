@@ -16,12 +16,12 @@ import (
 type MockClient struct {
 	Client                btc.Client
 	FuncNet               func() *chaincfg.Params
-	FuncGetUTXOs          func(context.Context, btcutil.Address) (btc.UTXOs, error)
 	FuncLatestBlock       func(context.Context) (int64, string, error)
 	FuncSubmitTx          func(context.Context, *wire.MsgTx) error
 	FuncGetRawTransaction func(context.Context, *chainhash.Hash) (*btcjson.TxRawResult, error)
-	FuncGetBlockByHeight  func(context.Context, int64) (*btcjson.GetBlockVerboseResult, error)
-	FuncGetBlockByHash    func(context.Context, *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetBlockHash      func(context.Context, int64) (*chainhash.Hash, error)
+	FuncGetBlock          func(context.Context, *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
+	FuncGetBlockVerbose   func(context.Context, *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error)
 	FuncGetTxOut          func(context.Context, *chainhash.Hash, uint32) (*btcjson.GetTxOutResult, error)
 	FuncGetNetworkInfo    func(ctx context.Context) (*btcjson.GetNetworkInfoResult, error)
 }
@@ -67,18 +67,25 @@ func (m *MockClient) GetRawTransaction(ctx context.Context, txhash *chainhash.Ha
 	return m.Client.GetRawTransaction(ctx, txhash)
 }
 
-func (m *MockClient) GetBlockByHeight(ctx context.Context, height int64) (*btcjson.GetBlockVerboseResult, error) {
-	if m.FuncGetBlockByHeight != nil {
-		return m.FuncGetBlockByHeight(ctx, height)
+func (m *MockClient) GetBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
+	if m.FuncGetBlockHash != nil {
+		return m.FuncGetBlockHash(ctx, height)
 	}
-	return m.Client.GetBlockByHeight(ctx, height)
+	return m.Client.GetBlockHash(ctx, height)
 }
 
-func (m *MockClient) GetBlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
-	if m.FuncGetBlockByHash != nil {
-		return m.FuncGetBlockByHash(ctx, hash)
+func (m *MockClient) GetBlock(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+	if m.FuncGetBlock != nil {
+		return m.GetBlock(ctx, hash)
 	}
-	return m.Client.GetBlockByHash(ctx, hash)
+	return m.Client.GetBlock(ctx, hash)
+}
+
+func (m *MockClient) GetBlockVerbose(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error) {
+	if m.FuncGetBlockVerbose != nil {
+		return m.FuncGetBlockVerbose(ctx, hash)
+	}
+	return m.Client.GetBlockVerbose(ctx, hash)
 }
 
 func (m *MockClient) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error) {

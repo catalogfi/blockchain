@@ -8,12 +8,11 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
-	"github.com/catalogfi/blockchain/testutil"
 	"github.com/fatih/color"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -21,19 +20,15 @@ import (
 var _ = Describe("Indexer client", func() {
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
-			By("Initialise the electrs client")
-			network := &chaincfg.RegressionNetParams
-			client := btctest.RegtestIndexer()
-
 			By("GetUTXOs()")
 			key, err := btcec.NewPrivateKey()
 			Expect(err).To(BeNil())
 			addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			txid, err := testutil.NigiriFaucet(addr.EncodeAddress())
+			txid, err := btctest.NigiriFaucet(addr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
-			utxos, err := client.GetUTXOs(context.Background(), addr)
+			utxos, err := indexer.GetUTXOs(context.Background(), addr)
 			Expect(err).To(BeNil())
 			Expect(len(utxos)).Should(BeNumerically(">=", 1))
 			exist := false
@@ -46,12 +41,12 @@ var _ = Describe("Indexer client", func() {
 			Expect(exist).Should(BeTrue())
 
 			By("GetTipBlockHeight()")
-			tip, err := client.GetTipBlockHeight(context.Background())
+			tip, err := indexer.GetTipBlockHeight(context.Background())
 			Expect(err).To(BeNil())
 			Expect(tip).Should(BeNumerically(">=", 100))
 
 			By("GetTx()")
-			tx, err := client.GetTx(context.Background(), txid.String())
+			tx, err := indexer.GetTx(context.Background(), txid.String())
 			Expect(err).To(BeNil())
 			Expect(tx.TxID).Should(Equal(txid.String()))
 			Expect(tx.Status.Confirmed).Should(BeTrue())
@@ -77,11 +72,11 @@ var _ = Describe("Indexer client", func() {
 
 			By("FeeEstimate()")
 			By("    --local env should not have enough data for the estimate")
-			_, err = client.FeeEstimate(context.Background())
+			_, err = indexer.FeeEstimate(context.Background())
 			Expect(err.Error()).Should(ContainSubstring("not enough data"))
 
 			By("GetAddressTxs()")
-			txs, err := client.GetAddressTxs(context.Background(), addr, "")
+			txs, err := indexer.GetAddressTxs(context.Background(), addr, "")
 			Expect(err).To(BeNil())
 			has := false
 			for _, tx := range txs {
@@ -95,10 +90,6 @@ var _ = Describe("Indexer client", func() {
 
 	Context("errors", func() {
 		It("should return specific errors", func() {
-			By("Initialise a local regnet client")
-			network := &chaincfg.RegressionNetParams
-			indexer := btctest.RegtestIndexer()
-
 			By("New address")
 			privKey, err := btcec.NewPrivateKey()
 			Expect(err).To(BeNil())
@@ -107,9 +98,8 @@ var _ = Describe("Indexer client", func() {
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			txhash, err := testutil.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
-			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr.EncodeAddress(), txhash))
 			time.Sleep(5 * time.Second)
 
 			By("Construct a new tx")
@@ -139,7 +129,7 @@ var _ = Describe("Indexer client", func() {
 			time.Sleep(time.Second)
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(testutil.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.NigiriNewBlock()).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = indexer.SubmitTx(context.Background(), transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
