@@ -44,6 +44,18 @@ var _ = Describe("bitcoin fees", func() {
 				Expect(fees.High).Should(BeNumerically(">=", fees.Medium))
 			})
 
+			It("should return the live data from mempool for testnet", func() {
+				estimator := btc.NewMempoolFeeEstimator(&chaincfg.TestNet3Params, btc.MempoolFeeAPITestnet, 15*time.Second)
+				fees, err := estimator.FeeSuggestion()
+				Expect(err).Should(BeNil())
+
+				Expect(fees.Minimum).Should(BeNumerically(">=", 1))
+				Expect(fees.Economy).Should(BeNumerically(">=", 1))
+				Expect(fees.Low).Should(BeNumerically(">=", 1))
+				Expect(fees.Medium).Should(BeNumerically(">=", 1))
+				Expect(fees.High).Should(BeNumerically(">=", 1))
+			})
+
 			It("should use the cached result if the more requests are made during certain time period", func() {
 				estimator := btc.NewMempoolFeeEstimator(&chaincfg.MainNetParams, btc.MempoolFeeAPI, time.Second)
 				fees, err := estimator.FeeSuggestion()
@@ -64,26 +76,11 @@ var _ = Describe("bitcoin fees", func() {
 				Expect(err).Should(BeNil())
 			})
 
-			It("should return a fixed fee for non-mainnet network", func() {
-				By("Testnet")
-				estimatorTestnet := btc.NewMempoolFeeEstimator(&chaincfg.TestNet3Params, "", 15*time.Second)
-				fees, err := estimatorTestnet.FeeSuggestion()
-				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(1))
-				Expect(fees.Economy).Should(Equal(1))
-				Expect(fees.Low).Should(Equal(1))
-				Expect(fees.Medium).Should(Equal(1))
-				Expect(fees.High).Should(Equal(1))
-
+			It("should panic if the network is not testnet or mainnet", func() {
 				By("Regnet")
-				estimatorRegnet := btc.NewMempoolFeeEstimator(&chaincfg.RegressionNetParams, "", 15*time.Second)
-				fees, err = estimatorRegnet.FeeSuggestion()
-				Expect(err).Should(BeNil())
-				Expect(fees.Minimum).Should(Equal(1))
-				Expect(fees.Economy).Should(Equal(1))
-				Expect(fees.Low).Should(Equal(1))
-				Expect(fees.Medium).Should(Equal(1))
-				Expect(fees.High).Should(Equal(1))
+				PanicWith(func() {
+					_ = btc.NewMempoolFeeEstimator(&chaincfg.RegressionNetParams, "", 15*time.Second)
+				})
 			})
 		})
 

@@ -2,6 +2,7 @@ package btc
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"sync"
@@ -15,6 +16,8 @@ import (
 
 const (
 	MempoolFeeAPI = "https://mempool.space/api/v1/fees/recommended"
+
+	MempoolFeeAPITestnet = "https://mempool.space/testnet/api/v1/fees/recommended"
 
 	BlockstreamAPI = "https://blockstream.info/api/fee-estimates"
 )
@@ -88,6 +91,12 @@ type mempoolFeeEstimator struct {
 }
 
 func NewMempoolFeeEstimator(params *chaincfg.Params, url string, ttl time.Duration) FeeEstimator {
+	switch params.Name {
+	case chaincfg.MainNetParams.Name, chaincfg.TestNet3Params.Name:
+		// do nothing
+	default:
+		panic("unsupported network")
+	}
 	return &mempoolFeeEstimator{
 		params: params,
 		url:    url,
@@ -97,31 +106,29 @@ func NewMempoolFeeEstimator(params *chaincfg.Params, url string, ttl time.Durati
 }
 
 func (f *mempoolFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
-	if f.params.Name == "mainnet" && f.url != "" {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-
-		if f.lastTime.IsZero() || time.Since(f.lastTime) >= f.ttl {
-			resp, err := http.Get(f.url)
-			if err != nil {
-				return FeeSuggestion{}, err
-			}
-			defer resp.Body.Close()
-
-			var res FeeSuggestion
-			if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-				return FeeSuggestion{}, err
-			}
-			f.last = res
-			f.lastTime = time.Now()
-			return res, nil
-		}
-		return f.last, nil
-	} else {
-		return FeeSuggestion{
-			1, 1, 1, 1, 1,
-		}, nil
+	if f.url == "" {
+		return FeeSuggestion{}, errors.New("url is empty")
 	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.lastTime.IsZero() || time.Since(f.lastTime) >= f.ttl {
+		resp, err := http.Get(f.url)
+		if err != nil {
+			return FeeSuggestion{}, err
+		}
+		defer resp.Body.Close()
+
+		var res FeeSuggestion
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+			return FeeSuggestion{}, err
+		}
+		f.last = res
+		f.lastTime = time.Now()
+		return res, nil
+	}
+	return f.last, nil
 }
 
 type blockstreamFeeEstimator struct {
