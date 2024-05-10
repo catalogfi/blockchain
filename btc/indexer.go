@@ -110,13 +110,21 @@ func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address b
 	}
 
 	// Send the request
-	txs := []Transaction{}
+	var txs []Transaction
 	if err := retry(client.logger, ctx, client.retryInterval, func() error {
 		resp, err := http.Get(endpoint)
 		if err != nil {
 			return err
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetAddressTxs : %v", string(errMsg))
+		}
 
 		// Decode response
 		if err := json.NewDecoder(resp.Body).Decode(&txs); err != nil {
@@ -147,6 +155,14 @@ func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcuti
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetUTXOs : %v", string(errMsg))
+		}
+
 		// Decode response
 		if err := json.NewDecoder(resp.Body).Decode(&utxos); err != nil {
 			return fmt.Errorf("failed to decode UTXOs: %w", err)
@@ -173,6 +189,14 @@ func (client *electrsIndexerClient) GetTipBlockHeight(ctx context.Context) (uint
 			return err
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetTipBlockHeight : %v", string(errMsg))
+		}
 
 		// Decode response
 		data, err := io.ReadAll(resp.Body)
@@ -202,6 +226,14 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 			return err
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetTx : %v", string(errMsg))
+		}
 
 		// Decode response
 		if err := json.NewDecoder(resp.Body).Decode(&tx); err != nil {
@@ -271,6 +303,14 @@ func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggest
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("FeeEstimate : %v", string(errMsg))
+		}
+
 		feerates := map[string]float64{}
 		if err := json.NewDecoder(resp.Body).Decode(&fees); err != nil {
 			return err
@@ -307,7 +347,7 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 		logger.Debug("retrying", zap.Any("error", err.Error()))
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("%v: %v", ctx.Err(), err)
+			return fmt.Errorf("%v : %v", ctx.Err(), err)
 		case <-ticker.C:
 			err = f()
 		}
