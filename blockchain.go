@@ -67,16 +67,20 @@ type Chain interface {
 }
 
 func ChainFromName(name Name) Chain {
+	chain, err := ParseChainName(name)
+	if err != nil {
+		panic(err)
+	}
+	return chain
+}
+
+func ParseChainName(name Name) (Chain, error) {
 	switch name {
 	case Bitcoin, BitcoinTestnet, BitcoinRegtest:
-		return NewUtxoChain(name)
-	case Ethereum, EthereumSepolia, EthereumLocalnet:
-		return NewEvmChain(name)
-	case Arbitrum:
-		return NewEvmChain(name)
-	case PolygonZK, PolygonZKTestnet:
-		return NewEvmChain(name)
+		return NewUtxoChain(name), nil
+	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, PolygonZK, PolygonZKTestnet:
+		return NewEvmChain(name), nil
 	default:
-		panic(fmt.Errorf("unsupported chain = %v", name))
+		return nil, fmt.Errorf("unsupported chain = %v", name)
 	}
 }
