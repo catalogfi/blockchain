@@ -85,9 +85,9 @@ func RandomSecret() []byte {
 	return data
 }
 
-// MerryFaucet funds the given address using the `merry faucet` command. It will transfer 1 BTC to the target address
+// FundBTC funds the given address using the `merry faucet` command. It will transfer 1 BTC to the target address
 // and automatically generate a new block for the tx. It returns the txid of the funding transaction.
-func MerryFaucet(addr string) (*chainhash.Hash, error) {
+func FundBTC(addr string) (*chainhash.Hash, error) {
 	res, err := RunOutput("merry", "faucet", "--to", addr)
 	if err != nil {
 		return nil, err
@@ -97,10 +97,10 @@ func MerryFaucet(addr string) (*chainhash.Hash, error) {
 	return chainhash.NewHashFromStr(txid)
 }
 
-// MerryNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
+// MineBTCBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
 // confirmations. It uses the `merry faucet` command to generate a new block, the receiver address is a dummy address
 // which shouldn't affect our testing
-func MerryNewBlock() error {
+func MineBTCBlock() error {
 	addr := "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
 	_, err := RunOutput("merry", "faucet", "--to", addr)
 	return err
