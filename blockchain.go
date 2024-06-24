@@ -79,7 +79,7 @@ func ParseChainName(name Name) (Chain, error) {
 	switch name {
 	case Bitcoin, BitcoinTestnet, BitcoinRegtest:
 		return NewUtxoChain(name), nil
-	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, PolygonZK, PolygonZKTestnet:
+	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, ArbitrumLocalnet, PolygonZK, PolygonZKTestnet:
 		return NewEvmChain(name), nil
 	default:
 		return nil, fmt.Errorf("unsupported chain = %v", name)

@@ -1,4 +1,4 @@
-package btctest
+package mock
 
 import (
 	"context"
