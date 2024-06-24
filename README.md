@@ -5,7 +5,7 @@
 
 For any Catalog-related blockchain interactions, in Golang.
 -  [x] Bitcoin
--  [ ] Ethereum
+-  [x] Ethereum
 
 ## Install
 
