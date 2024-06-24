@@ -9,17 +9,12 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/catalogfi/blockchain"
-	"github.com/catalogfi/blockchain/evm"
+	"github.com/catalogfi/blockchain/localnet"
 )
 
 var _ = Describe("Client", func() {
 	It("should be able to build a client", func() {
-		client, err := evm.NewClient(evm.Config{
-			RPC: map[string]string{
-				string(blockchain.EthereumLocalnet): "http://127.0.0.1:8545",
-			},
-		})
-		Expect(err).Should(BeNil())
+		client := localnet.EVMClient()
 		evmClient, ok := client.EvmClient(blockchain.NewEvmChain(blockchain.EthereumLocalnet))
 		Expect(ok).Should(BeTrue())
 		chainID, err := evmClient.ChainID(context.Background())
@@ -29,12 +24,7 @@ var _ = Describe("Client", func() {
 
 	It("should be able to get balance", func() {
 		chain := blockchain.NewEvmChain(blockchain.EthereumLocalnet)
-		client, err := evm.NewClient(evm.Config{
-			RPC: map[string]string{
-				string(blockchain.EthereumLocalnet): "http://127.0.0.1:8545",
-			},
-		})
-		Expect(err).Should(BeNil())
+		client := localnet.EVMClient()
 		balance, err := client.Balance(context.Background(), blockchain.NewETH(chain, common.HexToAddress("")), common.HexToAddress("0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199"), nil)
 		Expect(err).Should(BeNil())
 		expectedBalance, ok := new(big.Int).SetString("10000000000000000000000", 10)
