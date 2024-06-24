@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/catalogfi/blockchain/localnet"
 	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,7 +27,7 @@ var _ = Describe("bitcoin client", func() {
 		It("should return an error if providing an unknown chain params", func() {
 			config := &rpcclient.ConnConfig{
 				Params:       "",
-				Host:         btctest.DefaultRegtestHost,
+				Host:         localnet.DefaultRegtestHost,
 				HTTPPostMode: true,
 				DisableTLS:   true,
 			}
@@ -50,9 +50,9 @@ var _ = Describe("bitcoin client", func() {
 				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
 				By("Create a new tx")
-				_, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+				_, addr, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				txid, err := btctest.NigiriFaucet(addr.EncodeAddress())
+				txid, err := localnet.FundBTC(addr.EncodeAddress())
 				Expect(err).To(BeNil())
 				time.Sleep(500 * time.Millisecond)
 
@@ -104,11 +104,11 @@ var _ = Describe("bitcoin client", func() {
 	Context("errors", func() {
 		It("should return specific errors", func(ctx context.Context) {
 			By("New address")
-			privKey, pkAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			privKey, pkAddr, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = localnet.FundBTC(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -143,7 +143,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).Should(BeNil())
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(localnet.MineBTCBlock()).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = client.SubmitTx(ctx, transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
@@ -171,13 +171,13 @@ var _ = Describe("bitcoin client", func() {
 
 			By("Initialization keys ")
 			network := &chaincfg.RegressionNetParams
-			privKey1, pkAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			privKey1, pkAddr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			_, pkAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, pkAddr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			txhash1, err := btctest.NigiriFaucet(pkAddr1.EncodeAddress())
+			txhash1, err := localnet.FundBTC(pkAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
 			time.Sleep(5 * time.Second)
