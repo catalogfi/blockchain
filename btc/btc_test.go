@@ -25,7 +25,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = btctest.MerryFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -66,7 +66,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = btctest.MerryFaucet(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -97,7 +97,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(btc.SignP2pkhTx(network, privKey, transaction)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 			By(color.GreenString("RBF tx hash = %v", transaction.TxHash().String()))
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.MerryNewBlock()).Should(Succeed())
 
 			By("Build a new tx with higher fee")
 			feeRate += 2

@@ -25,7 +25,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(err).To(BeNil())
 			addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
 			Expect(err).To(BeNil())
-			txid, err := btctest.NigiriFaucet(addr.EncodeAddress())
+			txid, err := btctest.MerryFaucet(addr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 			utxos, err := indexer.GetUTXOs(context.Background(), addr)
@@ -98,7 +98,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = btctest.MerryFaucet(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -129,7 +129,7 @@ var _ = Describe("Indexer client", func() {
 			time.Sleep(time.Second)
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.MerryNewBlock()).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = indexer.SubmitTx(context.Background(), transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())

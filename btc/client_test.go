@@ -52,7 +52,7 @@ var _ = Describe("bitcoin client", func() {
 				By("Create a new tx")
 				_, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
-				txid, err := btctest.NigiriFaucet(addr.EncodeAddress())
+				txid, err := btctest.MerryFaucet(addr.EncodeAddress())
 				Expect(err).To(BeNil())
 				time.Sleep(500 * time.Millisecond)
 
@@ -108,7 +108,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = btctest.MerryFaucet(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -143,7 +143,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).Should(BeNil())
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.MerryNewBlock()).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = client.SubmitTx(ctx, transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
@@ -177,7 +177,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			txhash1, err := btctest.NigiriFaucet(pkAddr1.EncodeAddress())
+			txhash1, err := btctest.MerryFaucet(pkAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", pkAddr1.EncodeAddress(), txhash1))
 			time.Sleep(5 * time.Second)

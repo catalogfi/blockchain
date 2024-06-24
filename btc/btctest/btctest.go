@@ -46,10 +46,10 @@ func RandomSecret() []byte {
 	return data
 }
 
-// NigiriFaucet funds the given address using the `nigiri faucet` command. It will transfer 1 BTC to the target address
+// MerryFaucet funds the given address using the `merry faucet` command. It will transfer 1 BTC to the target address
 // and automatically generate a new block for the tx. It returns the txid of the funding transaction.
-func NigiriFaucet(addr string) (*chainhash.Hash, error) {
-	res, err := RunOutput("nigiri", "faucet", addr)
+func MerryFaucet(addr string) (*chainhash.Hash, error) {
+	res, err := RunOutput("merry", "faucet", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -58,12 +58,12 @@ func NigiriFaucet(addr string) (*chainhash.Hash, error) {
 	return chainhash.NewHashFromStr(txid)
 }
 
-// NigiriNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
-// confirmations. It uses the `nigiri faucet` command to generate a new block, the receiver address is a dummy address
+// MerryNewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
+// confirmations. It uses the `merry faucet` command to generate a new block, the receiver address is a dummy address
 // which shouldn't affect our testing
-func NigiriNewBlock() error {
+func MerryNewBlock() error {
 	addr := "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
-	_, err := RunOutput("nigiri", "faucet", addr)
+	_, err := RunOutput("merry", "faucet", addr)
 	return err
 }
 

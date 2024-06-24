@@ -17,6 +17,7 @@ const (
 	EthereumSepolia  Name = "ethereum_sepolia"
 	EthereumLocalnet Name = "ethereum_localnet"
 	Arbitrum         Name = "arbitrum"
+	ArbitrumLocalnet Name = "arbitrum_localnet"
 	PolygonZK        Name = "polygonzk"
 	PolygonZKTestnet Name = "polygonzk_testnet"
 

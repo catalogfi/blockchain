@@ -30,7 +30,7 @@ func (chain EvmChain) Network() Network {
 		return NetworkTestnet
 	case EthereumSepolia, PolygonZKTestnet:
 		return NetworkMainnet
-	case EthereumLocalnet:
+	case EthereumLocalnet, ArbitrumLocalnet:
 		return NetworkLocalnet
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))
@@ -45,6 +45,8 @@ func (chain EvmChain) ChainID() *big.Int {
 		return big.NewInt(11155111)
 	case EthereumLocalnet:
 		return big.NewInt(31337)
+	case ArbitrumLocalnet:
+		return big.NewInt(31338)
 	case Arbitrum:
 		return big.NewInt(42161)
 	case PolygonZK:

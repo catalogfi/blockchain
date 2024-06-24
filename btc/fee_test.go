@@ -171,7 +171,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(addr1.EncodeAddress())
+			_, err = btctest.MerryFaucet(addr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -216,7 +216,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(txscript.IsPayToWitnessScriptHash(multisigWitnessScript)).Should(BeTrue())
 
 			By("Funding the multisig address")
-			_, err = btctest.NigiriFaucet(multisigAddr.EncodeAddress())
+			_, err = btctest.MerryFaucet(multisigAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -276,7 +276,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the multisig address")
-			txhash, err := btctest.NigiriFaucet(htlcAddr.EncodeAddress())
+			txhash, err := btctest.MerryFaucet(htlcAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding multisig %v , txid = %v", htlcAddr, txhash))
 			time.Sleep(5 * time.Second)
@@ -340,7 +340,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the multisig address")
-			txhash, err := btctest.NigiriFaucet(htlcAddr.EncodeAddress())
+			txhash, err := btctest.MerryFaucet(htlcAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding multisig %v , txid = %v", htlcAddr, txhash))
 			time.Sleep(5 * time.Second)
@@ -376,7 +376,7 @@ var _ = Describe("bitcoin fees", func() {
 
 			By("Mine some blocks")
 			for i := int64(0); i <= waitTime; i++ {
-				Expect(btctest.NigiriNewBlock()).Should(Succeed())
+				Expect(btctest.MerryNewBlock()).Should(Succeed())
 			}
 			time.Sleep(5 * time.Second)
 

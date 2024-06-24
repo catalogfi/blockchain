@@ -1,6 +1,6 @@
 # Test setup
 The test is mainly relying on local regression testnet. It's highly recommended to use 
-[nigiri](https://nigiri.vulpem.com/) to easily set up a local testing environment. The `testutil`
+[merry](https://merry.dev/) to easily set up a local testing environment. The `testutil`
 package has some helper functions to use in the tests. You can check out the `btc.go` file in the 
 `testutil` package for more details. 
 

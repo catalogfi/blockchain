@@ -31,9 +31,9 @@ var _ = Describe("Bitcoin scripts", func() {
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = btctest.MerryFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
-			_, err = btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			_, err = btctest.MerryFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -118,10 +118,10 @@ var _ = Describe("Bitcoin scripts", func() {
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 			By("Funding the addresses")
-			txhash1, err := btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			txhash1, err := btctest.MerryFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address1 %v , txid = %v", p2pkhAddr1.EncodeAddress(), txhash1))
-			txhash2, err := btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			txhash2, err := btctest.MerryFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding address2 %v , txid = %v", p2pkhAddr2.EncodeAddress(), txhash2))
 			time.Sleep(5 * time.Second)
@@ -248,9 +248,9 @@ var _ = Describe("Bitcoin scripts", func() {
 			pubKey1, pubKey2 := privKey1.PubKey(), privKey2.PubKey()
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = btctest.MerryFaucet(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
-			_, err = btctest.NigiriFaucet(p2pkhAddr2.EncodeAddress())
+			_, err = btctest.MerryFaucet(p2pkhAddr2.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -342,7 +342,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			By("Mine some blocks")
 			for i := int64(0); i < waitTime-1; i++ {
-				Expect(btctest.NigiriNewBlock()).Should(Succeed())
+				Expect(btctest.MerryNewBlock()).Should(Succeed())
 			}
 			time.Sleep(time.Second)
 
@@ -378,13 +378,13 @@ var _ = Describe("Bitcoin scripts", func() {
 			Expect(err.Error()).Should(ContainSubstring("non-BIP68-final"))
 
 			By("Mine a new block and we should be able to submit the htlc spend tx")
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.MerryNewBlock()).Should(Succeed())
 			time.Sleep(time.Second)
 
 			err = client.SubmitTx(ctx, htlcSpendTx)
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Htlc SpendTx tx hash = %v", color.YellowString(htlcSpendTx.TxHash().String())))
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(btctest.MerryNewBlock()).Should(Succeed())
 		})
 	})
 
