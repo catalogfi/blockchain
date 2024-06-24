@@ -13,7 +13,7 @@ jobs:
             - name: Install merry
               run: curl https://get.merry.dev | bash
             - name : Start merry
-              run: merry start
+              run: merry go
             - name: generate test generate coverage
               run: go test ./... -coverprofile=./cover.out
               env:
