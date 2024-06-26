@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
@@ -26,8 +27,12 @@ func EVMClient() evm.Client {
 		string(blockchain.EthereumLocalnet): "http://localhost:8545",
 		string(blockchain.ArbitrumLocalnet): "http://localhost:8546",
 	}})
-	if err != nil {
-		panic(fmt.Errorf("failed to create localnet client: %v", err))
+	for {
+		if err == nil {
+			break
+		}
+		fmt.Printf("failed to connect to localnet: %v, retrying after 5 secs\n", err)
+		time.Sleep(5 * time.Second)
 	}
 	return client
 }
