@@ -92,7 +92,7 @@ func FundBTC(addr string) (*chainhash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
-	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5000/tx/"))
+	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
 	color.Green(fmt.Sprintf("Funding address1 %v , txid = %v", addr, txid))
 	return chainhash.NewHashFromStr(txid)
 }
