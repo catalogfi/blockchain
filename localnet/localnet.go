@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/fatih/color"
+	"go.uber.org/zap"
 )
 
 func EVMClient() evm.Client {
@@ -64,6 +65,10 @@ func ArbitrumWBTC() blockchain.EVMAsset {
 const (
 	DefaultRegtestHost = "0.0.0.0:18443"
 )
+
+func BTCIndexer() btc.IndexerClient {
+	return btc.NewElectrsIndexerClient(zap.NewNop(), "http://127.0.0.1:30000", 5*time.Second)
+}
 
 // NewBtcKey generates a new bitcoin private key.
 func NewBtcKey(network *chaincfg.Params, addrType waddrmgr.AddressType) (*btcec.PrivateKey, btcutil.Address, error) {
