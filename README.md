@@ -23,7 +23,7 @@ This client follows the standard bitcoind JSON-RPC interface.
 Example:
 
 ```go
-    // Initialise the client.
+    // Initialize the client.
     config := &rpcclient.ConnConfig{
         Params:       chaincfg.RegressionNetParams.Name,
         Host:         "0.0.0.0:18443",
@@ -48,7 +48,7 @@ The indexer client follows the [electrs indexer API](https://github.com/blockstr
 Example:
 
 ```go
-    // Initialise the client.
+    // Initialize the client.
     logger, _ := zap.NewDevelopment()
     indexer := btc.NewElectrsIndexerClient(logger, host, btc.DefaultRetryInterval)
     
@@ -102,7 +102,7 @@ into three categories.
 1. General 
 - `network` is the network where this tx is built on. 
 - `feeRate` is a minimum feeRate you want to use for the tx. Usually the actual tx will be a little over the feeRate due 
-  to the estimation will always use the upperbound. 
+  to the estimation will always use the upper bound. 
 2. Inputs 
 - `inputs` are the utxos you want to spend in the tx, this means they are guaranteed to be included in the tx. You'll 
   need to provide the estimate size of these utxos. Use the default value `NewRawInputs()` if you don't have any utxo 
@@ -138,10 +138,9 @@ Some examples
     Expect(err).To(BeNil())
 ```
 
-2. Spend an utxo and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
+2. Spend an UTXO and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
 
 ```go
-
     rawInputs := btc.RawInputs{
         VIN:        utxos,
         BaseSize:   txsizes.RedeemP2PKHSigScriptSize * len(utxos),
@@ -153,7 +152,7 @@ Some examples
     Expect(err).To(BeNil())
 ```
 
-3. Redeem an htcl and send  0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` and rest to sender
+3. Redeem an HTLC and send  0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` and rest to sender
 
 ```go
     htlcUtxos := []btc.UTXO{
