@@ -138,7 +138,7 @@ Some examples
     Expect(err).To(BeNil())
 ```
 
-2. Spend an UTXO and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
+2. Spend a UTXO and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
 
 ```go
     rawInputs := btc.RawInputs{
