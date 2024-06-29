@@ -1,7 +1,9 @@
 package localnet
 
 import (
+	"crypto/ecdsa"
 	crand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -23,27 +25,63 @@ import (
 	"go.uber.org/zap"
 )
 
-func EVMClient() evm.Client {
-	client, err := evm.NewClient(evm.Config{RPC: map[string]string{
-		string(blockchain.EthereumLocalnet): "http://localhost:8545",
-		string(blockchain.ArbitrumLocalnet): "http://localhost:8546",
-	}})
-	for {
-		if err == nil {
-			break
-		}
-		fmt.Printf("failed to connect to localnet: %v, retrying after 5 secs\n", err)
-		time.Sleep(5 * time.Second)
-	}
-	return client
+var localnetKeys = []string{
+	"ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+	"59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+	"5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+	"7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
+	"47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
+	"8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
+	"92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
+	"4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356",
+	"dbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97",
+	"2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6",
 }
 
-func EVMWallet() evm.Wallet {
-	key, err := crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+var EVMLocalnetConfig = evm.Config{RPC: map[string]string{
+	string(blockchain.EthereumLocalnet): "http://localhost:8545",
+	string(blockchain.ArbitrumLocalnet): "http://localhost:8546",
+}}
+
+func ECDSAKey(i uint) *ecdsa.PrivateKey {
+	key, err := crypto.HexToECDSA(localnetKeys[i])
 	if err != nil {
-		panic(fmt.Errorf("failed to parse localnet privatekey: %v", err))
+		panic(err)
 	}
-	return evm.NewWallet(EVMClient(), key)
+	return key
+}
+
+func BTCECKey(i uint) *btcec.PrivateKey {
+	keyBytes, err := hex.DecodeString(localnetKeys[i])
+	if err != nil {
+		panic(err)
+	}
+	privKey, _ := btcec.PrivKeyFromBytes(keyBytes)
+	return privKey
+}
+
+func EVMHTLCWallet(i uint) (evm.HTLCWallet, error) {
+	client, err := EVMHTLCClient()
+	if err != nil {
+		return nil, err
+	}
+	return evm.NewHTLCWallet(client, ECDSAKey(i)), nil
+}
+
+func EVMHTLCClient() (evm.HTLCClient, error) {
+	return evm.NewHTLCClient(EVMLocalnetConfig)
+}
+
+func EVMClient() (evm.Client, error) {
+	return evm.NewClient(EVMLocalnetConfig)
+}
+
+func EVMWallet(i uint) (evm.Wallet, error) {
+	client, err := EVMClient()
+	if err != nil {
+		return nil, err
+	}
+	return evm.NewWallet(client, ECDSAKey(i)), nil
 }
 
 func ETH() blockchain.EVMAsset {

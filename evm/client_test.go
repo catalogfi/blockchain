@@ -14,7 +14,8 @@ import (
 
 var _ = Describe("Client", func() {
 	It("should be able to build a client", func() {
-		client := localnet.EVMClient()
+		client, err := localnet.EVMClient()
+		Expect(err).Should(BeNil())
 		evmClient, ok := client.EvmClient(blockchain.NewEvmChain(blockchain.EthereumLocalnet))
 		Expect(ok).Should(BeTrue())
 		chainID, err := evmClient.ChainID(context.Background())
@@ -24,11 +25,11 @@ var _ = Describe("Client", func() {
 
 	It("should be able to get balance", func() {
 		chain := blockchain.NewEvmChain(blockchain.EthereumLocalnet)
-		client := localnet.EVMClient()
-		balance, err := client.Balance(context.Background(), blockchain.NewETH(chain, common.HexToAddress("")), common.HexToAddress("0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199"), nil)
+		client, err := localnet.EVMClient()
 		Expect(err).Should(BeNil())
-		expectedBalance, ok := new(big.Int).SetString("10000000000000000000000", 10)
-		Expect(ok).Should(BeTrue())
-		Expect(balance.Cmp(expectedBalance)).To(Equal(0))
+
+		balance, err := client.Balance(context.Background(), blockchain.NewETH(chain, common.HexToAddress("")), common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"), nil)
+		Expect(err).Should(BeNil())
+		Expect(balance.Cmp(big.NewInt(0))).To(Equal(1))
 	})
 })

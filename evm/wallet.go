@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 
@@ -17,12 +18,17 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+var MaxETHAmount, _ = new(big.Int).SetString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+
 type wallet struct {
-	client     Client
+	Client
 	privateKey *ecdsa.PrivateKey
 }
 
 type Wallet interface {
+	Client
+
+	Address() common.Address
 	Send(ctx context.Context, asset blockchain.EVMAsset, to common.Address, amount *big.Int) (*types.Transaction, error)
 	SendAll(ctx context.Context, asset blockchain.EVMAsset, to common.Address) (*types.Transaction, error)
 }
@@ -30,9 +36,10 @@ type Wallet interface {
 type HTLCWallet interface {
 	Wallet
 
-	Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Transaction, error)
-	Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Transaction, error)
-	Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Transaction, error)
+	OrderID(secretHash [32]byte) [32]byte
+	Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Receipt, error)
+	Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Receipt, error)
+	Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Receipt, error)
 }
 
 type GardenWallet interface {
@@ -40,15 +47,19 @@ type GardenWallet interface {
 }
 
 func NewWallet(client Client, key *ecdsa.PrivateKey) Wallet {
-	return &wallet{client: client, privateKey: key}
+	return &wallet{Client: client, privateKey: key}
 }
 
-func NewHTLCWallet(client Client, key *ecdsa.PrivateKey) HTLCWallet {
-	return &wallet{client: client, privateKey: key}
+func NewHTLCWallet(client HTLCClient, key *ecdsa.PrivateKey) HTLCWallet {
+	return &wallet{Client: client, privateKey: key}
 }
 
 func NewGardenWallet(client Client, key *ecdsa.PrivateKey) GardenWallet {
-	return &wallet{client: client, privateKey: key}
+	return &wallet{Client: client, privateKey: key}
+}
+
+func (w *wallet) Address() common.Address {
+	return crypto.PubkeyToAddress(w.privateKey.PublicKey)
 }
 
 func (w *wallet) Send(ctx context.Context, asset blockchain.EVMAsset, to common.Address, amount *big.Int) (*types.Transaction, error) {
@@ -101,14 +112,22 @@ func (w *wallet) Send(ctx context.Context, asset blockchain.EVMAsset, to common.
 }
 
 func (w *wallet) SendAll(ctx context.Context, asset blockchain.EVMAsset, to common.Address) (*types.Transaction, error) {
-	balance, err := w.client.Balance(ctx, asset, crypto.PubkeyToAddress(w.privateKey.PublicKey), nil)
+	balance, err := w.Client.Balance(ctx, asset, crypto.PubkeyToAddress(w.privateKey.PublicKey), nil)
 	if err != nil {
 		return nil, err
 	}
 	return w.Send(ctx, asset, to, balance)
 }
 
-func (w *wallet) Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Transaction, error) {
+func (w *wallet) SignInitiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (w *wallet) OrderID(secretHash [32]byte) [32]byte {
+	return sha256.Sum256(append(secretHash[:], common.BytesToHash(w.Address().Bytes()).Bytes()...))
+}
+
+func (w *wallet) Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Receipt, error) {
 	client, tops, err := w.transactor(ctx, asset.Chain())
 	if err != nil {
 		return nil, err
@@ -119,16 +138,40 @@ func (w *wallet) Initiate(ctx context.Context, asset blockchain.EVMAsset, redeem
 		if err != nil {
 			return nil, err
 		}
-		if sig != nil {
-			return htlc.InitiateWithSignature(tops, redeemer, expiry, amount, secretHash, sig)
+		erc20, err := erc20.NewERC20(asset.Token, client)
+		if err != nil {
+			return nil, err
 		}
-		return htlc.Initiate(tops, redeemer, expiry, amount, secretHash)
+		allowance, err := erc20.Allowance(&bind.CallOpts{}, w.Address(), asset.Swapper())
+		if err != nil {
+			return nil, err
+		}
+		if allowance.Cmp(amount) < 0 {
+			tx, err := erc20.Approve(tops, asset.Swapper(), MaxETHAmount)
+			if err != nil {
+				return nil, err
+			}
+			_, err = bind.WaitMined(ctx, client, tx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var tx *types.Transaction
+		if sig != nil {
+			tx, err = htlc.InitiateWithSignature(tops, redeemer, expiry, amount, secretHash, sig)
+		} else {
+			tx, err = htlc.Initiate(tops, redeemer, expiry, amount, secretHash)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
 	default:
 		panic(fmt.Sprintf("unsupported asset type: %T", asset))
 	}
 }
 
-func (w *wallet) Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Transaction, error) {
+func (w *wallet) Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Receipt, error) {
 	client, tops, err := w.transactor(ctx, asset.Chain())
 	if err != nil {
 		return nil, err
@@ -139,13 +182,17 @@ func (w *wallet) Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID 
 		if err != nil {
 			return nil, err
 		}
-		return htlc.Redeem(tops, orderID, secret)
+		tx, err := htlc.Redeem(tops, orderID, secret)
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
 	default:
 		panic(fmt.Sprintf("unsupported asset type: %T", asset))
 	}
 }
 
-func (w *wallet) Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Transaction, error) {
+func (w *wallet) Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Receipt, error) {
 	client, tops, err := w.transactor(ctx, asset.Chain())
 	if err != nil {
 		return nil, err
@@ -156,17 +203,23 @@ func (w *wallet) Refund(ctx context.Context, asset blockchain.EVMAsset, orderID 
 		if err != nil {
 			return nil, err
 		}
+		var tx *types.Transaction
 		if sig != nil {
-			return htlc.InstantRefund(tops, orderID, sig)
+			tx, err = htlc.InstantRefund(tops, orderID, sig)
+		} else {
+			tx, err = htlc.Refund(tops, orderID)
 		}
-		return htlc.Refund(tops, orderID)
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
 	default:
 		panic(fmt.Sprintf("unsupported asset type: %T", asset))
 	}
 }
 
 func (w *wallet) transactor(ctx context.Context, chain blockchain.EvmChain) (*ethclient.Client, *bind.TransactOpts, error) {
-	client, ok := w.client.EvmClient(chain)
+	client, ok := w.Client.EvmClient(chain)
 	if !ok {
 		return nil, nil, fmt.Errorf("unsupported evm chain: %v", chain.Name())
 	}

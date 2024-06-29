@@ -24,6 +24,8 @@ type Client interface {
 
 type HTLCClient interface {
 	Client
+
+	HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error)
 }
 
 type Config struct {
@@ -31,6 +33,14 @@ type Config struct {
 }
 
 func NewClient(config Config) (Client, error) {
+	return newClient(config)
+}
+
+func NewHTLCClient(config Config) (HTLCClient, error) {
+	return newClient(config)
+}
+
+func newClient(config Config) (*client, error) {
 	evmClients := map[blockchain.EvmChain]*ethclient.Client{}
 	for chainName, rpc := range config.RPC {
 		chain, ok := blockchain.ChainFromName(blockchain.Name(strings.ToLower(chainName))).(blockchain.EvmChain)
@@ -46,7 +56,7 @@ func NewClient(config Config) (Client, error) {
 			return nil, err
 		}
 		if chainID.Cmp(chain.ChainID()) != 0 {
-			return nil, fmt.Errorf("invalid rpc url for: %v", chain.Name())
+			return nil, fmt.Errorf("invalid rpc url for: %v, chain id mismatch %v != %v", chain.Name(), chainID, chain.ChainID())
 		}
 		evmClients[chain] = client
 	}
