@@ -61,8 +61,8 @@ Example:
 
 ### Fee estimator
 
-There are a few commonly used fee estimators to give you an estimate of the current network. Beware these are 
-mostly for mainnet, as min relay fees usually is enough for testnet and regnet. 
+There are a few commonly used fee estimators to give you an estimate of the current network. Beware, these are 
+mostly for mainnet, as min relay fees usually is enough for testnet and regnet.
 > The result is in `sats/vB`
 
 Example:
@@ -95,17 +95,19 @@ Example:
 
 ### Build a bitcoin transaction 
 
-One important use case for this library is building a Bitcoin transaction. We typically use the BuildTransaction function for this purpose. Although this function has many parameters, they can be grouped into three categories: 
+One important use case for this library is building a Bitcoin transaction. We typically use the BuildTransaction function for this purpose. Although this function has many parameters, they can be grouped into three categories:
 
 1. General 
 - `network:` The network on which the transaction is built.
 - `feeRate:` The minimum fee rate for the transaction. The actual transaction fee might be slightly higher due to estimation using the upper bound.
-2. Inputs 
+  
+2. Inputs
 - `inputs:` The UTXOs (unspent transaction outputs) you want to spend in the transaction. These are guaranteed to be included. Provide the estimated size of these UTXOs. Use the default value `NewRawInputs()` if you don't have any specific UTXOs.
 - `utxos:` Available UTXOs that can be added to the inputs if their amount is insufficient to cover the output. The UTXOs are added in the order provided. Use `nil` if you don't have any. 
 - `sizeUpdater:` Describes how much size each UTXO adds to the transaction. It assumes all UTXOs come from the same address. Predefined size updaters like `P2pkhUpdater` and `P2wpkhUpdater` are available. Use `nil` if `utxos` is empty.
+  
 3. Outputs
-- `recipients:` Specifies who will receive the funds. All recipients are guaranteed to receive the specified amount. 
+- `recipients:` Specifies who will receive the funds. All recipients are guaranteed to receive the specified amount.
 - `changeAddr:` The address where you want to send the change, typically the sender's address.
 
 **Examples:**
