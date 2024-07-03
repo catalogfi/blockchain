@@ -3,14 +3,141 @@ package evm
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 
 	"github.com/catalogfi/blockchain"
 	"github.com/catalogfi/blockchain/evm/bindings/contracts/htlc/gardenhtlc"
+	"github.com/catalogfi/blockchain/evm/bindings/openzeppelin/contracts/token/ERC20/erc20"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
+
+type HTLCWallet interface {
+	Wallet
+
+	OrderID(secretHash [32]byte) [32]byte
+	Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Receipt, error)
+	Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Receipt, error)
+	Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Receipt, error)
+}
+
+type HTLCClient interface {
+	Client
+
+	HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error)
+}
+
+func NewHTLCClient(config Config) (HTLCClient, error) {
+	return newClient(config)
+}
+
+func NewHTLCWallet(client HTLCClient, key *ecdsa.PrivateKey) HTLCWallet {
+	return &wallet{Client: client, privateKey: key}
+}
+
+func (w *wallet) SignInitiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (w *wallet) OrderID(secretHash [32]byte) [32]byte {
+	return sha256.Sum256(append(secretHash[:], common.BytesToHash(w.Address().Bytes()).Bytes()...))
+}
+
+func (w *wallet) Initiate(ctx context.Context, asset blockchain.EVMAsset, redeemer common.Address, secretHash [32]byte, expiry *big.Int, amount *big.Int, sig []byte) (*types.Receipt, error) {
+	client, tops, err := w.transactor(ctx, asset.Chain())
+	if err != nil {
+		return nil, err
+	}
+	switch asset := asset.(type) {
+	case blockchain.ERC20:
+		htlc, err := gardenhtlc.NewGardenHTLC(asset.Swapper(), client)
+		if err != nil {
+			return nil, err
+		}
+		erc20, err := erc20.NewERC20(asset.Token, client)
+		if err != nil {
+			return nil, err
+		}
+		allowance, err := erc20.Allowance(&bind.CallOpts{}, w.Address(), asset.Swapper())
+		if err != nil {
+			return nil, err
+		}
+		if allowance.Cmp(amount) < 0 {
+			tx, err := erc20.Approve(tops, asset.Swapper(), MaxETHAmount)
+			if err != nil {
+				return nil, err
+			}
+			_, err = bind.WaitMined(ctx, client, tx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var tx *types.Transaction
+		if sig != nil {
+			tx, err = htlc.InitiateWithSignature(tops, redeemer, expiry, amount, secretHash, sig)
+		} else {
+			tx, err = htlc.Initiate(tops, redeemer, expiry, amount, secretHash)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
+	default:
+		panic(fmt.Sprintf("unsupported asset type: %T", asset))
+	}
+}
+
+func (w *wallet) Redeem(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, secret []byte) (*types.Receipt, error) {
+	client, tops, err := w.transactor(ctx, asset.Chain())
+	if err != nil {
+		return nil, err
+	}
+	switch asset := asset.(type) {
+	case blockchain.ERC20:
+		htlc, err := gardenhtlc.NewGardenHTLC(asset.Swapper(), client)
+		if err != nil {
+			return nil, err
+		}
+		tx, err := htlc.Redeem(tops, orderID, secret)
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
+	default:
+		panic(fmt.Sprintf("unsupported asset type: %T", asset))
+	}
+}
+
+func (w *wallet) Refund(ctx context.Context, asset blockchain.EVMAsset, orderID [32]byte, sig []byte) (*types.Receipt, error) {
+	client, tops, err := w.transactor(ctx, asset.Chain())
+	if err != nil {
+		return nil, err
+	}
+	switch asset := asset.(type) {
+	case blockchain.ERC20:
+		htlc, err := gardenhtlc.NewGardenHTLC(asset.Swapper(), client)
+		if err != nil {
+			return nil, err
+		}
+		var tx *types.Transaction
+		if sig != nil {
+			tx, err = htlc.InstantRefund(tops, orderID, sig)
+		} else {
+			tx, err = htlc.Refund(tops, orderID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return bind.WaitMined(ctx, client, tx)
+	default:
+		panic(fmt.Sprintf("unsupported asset type: %T", asset))
+	}
+}
 
 type HTLCEvent interface {
 	OrderID() [32]byte

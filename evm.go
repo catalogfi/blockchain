@@ -69,9 +69,26 @@ func (chain EvmChain) L2() bool {
 	}
 }
 
+type Asset interface {
+	Chain() Chain
+}
+
 type EVMAsset interface {
 	Swapper() common.Address
-	Chain() EvmChain
+	Chain() Chain
+}
+
+func ParseAsset(a string) (Asset, error) {
+	return ParseEVMAsset(a)
+}
+
+type UtxoAsset struct {
+	name  Name
+	chain Chain
+}
+
+func ParseBTCAsset(a string) (UtxoAsset, error) {
+	return UtxoAsset{}, nil
 }
 
 func ParseEVMAsset(a string) (EVMAsset, error) {
@@ -115,7 +132,7 @@ func (a ERC20) String() string {
 }
 
 func (a ERC20) Swapper() common.Address { return a.swapper }
-func (a ERC20) Chain() EvmChain         { return a.chain }
+func (a ERC20) Chain() Chain            { return a.chain }
 
 func NewETH(chain EvmChain, swapper common.Address) EVMAsset { return ETH{chain, swapper} }
 
@@ -125,7 +142,7 @@ type ETH struct {
 }
 
 func (a ETH) Swapper() common.Address { return a.swapper }
-func (a ETH) Chain() EvmChain         { return a.chain }
+func (a ETH) Chain() Chain            { return a.chain }
 func (a ETH) String() string {
 	return fmt.Sprintf("%s-%s", a.chain.name, a.swapper.Hex())
 }
@@ -142,7 +159,19 @@ func NewERC721(chain EvmChain, token, swapper common.Address) EVMAsset {
 }
 
 func (a ERC721) Swapper() common.Address { return a.swapper }
-func (a ERC721) Chain() EvmChain         { return a.chain }
+func (a ERC721) Chain() Chain            { return a.chain }
 func (a ERC721) String() string {
 	return fmt.Sprintf("%s-erc721-%s-%s", a.chain.name, a.Token.Hex(), a.swapper.Hex())
+}
+
+type BTC struct {
+	chain UtxoChain
+}
+
+func NewBTC(chain UtxoChain) UtxoAsset {
+	return UtxoAsset{name: chain.name, chain: chain}
+}
+
+func (a BTC) String() string {
+	return string(a.chain.Name())
 }
