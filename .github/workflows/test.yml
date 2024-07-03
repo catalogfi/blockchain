@@ -15,7 +15,7 @@ jobs:
             - name : Start merry
               run: merry go --bare --headless
             - name: generate test generate coverage
-              run: go test ./... -coverprofile=./cover.out
+              run: go test $(go list ./... | grep -v /localnet | grep -v /evm/bindings) -coverprofile=./cover.out
               env:
                   BTC_REGNET_USERNAME: "admin1"
                   BTC_REGNET_PASSWORD: "123"
