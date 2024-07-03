@@ -8,7 +8,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/catalogfi/blockchain/localnet"
 	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -19,13 +19,13 @@ var _ = Describe("Bitcoin", func() {
 	Context("RBF", func() {
 		It("should be able to build transaction which support rbf", func(ctx context.Context) {
 			By("Initialize keys and addresses")
-			privKey1, p2pkhAddr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			privKey1, p2pkhAddr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			_, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, p2pkhAddr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(p2pkhAddr1.EncodeAddress())
+			_, err = localnet.FundBTC(p2pkhAddr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -60,13 +60,13 @@ var _ = Describe("Bitcoin", func() {
 
 		It("should get an error when trying to replace a mined tx", func(ctx context.Context) {
 			By("Initialize keys and addresses")
-			privKey, pkAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			privKey, pkAddr, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			_, toAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, toAddr, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(pkAddr.EncodeAddress())
+			_, err = localnet.FundBTC(pkAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -97,7 +97,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(btc.SignP2pkhTx(network, privKey, transaction)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 			By(color.GreenString("RBF tx hash = %v", transaction.TxHash().String()))
-			Expect(btctest.NigiriNewBlock()).Should(Succeed())
+			Expect(localnet.MineBTCBlock()).Should(Succeed())
 
 			By("Build a new tx with higher fee")
 			feeRate += 2

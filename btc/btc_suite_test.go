@@ -7,7 +7,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
@@ -51,7 +51,7 @@ var _ = BeforeSuite(func() {
 	indexer = btc.NewElectrsIndexerClient(logger, indexerHost, btc.DefaultRetryInterval)
 	config := &rpcclient.ConnConfig{
 		Params:       chaincfg.RegressionNetParams.Name,
-		Host:         btctest.DefaultRegtestHost,
+		Host:         localnet.DefaultRegtestHost,
 		User:         btcUsername,
 		Pass:         btcPassword,
 		HTTPPostMode: true,

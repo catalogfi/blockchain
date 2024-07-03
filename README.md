@@ -5,7 +5,7 @@
 
 For any Catalog-related blockchain interactions, in Golang.
 -  [x] Bitcoin
--  [ ] Ethereum
+-  [x] Ethereum
 
 ## Install
 
@@ -23,7 +23,7 @@ This client follows the standard bitcoind JSON-RPC interface.
 Example:
 
 ```go
-    // Initialise the client.
+    // Initialize the client.
     config := &rpcclient.ConnConfig{
         Params:       chaincfg.RegressionNetParams.Name,
         Host:         "0.0.0.0:18443",
@@ -48,7 +48,7 @@ The indexer client follows the [electrs indexer API](https://github.com/blockstr
 Example:
 
 ```go
-    // Initialise the client.
+    // Initialize the client.
     logger, _ := zap.NewDevelopment()
     indexer := btc.NewElectrsIndexerClient(logger, host, btc.DefaultRetryInterval)
     
@@ -61,8 +61,8 @@ Example:
 
 ### Fee estimator
 
-There're a few commonly used fee estimator for you to give you an estimate of the current network. Beware these are 
-mostly for mainnet, as min relay fees usually is enough for testnet and regnet. 
+There are a few commonly used fee estimators to give you an estimate of the current network. Beware, these are 
+mostly for mainnet, as min relay fees usually is enough for testnet and regnet.
 > The result is in `sats/vB`
 
 Example:
@@ -84,7 +84,7 @@ Example:
         panic(err)
     } 
     
-    // If you know the exact fee rate you want, you can use the FixedFeeEstimator which will always returns the provided 
+    // If you know the exact fee rate you want, you can use the FixedFeeEstimator which will always return the provided 
     // fee rate. 
     estimator := btc.NewFixedFeeEstimator(10)
     fees, err := estimator.FeeSuggestion()
@@ -95,30 +95,22 @@ Example:
 
 ### Build a bitcoin transaction 
 
-One of the important use case for this library is to build a bitcoin transaction. We use the `BuildTransaction` function 
-to do this most of time. Don't be scared by the number of parameters of this function. These parameters can be divided 
-into three categories. 
+One important use case for this library is building a Bitcoin transaction. We typically use the BuildTransaction function for this purpose. Although this function has many parameters, they can be grouped into three categories:
 
 1. General 
-- `network` is the network where this tx is built on. 
-- `feeRate` is a minimum feeRate you want to use for the tx. Usually the actual tx will be a little over the feeRate due 
-  to the estimation will always use the upperbound. 
-2. Inputs 
-- `inputs` are the utxos you want to spend in the tx, this means they are guaranteed to be included in the tx. You'll 
-  need to provide the estimate size of these utxos. Use the default value `NewRawInputs()` if you don't have any utxo 
-  want to be specified
-- `utxos` is the available utxos we can add to the inputs if the `inputs` amount is not enough to cover the output. 
-  It simply adds the utxo with the given order from the list. Use the `nil` value if you don't have this. 
-- `sizeUpdater` describes how much sizes each of the `utxos` will add to the tx. It assumes all the `utxos` are coming 
-  from the same address. There are predefined `sizeUpdate` for you to grab and use. i.e. `P2pkhUpdater` and `P2wpkhUpdater`
-  Use the `nil` value if `utxos` is nil. 
+- `network:` The network on which the transaction is built.
+- `feeRate:` The minimum fee rate for the transaction. The actual transaction fee might be slightly higher due to estimation using the upper bound.
+  
+2. Inputs
+- `inputs:` The UTXOs (unspent transaction outputs) you want to spend in the transaction. These are guaranteed to be included. Provide the estimated size of these UTXOs. Use the default value `NewRawInputs()` if you don't have any specific UTXOs.
+- `utxos:` Available UTXOs that can be added to the inputs if their amount is insufficient to cover the output. The UTXOs are added in the order provided. Use `nil` if you don't have any. 
+- `sizeUpdater:` Describes how much size each UTXO adds to the transaction. It assumes all UTXOs come from the same address. Predefined size updaters like `P2pkhUpdater` and `P2wpkhUpdater` are available. Use `nil` if `utxos` is empty.
+  
 3. Outputs
-- `recipients` defines who will receive the funds, like the `inputs`, all the recipients will be guaranteed to receive
-  the provided amount. 
-- `changeAddr` is where you want to send the change to. Usually this will be the sender's address and the change will be
-  sent back to him.
+- `recipients:` Specifies who will receive the funds. All recipients are guaranteed to receive the specified amount.
+- `changeAddr:` The address where you want to send the change, typically the sender's address.
 
-Some examples
+**Examples:**
 
 1. Transfer 0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
 ```go
@@ -138,10 +130,9 @@ Some examples
     Expect(err).To(BeNil())
 ```
 
-2. Spend an utxo and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
+2. Spend a UTXO and send all the money to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`
 
 ```go
-
     rawInputs := btc.RawInputs{
         VIN:        utxos,
         BaseSize:   txsizes.RedeemP2PKHSigScriptSize * len(utxos),
@@ -153,7 +144,7 @@ Some examples
     Expect(err).To(BeNil())
 ```
 
-3. Redeem an htcl and send  0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` and rest to sender
+3. Redeem an HTLC and send  0.1 btc to `1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa` and rest to sender
 
 ```go
     htlcUtxos := []btc.UTXO{
@@ -178,8 +169,6 @@ Some examples
     transaction, err := btc.BuildTransaction(&chaincfg.MainNetParams, 20, rawInputs, nil, nil, recipients, sender)
     Expect(err).To(BeNil())
 ```
-
-
 
 ### Bitcoin scripts
 

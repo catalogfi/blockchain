@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/catalogfi/blockchain/localnet"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -165,13 +165,13 @@ var _ = Describe("bitcoin fees", func() {
 	Context("estimate transaction fees", func() {
 		It("should return a proper estimate of tx size for a simple transfer", func(ctx context.Context) {
 			By("Initialization keys")
-			key1, addr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key1, addr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			_, addr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, addr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Funding the addresses")
-			_, err = btctest.NigiriFaucet(addr1.EncodeAddress())
+			_, err = localnet.FundBTC(addr1.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -202,9 +202,9 @@ var _ = Describe("bitcoin fees", func() {
 
 		It("should return a proper estimate of tx size when spending multisig utxo", func(ctx context.Context) {
 			By("Initialization keys")
-			key1, addr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key1, addr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			key2, addr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key2, addr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Create the multisig script using both public keys")
@@ -216,7 +216,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(txscript.IsPayToWitnessScriptHash(multisigWitnessScript)).Should(BeTrue())
 
 			By("Funding the multisig address")
-			_, err = btctest.NigiriFaucet(multisigAddr.EncodeAddress())
+			_, err = localnet.FundBTC(multisigAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
@@ -261,13 +261,13 @@ var _ = Describe("bitcoin fees", func() {
 
 		It("should return a proper estimate of tx size when spending htlc utxo", func(ctx context.Context) {
 			By("Initialization keys")
-			key1, addr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key1, addr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			key2, addr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key2, addr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Create the htlc script using both public keys")
-			secret := btctest.RandomSecret()
+			secret := localnet.RandomSecret()
 			secretHash := sha256.Sum256(secret)
 			waitTime := int64(6)
 			htlc, err := btc.HtlcScript(btcutil.Hash160(key1.PubKey().SerializeCompressed()), btcutil.Hash160(key2.PubKey().SerializeCompressed()), secretHash[:], waitTime)
@@ -276,7 +276,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the multisig address")
-			txhash, err := btctest.NigiriFaucet(htlcAddr.EncodeAddress())
+			txhash, err := localnet.FundBTC(htlcAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding multisig %v , txid = %v", htlcAddr, txhash))
 			time.Sleep(5 * time.Second)
@@ -325,13 +325,13 @@ var _ = Describe("bitcoin fees", func() {
 
 		It("should return a proper estimate of tx size when refunding htlc utxo", func(ctx context.Context) {
 			By("Initialization keys")
-			key1, addr1, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key1, addr1, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			key2, addr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			key2, addr2, err := localnet.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
 
 			By("Create the htlc script using both public keys")
-			secret := btctest.RandomSecret()
+			secret := localnet.RandomSecret()
 			secretHash := sha256.Sum256(secret)
 			waitTime := int64(6)
 			htlc, err := btc.HtlcScript(btcutil.Hash160(key1.PubKey().SerializeCompressed()), btcutil.Hash160(key2.PubKey().SerializeCompressed()), secretHash[:], waitTime)
@@ -340,7 +340,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Funding the multisig address")
-			txhash, err := btctest.NigiriFaucet(htlcAddr.EncodeAddress())
+			txhash, err := localnet.FundBTC(htlcAddr.EncodeAddress())
 			Expect(err).To(BeNil())
 			By(fmt.Sprintf("Funding multisig %v , txid = %v", htlcAddr, txhash))
 			time.Sleep(5 * time.Second)
@@ -376,7 +376,7 @@ var _ = Describe("bitcoin fees", func() {
 
 			By("Mine some blocks")
 			for i := int64(0); i <= waitTime; i++ {
-				Expect(btctest.NigiriNewBlock()).Should(Succeed())
+				Expect(localnet.MineBTCBlock()).Should(Succeed())
 			}
 			time.Sleep(5 * time.Second)
 

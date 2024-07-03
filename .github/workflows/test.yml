@@ -10,10 +10,10 @@ jobs:
               uses : actions/setup-go@v4
               with :
                   go-version : '>=1.19.0'
-            - name: Install nigiri
-              run: curl https://getnigiri.vulpem.com | bash
-            - name : Start nigiri
-              run: nigiri start
+            - name: Install merry
+              run: curl https://get.merry.dev | bash
+            - name : Start merry
+              run: merry go --bare --headless
             - name: generate test generate coverage
               run: go test ./... -coverprofile=./cover.out
               env:
