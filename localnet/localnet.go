@@ -25,7 +25,15 @@ import (
 	"go.uber.org/zap"
 )
 
-var localnetKeys = []string{
+const (
+	DefaultRegtestHost    = "http://localhost:18443"
+	DefaultRegtestIndexer = "http://localhost:30000"
+	DefaultEthereumHost   = "http://localhost:8545"
+	DefaultArbitrumHost   = "http://localhost:8546"
+)
+
+// Privatekeys used by Anvil and Hardhat
+var LocalnetKeys = []string{
 	"ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
 	"59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
 	"5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
@@ -39,12 +47,12 @@ var localnetKeys = []string{
 }
 
 var EVMLocalnetConfig = evm.Config{RPC: map[string]string{
-	string(blockchain.EthereumLocalnet): "http://localhost:8545",
-	string(blockchain.ArbitrumLocalnet): "http://localhost:8546",
+	string(blockchain.EthereumLocalnet): DefaultEthereumHost,
+	string(blockchain.ArbitrumLocalnet): DefaultArbitrumHost,
 }}
 
 func ECDSAKey(i uint) *ecdsa.PrivateKey {
-	key, err := crypto.HexToECDSA(localnetKeys[i])
+	key, err := crypto.HexToECDSA(LocalnetKeys[i])
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +60,7 @@ func ECDSAKey(i uint) *ecdsa.PrivateKey {
 }
 
 func BTCECKey(i uint) *btcec.PrivateKey {
-	keyBytes, err := hex.DecodeString(localnetKeys[i])
+	keyBytes, err := hex.DecodeString(LocalnetKeys[i])
 	if err != nil {
 		panic(err)
 	}
@@ -100,12 +108,8 @@ func ArbitrumWBTC() blockchain.EVMAsset {
 	return blockchain.NewERC20(blockchain.NewEvmChain(blockchain.ArbitrumLocalnet), common.HexToAddress("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"), common.HexToAddress("0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"))
 }
 
-const (
-	DefaultRegtestHost = "0.0.0.0:18443"
-)
-
 func BTCIndexer() btc.IndexerClient {
-	return btc.NewElectrsIndexerClient(zap.NewNop(), "http://127.0.0.1:30000", 5*time.Second)
+	return btc.NewElectrsIndexerClient(zap.NewNop(), DefaultRegtestIndexer, 5*time.Second)
 }
 
 // NewBtcKey generates a new bitcoin private key.

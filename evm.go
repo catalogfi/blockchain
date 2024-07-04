@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -58,6 +59,19 @@ func (chain EvmChain) ChainID() *big.Int {
 	}
 }
 
+func (chain EvmChain) ValidateAddress(address string) error {
+	if len(address) == 42 {
+		address = address[2:]
+	}
+	if len(address) == 40 {
+		_, err := hex.DecodeString(address)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid address: %v", address)
+}
+
 func (chain EvmChain) L2() bool {
 	switch chain.name {
 	case Ethereum, EthereumSepolia, EthereumLocalnet:
@@ -69,26 +83,31 @@ func (chain EvmChain) L2() bool {
 	}
 }
 
-type Asset interface {
-	Chain() Chain
-}
-
 type EVMAsset interface {
+	Asset
+
 	Swapper() common.Address
-	Chain() Chain
 }
 
 func ParseAsset(a string) (Asset, error) {
 	return ParseEVMAsset(a)
 }
 
-type UtxoAsset struct {
-	name  Name
-	chain Chain
+type utxoAsset struct {
+	name  string
+	chain UtxoChain
+}
+
+func (a utxoAsset) String() string {
+	return string(a.name)
+}
+
+func (a utxoAsset) Chain() Chain {
+	return a.chain
 }
 
 func ParseBTCAsset(a string) (UtxoAsset, error) {
-	return UtxoAsset{}, nil
+	return utxoAsset{}, nil
 }
 
 func ParseEVMAsset(a string) (EVMAsset, error) {
@@ -164,14 +183,6 @@ func (a ERC721) String() string {
 	return fmt.Sprintf("%s-erc721-%s-%s", a.chain.name, a.Token.Hex(), a.swapper.Hex())
 }
 
-type BTC struct {
-	chain UtxoChain
-}
-
 func NewBTC(chain UtxoChain) UtxoAsset {
-	return UtxoAsset{name: chain.name, chain: chain}
-}
-
-func (a BTC) String() string {
-	return string(a.chain.Name())
+	return utxoAsset{name: "btc", chain: chain}
 }
