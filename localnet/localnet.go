@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	DefaultRegtestHost    = "http://localhost:18443"
+	DefaultRegtestHost    = "localhost:18443"
 	DefaultRegtestIndexer = "http://localhost:30000"
 	DefaultEthereumHost   = "http://localhost:8545"
 	DefaultArbitrumHost   = "http://localhost:8546"
