@@ -3,10 +3,12 @@ package btc_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -394,6 +396,53 @@ var _ = Describe("bitcoin fees", func() {
 			By(fmt.Sprintf("Txid = %v ,Estimated tx size = %v, actual tx size = %v", transaction.TxHash().String(), estimatedSize, actualSize))
 			Expect(estimatedSize - actualSize).Should(BeNumerically("<=", 10))
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
+		})
+	})
+	Context("estimate segwit transaction fees", func() {
+		It("should return a proper segwit fee for a simple transfer", func(ctx context.Context) {
+			By("Initialization Wallet")
+			pk, _, err := localnet.NewBtcKey(network, waddrmgr.WitnessPubKey)
+			Expect(err).To(BeNil())
+			fixedFeeEstimator := btc.NewFixFeeEstimator(10)
+
+			wallet, err := btc.NewSimpleWallet(pk, network, indexer, fixedFeeEstimator, btc.HighFee)
+			Expect(err).To(BeNil())
+
+			By("Fund the wallet")
+			_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
+			Expect(err).To(BeNil())
+
+			By("Build the request")
+			req := []btc.SendRequest{
+				{
+					To:     wallet.Address(),
+					Amount: 1e5,
+				},
+			}
+			txId, err := wallet.Send(ctx, req)
+
+			By("Rebuild submitted tx")
+			txHex, err := indexer.GetTxHex(ctx, txId)
+			Expect(err).To(BeNil())
+
+			txBytes, err := hex.DecodeString(txHex)
+			Expect(err).To(BeNil())
+
+			tx, err := btcutil.NewTxFromBytes(txBytes)
+			Expect(err).To(BeNil())
+
+			By("Estimate the fee")
+			estimatedFee, err := btc.EstimateSegwitFee(tx.MsgTx(), fixedFeeEstimator, btc.HighFee)
+			Expect(err).To(BeNil())
+
+			By("Verifying whether the estimated fee is used in the transaction")
+			transaction, err := indexer.GetTx(ctx, txId)
+			Expect(err).To(BeNil())
+
+			feeRates, err := fixedFeeEstimator.FeeSuggestion()
+			Expect(err).To(BeNil())
+			Expect(estimatedFee).Should(Equal(int((transaction.Weight / blockchain.WitnessScaleFactor) * feeRates.High)))
+
 		})
 	})
 })

@@ -1,6 +1,7 @@
 package localnet
 
 import (
+	"context"
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/hex"
@@ -147,6 +148,27 @@ func FundBTC(addr string) (*chainhash.Hash, error) {
 	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
 	color.Green(fmt.Sprintf("Funding address1 %v , txid = %v", addr, txid))
 	return chainhash.NewHashFromStr(txid)
+}
+
+// Funds 1 BTC to the given address and waits for the transaction to be indexed.
+func FundBitcoin(addr string, indexer btc.IndexerClient) (*chainhash.Hash, error) {
+
+	txHash, err := FundBTC(addr)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		_, err = indexer.GetTx(context.Background(), txHash.String())
+		if err == nil {
+			return txHash, nil
+		}
+		if err.Error() == "Transaction not found" {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		return txHash, err
+
+	}
 }
 
 // MineBTCBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with

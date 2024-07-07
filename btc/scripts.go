@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math"
+	"math/big"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -160,6 +162,48 @@ func WitnessScriptHash(witnessScript []byte) ([]byte, error) {
 func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, error) {
 	scriptHash := sha256.Sum256(script)
 	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
+}
+
+func GardenNUMS() (*btcec.PublicKey, error) {
+	// H value from BIP-341
+	xCoordHex := "0x50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
+
+	// Convert the x coordinate from hex to a big integer
+	xCoord, _ := new(big.Int).SetString(xCoordHex[2:], 16)
+
+	// Calculate the y coordinate for the given x coordinate
+	curve := btcec.S256()
+	yCoord := new(big.Int).ModSqrt(new(big.Int).Exp(xCoord, big.NewInt(3), curve.P), curve.P)
+	format := byte(0x03)
+	if yCoord.Bit(0) == 0 {
+		format = byte(0x02)
+	}
+
+	compressedH := append([]byte{format}, xCoord.Bytes()...)
+	H, err := btcec.ParsePubKey(compressedH[:])
+	if err != nil {
+		return nil, err
+	}
+
+	r := sha256.Sum256([]byte("GardenHTLC"))
+	_, rG := btcec.PrivKeyFromBytes(r[:])
+
+	numsX, numsY := curve.Add(H.X(), H.Y(), rG.X(), rG.Y())
+	if !curve.IsOnCurve(numsX, numsY) {
+		return nil, fmt.Errorf("invalid NUMS point")
+	}
+
+	formatNums := byte(0x03)
+	if numsY.Bit(0) == 0 {
+		formatNums = byte(0x02)
+	}
+
+	compressedNums := append([]byte{formatNums}, numsX.Bytes()...)
+	nums, err := btcec.ParsePubKey(compressedNums)
+	if err != nil {
+		panic(err)
+	}
+	return nums, nil
 }
 
 // modified from https://github.com/btcsuite/btcd/blob/4171854739fa2590a99c486341209d3aea8404dc/txscript/scriptnum.go#L198

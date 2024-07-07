@@ -2,6 +2,7 @@ package btc_test
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -40,6 +41,20 @@ var _ = Describe("Indexer client", func() {
 			}
 			Expect(exist).Should(BeTrue())
 
+			By("GetUTXOsForAmount()")
+			utxos, utxosValue, err := indexer.GetUTXOsForAmount(context.Background(), addr, 1e8)
+			Expect(err).To(BeNil())
+			Expect(utxosValue).Should(BeNumerically(">=", 1e8))
+			Expect(len(utxos)).Should(BeNumerically(">=", 1))
+			exist = false
+			for _, utxo := range utxos {
+				if utxo.TxID == txid.String() {
+					exist = true
+					break
+				}
+			}
+			Expect(exist).Should(BeTrue())
+
 			By("GetTipBlockHeight()")
 			tip, err := indexer.GetTipBlockHeight(context.Background())
 			Expect(err).To(BeNil())
@@ -50,6 +65,17 @@ var _ = Describe("Indexer client", func() {
 			Expect(err).To(BeNil())
 			Expect(tx.TxID).Should(Equal(txid.String()))
 			Expect(tx.Status.Confirmed).Should(BeTrue())
+
+			By("GetTxHex()")
+			txHex, err := indexer.GetTxHex(context.Background(), txid.String())
+			Expect(err).To(BeNil())
+			Expect(txHex).ShouldNot(BeEmpty())
+			txBytes, err := hex.DecodeString(txHex)
+			Expect(err).To(BeNil())
+			Expect(txBytes).ShouldNot(BeEmpty())
+			btcTx, err := btcutil.NewTxFromBytes(txBytes)
+			Expect(err).To(BeNil())
+			Expect(btcTx.MsgTx().TxHash().String()).Should(Equal(txid.String()))
 
 			By("SubmitTx()")
 			amount, feeRate := int64(1e6), 10
