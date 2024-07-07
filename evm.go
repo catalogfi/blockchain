@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -58,6 +59,19 @@ func (chain EvmChain) ChainID() *big.Int {
 	}
 }
 
+func (chain EvmChain) ValidateAddress(address string) error {
+	if len(address) == 42 {
+		address = address[2:]
+	}
+	if len(address) == 40 {
+		_, err := hex.DecodeString(address)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid address: %v", address)
+}
+
 func (chain EvmChain) L2() bool {
 	switch chain.name {
 	case Ethereum, EthereumSepolia, EthereumLocalnet:
@@ -70,8 +84,30 @@ func (chain EvmChain) L2() bool {
 }
 
 type EVMAsset interface {
+	Asset
+
 	Swapper() common.Address
-	Chain() EvmChain
+}
+
+func ParseAsset(a string) (Asset, error) {
+	return ParseEVMAsset(a)
+}
+
+type utxoAsset struct {
+	name  string
+	chain UtxoChain
+}
+
+func (a utxoAsset) String() string {
+	return string(a.name)
+}
+
+func (a utxoAsset) Chain() Chain {
+	return a.chain
+}
+
+func ParseBTCAsset(a string) (UtxoAsset, error) {
+	return utxoAsset{}, nil
 }
 
 func ParseEVMAsset(a string) (EVMAsset, error) {
@@ -115,7 +151,7 @@ func (a ERC20) String() string {
 }
 
 func (a ERC20) Swapper() common.Address { return a.swapper }
-func (a ERC20) Chain() EvmChain         { return a.chain }
+func (a ERC20) Chain() Chain            { return a.chain }
 
 func NewETH(chain EvmChain, swapper common.Address) EVMAsset { return ETH{chain, swapper} }
 
@@ -125,7 +161,7 @@ type ETH struct {
 }
 
 func (a ETH) Swapper() common.Address { return a.swapper }
-func (a ETH) Chain() EvmChain         { return a.chain }
+func (a ETH) Chain() Chain            { return a.chain }
 func (a ETH) String() string {
 	return fmt.Sprintf("%s-%s", a.chain.name, a.swapper.Hex())
 }
@@ -142,7 +178,11 @@ func NewERC721(chain EvmChain, token, swapper common.Address) EVMAsset {
 }
 
 func (a ERC721) Swapper() common.Address { return a.swapper }
-func (a ERC721) Chain() EvmChain         { return a.chain }
+func (a ERC721) Chain() Chain            { return a.chain }
 func (a ERC721) String() string {
 	return fmt.Sprintf("%s-erc721-%s-%s", a.chain.name, a.Token.Hex(), a.swapper.Hex())
+}
+
+func NewBTC(chain UtxoChain) UtxoAsset {
+	return utxoAsset{name: "btc", chain: chain}
 }

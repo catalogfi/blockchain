@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
@@ -53,4 +54,13 @@ func (chain UtxoChain) Params() *chaincfg.Params {
 	default:
 		panic("unknown utxoChain network")
 	}
+}
+
+func (chain UtxoChain) ValidateAddress(address string) error {
+	_, err := btcutil.DecodeAddress(address, chain.Params())
+	return err
+}
+
+type UtxoAsset interface {
+	Asset
 }

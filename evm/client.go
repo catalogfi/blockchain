@@ -19,13 +19,7 @@ type client struct {
 }
 type Client interface {
 	Balance(ctx context.Context, asset blockchain.EVMAsset, owner common.Address, blockNumber *big.Int) (*big.Int, error)
-	EvmClient(chain blockchain.EvmChain) (*ethclient.Client, bool)
-}
-
-type HTLCClient interface {
-	Client
-
-	HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error)
+	EvmClient(chain blockchain.Chain) (*ethclient.Client, bool)
 }
 
 type Config struct {
@@ -33,10 +27,6 @@ type Config struct {
 }
 
 func NewClient(config Config) (Client, error) {
-	return newClient(config)
-}
-
-func NewHTLCClient(config Config) (HTLCClient, error) {
 	return newClient(config)
 }
 
@@ -64,11 +54,10 @@ func newClient(config Config) (*client, error) {
 }
 
 func (client *client) Balance(ctx context.Context, asset blockchain.EVMAsset, owner common.Address, blockNumber *big.Int) (*big.Int, error) {
-	evmClient, ok := client.evmClients[asset.Chain()]
+	evmClient, ok := client.EvmClient(asset.Chain())
 	if !ok {
 		return nil, fmt.Errorf("unsupported chain: %v", asset.Chain().Name())
 	}
-
 	switch asset := asset.(type) {
 	case blockchain.ERC20:
 		caller, err := erc20.NewERC20Caller(asset.Token, evmClient)
@@ -89,7 +78,11 @@ func (client *client) Balance(ctx context.Context, asset blockchain.EVMAsset, ow
 	}
 }
 
-func (client *client) EvmClient(chain blockchain.EvmChain) (*ethclient.Client, bool) {
-	c, ok := client.evmClients[chain]
+func (client *client) EvmClient(chain blockchain.Chain) (*ethclient.Client, bool) {
+	ec, ok := chain.(blockchain.EvmChain)
+	if !ok {
+		return nil, ok
+	}
+	c, ok := client.evmClients[ec]
 	return c, ok
 }

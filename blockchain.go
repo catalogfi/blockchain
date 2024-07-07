@@ -65,6 +65,15 @@ type Chain interface {
 
 	// Network returns which network type of this chain.
 	Network() Network
+
+	// Validate address and return error if the address is invalid for the given chain
+	ValidateAddress(string) error
+}
+
+type Asset interface {
+	String() string
+
+	Chain() Chain
 }
 
 func ChainFromName(name Name) Chain {
