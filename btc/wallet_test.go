@@ -691,8 +691,8 @@ var _ = Describe("Wallets", Ordered, func() {
 		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
 		//Validate whether dave and bob received the right amount
-		Expect(tx.VOUTs[0].Value).Should(Equal(amount))
-		Expect(tx.VOUTs[1].Value).Should(Equal(amount))
+		Expect(tx.VOUTs[0].Value).Should(Equal(int(amount)))
+		Expect(tx.VOUTs[1].Value).Should(Equal(int(amount)))
 
 	})
 
