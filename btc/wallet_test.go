@@ -48,7 +48,7 @@ var _ = Describe("Wallets", Ordered, func() {
 			},
 		}
 
-		txid, err := wallet.Send(context.Background(), req)
+		txid, err := wallet.Send(context.Background(), req, nil)
 		Expect(err).To(BeNil())
 
 		tx, ok, err := wallet.Status(context.Background(), txid)
@@ -79,7 +79,7 @@ var _ = Describe("Wallets", Ordered, func() {
 			},
 		}
 
-		txid, err := wallet.Send(context.Background(), req)
+		txid, err := wallet.Send(context.Background(), req, nil)
 		Expect(err).To(BeNil())
 
 		tx, _, err := wallet.Status(context.Background(), txid)
@@ -107,7 +107,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				To:     wallet.Address(),
 			},
 		}
-		_, err = wallet.Send(context.Background(), req)
+		_, err = wallet.Send(context.Background(), req, nil)
 
 		Expect(err).ShouldNot(BeNil())
 		req = []btc.SendRequest{
@@ -116,7 +116,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				To:     wallet.Address(),
 			},
 		}
-		_, err = wallet.Send(context.Background(), req)
+		_, err = wallet.Send(context.Background(), req, nil)
 		Expect(err).ShouldNot(BeNil())
 	})
 
@@ -133,7 +133,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: bobBalance,
 				To:     bobWallet.Address(),
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 
 		By("Build the send request")
@@ -145,7 +145,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				To: bobWallet.Address(),
 			},
 		}
-		txid, err := bobWallet.Send(context.Background(), req)
+		txid, err := bobWallet.Send(context.Background(), req, nil)
 		Expect(err).To(BeNil())
 
 		tx, _, err := wallet.Status(context.Background(), txid)
@@ -169,7 +169,7 @@ var _ = Describe("Wallets", Ordered, func() {
 			},
 		}
 
-		txid, err = bobWallet.Send(context.Background(), req)
+		txid, err = bobWallet.Send(context.Background(), req, nil)
 		Expect(err).To(BeNil())
 
 		By("Tx should contain only one output without change")
@@ -189,19 +189,16 @@ var _ = Describe("Wallets", Ordered, func() {
 		pkScript, err := txscript.PayToAddrScript(address)
 		Expect(err).To(BeNil())
 
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						btc.AddSignatureSegwitOp,
-						btc.AddPubkeyCompressedOp,
-					},
-					Script:        pkScript,
-					ScriptAddress: address,
-					HashType:      txscript.SigHashAll,
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
 				},
+				Script:        pkScript,
+				ScriptAddress: address,
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: address,
 		})
 		Expect(err).To(BeNil())
 
@@ -224,12 +221,12 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: 100000,
 				To:     scriptAddr,
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 
 		// spend the script
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
+		txId, err := wallet.Send(context.Background(), nil,
+			[]btc.SpendRequest{
 				{
 					Witness: [][]byte{
 						{0x1},
@@ -240,9 +237,7 @@ var _ = Describe("Wallets", Ordered, func() {
 					ScriptAddress: scriptAddr,
 					HashType:      txscript.SigHashAll,
 				},
-			},
-			ToAddress: wallet.Address(),
-		})
+			})
 		Expect(err).To(BeNil())
 		Expect(txId).ShouldNot(BeEmpty())
 
@@ -257,26 +252,24 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: 100000,
 				To:     scriptAddr,
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 
 		// spend the script
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						script,
-						cb,
-					},
-					Script:        script,
-					Leaf:          txscript.NewTapLeaf(0xc0, script),
-					ScriptAddress: scriptAddr,
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					script,
+					cb,
 				},
+				Script:        script,
+				Leaf:          txscript.NewTapLeaf(0xc0, script),
+				ScriptAddress: scriptAddr,
 			},
-			ToAddress: wallet.Address(),
-		})
+		},
+		)
 		Expect(err).To(BeNil())
 		Expect(txId).ShouldNot(BeEmpty())
 	})
@@ -290,24 +283,21 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: 100000,
 				To:     scriptAddr,
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					// we don't pass the script here as it is not needed for taproot
-					// instead we pass the leaf
-					Witness: [][]byte{
-						btc.AddSignatureSchnorrOp,
-						script,
-						cb,
-					},
-					Leaf:          txscript.NewTapLeaf(0xc0, script),
-					ScriptAddress: scriptAddr,
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				// we don't pass the script here as it is not needed for taproot
+				// instead we pass the leaf
+				Witness: [][]byte{
+					btc.AddSignatureSchnorrOp,
+					script,
+					cb,
 				},
+				Leaf:          txscript.NewTapLeaf(0xc0, script),
+				ScriptAddress: scriptAddr,
 			},
-			ToAddress: wallet.Address(),
 		})
 		Expect(err).To(BeNil())
 		Expect(txId).ShouldNot(BeEmpty())
@@ -323,24 +313,21 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: scriptBalance,
 				To:     scriptAddr,
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 
 		// spend the script
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						btc.AddSignatureSegwitOp,
-						btc.AddPubkeyCompressedOp,
-						script,
-					},
-					Script:        script,
-					ScriptAddress: scriptAddr,
-					HashType:      txscript.SigHashAll,
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
+					script,
 				},
+				Script:        script,
+				ScriptAddress: scriptAddr,
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: wallet.Address(),
 		})
 		Expect(err).To(BeNil())
 		Expect(txId).ShouldNot(BeEmpty())
@@ -367,32 +354,29 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: 100000,
 				To:     p2wshAddr2,
 			},
-		})
+		}, nil)
 
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						p2wshScript1,
-					},
-					Script:        p2wshScript1,
-					ScriptAddress: p2wshAddr1,
-					HashType:      txscript.SigHashAll,
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshScript1,
 				},
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						p2wshScript2,
-					},
-					Script:        p2wshScript2,
-					ScriptAddress: p2wshAddr2,
-					HashType:      txscript.SigHashAll,
-				},
+				Script:        p2wshScript1,
+				ScriptAddress: p2wshAddr1,
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: wallet.Address(),
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshScript2,
+				},
+				Script:        p2wshScript2,
+				ScriptAddress: p2wshAddr2,
+				HashType:      txscript.SigHashAll,
+			},
 		})
 
 		Expect(err).To(BeNil())
@@ -406,6 +390,9 @@ var _ = Describe("Wallets", Ordered, func() {
 		p2trAdditionScript, p2trAddr, cb, err := additionTapscript(chainParams)
 		Expect(err).To(BeNil())
 
+		p2trSigCheckScript, p2trSigCheckScriptAddr, sigCheckCb, err := sigCheckTapScript(chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
+		Expect(err).To(BeNil())
+
 		_, err = wallet.Send(context.Background(), []btc.SendRequest{
 			{
 				Amount: 100000,
@@ -415,33 +402,44 @@ var _ = Describe("Wallets", Ordered, func() {
 				Amount: 100000,
 				To:     p2trAddr,
 			},
-		})
-		By("Spend p2wsh and p2tr scripts")
-		txId, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						p2wshAdditionScript,
-					},
-					Script:        p2wshAdditionScript,
-					ScriptAddress: p2wshAddr,
-					HashType:      txscript.SigHashAll,
-				},
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						p2trAdditionScript,
-						cb,
-					},
-					Script:        p2trAdditionScript,
-					Leaf:          txscript.NewTapLeaf(0xc0, p2trAdditionScript),
-					ScriptAddress: p2trAddr,
-				},
+			{
+				Amount: 100000,
+				To:     p2trSigCheckScriptAddr,
 			},
-			ToAddress: wallet.Address(),
+		}, nil)
+
+		By("Spend p2wsh and p2tr scripts")
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshAdditionScript,
+				},
+				Script:        p2wshAdditionScript,
+				ScriptAddress: p2wshAddr,
+				HashType:      txscript.SigHashAll,
+			},
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2trAdditionScript,
+					cb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, p2trAdditionScript),
+				ScriptAddress: p2trAddr,
+			},
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSchnorrOp,
+					p2trSigCheckScript,
+					sigCheckCb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, p2trSigCheckScript),
+				ScriptAddress: p2trSigCheckScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
 		})
 
 		Expect(err).To(BeNil())
@@ -468,56 +466,47 @@ var _ = Describe("Wallets", Ordered, func() {
 		additionScript, additionAddr, err := additionScript(chainParams)
 		Expect(err).To(BeNil())
 
-		_, err = wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						additionScript,
-					},
-					Script:        additionScript,
-					ScriptAddress: additionAddr,
-					HashType:      txscript.SigHashAll,
+		_, err = wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					additionScript,
 				},
+				Script:        additionScript,
+				ScriptAddress: additionAddr,
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: wallet.Address(),
 		})
 		Expect(err).ShouldNot(BeNil())
 	})
 
 	It("should not be able to spend with invalid Inputs", func() {
-		_, err := wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						{0x1},
-						{0x1},
-						{0x1},
-					},
-					Script:        []byte{0x1},
-					ScriptAddress: wallet.Address(),
-					HashType:      txscript.SigHashAll,
+		_, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					{0x1},
 				},
+				Script:        []byte{0x1},
+				ScriptAddress: wallet.Address(),
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: wallet.Address(),
 		})
 		Expect(err).ShouldNot(BeNil())
 
 		By("Lets give proper witness but bad script")
-		_, err = wallet.Spend(context.Background(), &btc.SpendRequest{
-			Inputs: []btc.SpendScripts{
-				{
-					Witness: [][]byte{
-						btc.AddSignatureSegwitOp,
-						btc.AddPubkeyCompressedOp,
-					},
-					Script:        []byte{0x1},
-					ScriptAddress: wallet.Address(),
-					HashType:      txscript.SigHashAll,
+		_, err = wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
 				},
+				Script:        []byte{0x1},
+				ScriptAddress: wallet.Address(),
+				HashType:      txscript.SigHashAll,
 			},
-			ToAddress: wallet.Address(),
 		})
 		Expect(err).ShouldNot(BeNil())
 	})
@@ -530,7 +519,7 @@ var _ = Describe("Wallets", Ordered, func() {
 			},
 		}
 
-		txid, err := wallet.Send(context.Background(), req)
+		txid, err := wallet.Send(context.Background(), req, nil)
 		Expect(err).To(BeNil())
 
 		tx, ok, err := wallet.Status(context.Background(), txid)
@@ -544,6 +533,167 @@ var _ = Describe("Wallets", Ordered, func() {
 		Expect(err).To(BeNil())
 		Expect(ok).Should(BeFalse())
 		Expect(tx.TxID).Should(BeEmpty())
+	})
+
+	It("should be able to spend and send at the same time", func() {
+		amount := int64(100000)
+		// p2wpkh script
+		script, err := txscript.PayToAddrScript(wallet.Address())
+		Expect(err).To(BeNil())
+
+		By("Let's create a random wallet")
+		pk, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		randomWallet, err := btc.NewSimpleWallet(pk, &chainParams, indexer, fixedFeeEstimator, feeLevel)
+		Expect(err).To(BeNil())
+
+		By("Send funds to the random address by spending the script")
+		txId, err := wallet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: amount,
+				To:     randomWallet.Address(),
+			},
+		}, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
+				},
+				Script:        script,
+				ScriptAddress: wallet.Address(),
+				HashType:      txscript.SigHashAll,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txId).ShouldNot(BeEmpty())
+
+		By("Check the balance of the random wallet")
+		balance, err := getBalance(indexer, randomWallet.Address())
+		Expect(err).To(BeNil())
+		Expect(balance).Should(Equal(int64(amount)))
+
+		tx, _, err := wallet.Status(context.Background(), txId)
+		Expect(err).To(BeNil())
+		Expect(tx).ShouldNot(BeNil())
+		// one for the random wallet and one for the change
+		Expect(tx.VOUTs).Should(HaveLen(2))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(randomWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+	})
+
+	It("should be able to spend multiple scripts and send to multiple parties", func() {
+		amount := int64(100000)
+
+		p2wshSigCheckScript, p2wshSigCheckScriptAddr, err := sigCheckScript(chainParams)
+
+		p2wshAdditionScript, p2wshScriptAddr, err := additionScript(chainParams)
+		Expect(err).To(BeNil())
+
+		p2trAdditionScript, p2trScriptAddr, cb, err := additionTapscript(chainParams)
+		Expect(err).To(BeNil())
+
+		checkSigScript, checkSigScriptAddr, checkSigScriptCb, err := sigCheckTapScript(chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
+		Expect(err).To(BeNil())
+
+		By("Fund the scripts")
+		_, err = wallet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: amount,
+				To:     p2wshScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     p2wshSigCheckScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     p2trScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     checkSigScriptAddr,
+			},
+		}, nil)
+		Expect(err).To(BeNil())
+
+		By("Let's create Bob and Dave wallets")
+		pk, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		bobWallet, err := btc.NewSimpleWallet(pk, &chainParams, indexer, fixedFeeEstimator, feeLevel)
+		Expect(err).To(BeNil())
+		pk, err = btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		daveWallet, err := btc.NewSimpleWallet(pk, &chainParams, indexer, fixedFeeEstimator, feeLevel)
+		Expect(err).To(BeNil())
+
+		By("Send funds to Bob and Dave by spending the scripts")
+		txId, err := wallet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: amount,
+				To:     bobWallet.Address(),
+			},
+			{
+				Amount: amount,
+				To:     daveWallet.Address(),
+			},
+		}, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshAdditionScript,
+				},
+				Script:        p2wshAdditionScript,
+				ScriptAddress: p2wshScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
+					p2wshSigCheckScript,
+				},
+				Script:        p2wshSigCheckScript,
+				ScriptAddress: p2wshSigCheckScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2trAdditionScript,
+					cb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, p2trAdditionScript),
+				ScriptAddress: p2trScriptAddr,
+			},
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSchnorrOp,
+					checkSigScript,
+					checkSigScriptCb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, checkSigScript),
+				ScriptAddress: checkSigScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txId).ShouldNot(BeEmpty())
+
+		By("The tx should have 3 outputs")
+		tx, _, err := wallet.Status(context.Background(), txId)
+		Expect(err).To(BeNil())
+		Expect(tx).ShouldNot(BeNil())
+		Expect(tx.VOUTs).Should(HaveLen(3))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(bobWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(daveWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+
+		//Validate whether dave and bob received the right amount
+		Expect(tx.VOUTs[0].Value).Should(Equal(amount))
+		Expect(tx.VOUTs[1].Value).Should(Equal(amount))
+
 	})
 
 })

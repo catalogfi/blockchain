@@ -419,7 +419,7 @@ var _ = Describe("bitcoin fees", func() {
 					Amount: 1e5,
 				},
 			}
-			txId, err := wallet.Send(ctx, req)
+			txId, err := wallet.Send(ctx, req, nil)
 
 			By("Rebuild submitted tx")
 			txHex, err := indexer.GetTxHex(ctx, txId)
