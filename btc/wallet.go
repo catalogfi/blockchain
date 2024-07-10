@@ -249,6 +249,9 @@ func buildTransaction(utxos UTXOs, recipients []SendRequest, changeAddr btcutil.
 		if err != nil {
 			return nil, err
 		}
+		if r.Amount < 0 {
+			r.Amount = totalUTXOAmount
+		}
 		tx.AddTxOut(wire.NewTxOut(r.Amount, script))
 		totalSendAmount += r.Amount
 	}
