@@ -93,12 +93,6 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(err).To(BeNil())
 		Expect(txid).NotTo(BeEmpty())
 
-		By("Redeem Bob HTLC")
-		Expect(err).To(BeNil())
-		txid, err = bobHTLCWallet.Redeem(ctx, aliceHTLC, secret)
-		Expect(err).To(BeNil())
-		Expect(txid).NotTo(BeEmpty())
-
 		By("Redeem Alice HTLC")
 		sec, _, err := generateSecret()
 		Expect(err).To(BeNil())
@@ -109,6 +103,13 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		txid, err = aliceHTLCWallet.Redeem(ctx, bobHTLC, secret)
 		Expect(err).To(BeNil())
 		Expect(txid).NotTo(BeEmpty())
+
+		By("Redeem Bob HTLC")
+		Expect(err).To(BeNil())
+		txid, err = bobHTLCWallet.Redeem(ctx, aliceHTLC, secret)
+		Expect(err).To(BeNil())
+		Expect(txid).NotTo(BeEmpty())
+
 	})
 
 	It("should be able to initiate and refund HTLC", func(ctx context.Context) {

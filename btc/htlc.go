@@ -124,6 +124,8 @@ func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC,
 
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
+		// insert random sig placeholder for other parties to insert their signature
+		// this is for proper fee calculation
 		randomSig(),
 		instantRefundLeaf.Script,
 		cbBytes,
@@ -216,21 +218,26 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 	instantRefundWitness := [][]byte{
 		AddSignatureSchnorrOp,
 		// insert invalid placeholder signature for other parties to insert their signature
+		// this is for proper fee calculation
 		randomSig(),
 		instandRefundLeaf.Script,
 		cbBytes,
 	}
 
-	// 0th index is the signature of this wallet
-	witnessWithSig, err := hw.wallet.SignSACPTx(tx, 0, utxoValue, instandRefundLeaf, scriptAddr, instantRefundWitness)
-	if err != nil {
-		return "", err
-	}
+	// TODO: sign all idxs
 
-	// Format the witness to include the signature of the initiator at the 1st index of the witness
-	// 0th index should be the signature of the redeemer
-	// 1st index should be the signature of the initiator
-	tx.TxIn[0].Witness[1] = witnessWithSig[0]
+	for i := range tx.TxIn {
+		// 0th index is the signature of this wallet
+		witnessWithSig, err := hw.wallet.SignSACPTx(tx, i, utxoValue, instandRefundLeaf, scriptAddr, instantRefundWitness)
+		if err != nil {
+			return "", err
+		}
+
+		// Format the witness to include the signature of the initiator at the 1st index of the witness
+		// 0th index should be the signature of the redeemer
+		// 1st index should be the signature of the initiator
+		tx.TxIn[i].Witness[1] = witnessWithSig[0]
+	}
 
 	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
 	err = tx.Serialize(buf)
@@ -325,7 +332,9 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcuti
 		return nil, ErrInvalidInstantRefundSACPWitnessLen
 	}
 
-	// first two should be signatures
+	//TODO: check if the signature is valid
+
+	// first two should be signature lens
 	if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
 		return nil, ErrInvalidInstantRefundSACPWitnessLen
 	}
