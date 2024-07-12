@@ -2,7 +2,7 @@ module github.com/catalogfi/blockchain
 
 go 1.21
 
-toolchain go1.22.0
+toolchain go1.22.5
 
 require (
 	github.com/btcsuite/btcd v0.24.0
