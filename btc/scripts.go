@@ -26,6 +26,66 @@ var (
 
 var ErrInvalidLockTime = fmt.Errorf("invalid lock-time")
 
+// RedeemLeaf is one of the leaf scripts in the HTLC script which can be spent by revealing the secret
+// by the redeemer.
+//
+// redeemerPubkey must be x-only pubkey of the redeemer.
+func RedeemLeaf(redeemerPubkey, secretHash []byte) (txscript.TapLeaf, error) {
+	script, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_SHA256).
+		AddData(secretHash).
+		AddOp(txscript.OP_EQUALVERIFY).
+		AddData(redeemerPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
+
+// RefundLeaf is one of the leaf scripts in the HTLC script which can be spent by the initiator
+// after the lock time.
+//
+// initiatorPubkey must be x-only pubkey of the initiator.
+func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, error) {
+	if lockTime > math.MaxUint16 || lockTime < 0 {
+		return txscript.TapLeaf{}, ErrInvalidLockTime
+	}
+	// 64b275202a003722cb3cd5207b5cd37bab158ddd36a1000abfa316bbd8811987139247fdac
+
+	script, err := txscript.NewScriptBuilder().
+		AddInt64(int64(lockTime)).
+		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddData(initiatorPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
+
+// MultiSigLeaf is a 2 on 2 multisig leaf script
+//
+// pubkeys must be x-only pubkeys of the initiator and the redeemer.
+func MultiSigLeaf(initiatorPubkey, redeemerPubkey []byte) (txscript.TapLeaf, error) {
+
+	script, err := txscript.NewScriptBuilder().
+		AddData(initiatorPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		AddData(redeemerPubkey).
+		AddOp(txscript.OP_CHECKSIGADD).
+		AddOp(txscript.OP_2).
+		AddOp(txscript.OP_NUMEQUAL).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
+
 // MultisigScript generates a 2-out-2 multisig script.
 func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
 	return txscript.NewScriptBuilder().
@@ -231,4 +291,9 @@ func decodeLocktime(v []byte) int64 {
 	}
 
 	return result
+}
+
+// Helper function to convert a script to a leaf with version 0xc0.
+func toLeaf(script []byte) txscript.TapLeaf {
+	return txscript.NewTapLeaf(0xc0, script)
 }

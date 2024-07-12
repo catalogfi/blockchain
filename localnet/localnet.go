@@ -171,6 +171,29 @@ func FundBitcoin(addr string, indexer btc.IndexerClient) (*chainhash.Hash, error
 	}
 }
 
+// MineBitcoinBlocks will mine n blocks in the Bitcoin regtest.
+// It also waits for the blocks to be indexed by the indexer.
+func MineBitcoinBlocks(n int, indexer btc.IndexerClient) error {
+	currentHeight, err := indexer.GetTipBlockHeight(context.Background())
+	if err != nil {
+		return err
+	}
+	_, err = RunOutput("merry", "rpc", "--generate", fmt.Sprintf("%d", n))
+	if err != nil {
+		return err
+	}
+	for {
+		height, err := indexer.GetTipBlockHeight(context.Background())
+		if err != nil {
+			return err
+		}
+		if height >= currentHeight+uint64(n) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // MineBTCBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
 // confirmations. It uses the `merry faucet` command to generate a new block, the receiver address is a dummy address
 // which shouldn't affect our testing
