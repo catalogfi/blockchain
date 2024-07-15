@@ -292,7 +292,6 @@ func (client *electrsIndexerClient) GetTxHex(ctx context.Context, txid string) (
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			fmt.Println(resp.StatusCode)
 			errMsg, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)

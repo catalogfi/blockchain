@@ -3,6 +3,7 @@ package btc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -17,7 +18,61 @@ import (
 )
 
 var (
-	// Adds a 64 or 65 byte schnorr signature
+	// ErrAmountLessThanDust indicates that the amount is less than the dust limit (546 satoshis).
+	ErrAmountLessThanDust = fmt.Errorf("amount is less than dust")
+
+	// ErrSACPInvalidHashType indicates that the hash type for the SACP is invalid.
+	// Use SigHashSingleAnyoneCanPay for generating SACP.
+	ErrSACPInvalidHashType = fmt.Errorf("invalid hash type, use SigHashSingleAnyoneCanPay")
+
+	// ErrFeeExceedsValue indicates that the fee exceeds the value of the script.
+	// Occurs when the fee required to spend the script is more than the value of the script.
+	ErrFeeExceedsValue = fmt.Errorf("fee exceeds the value of the script")
+
+	// ErrNoUTXOsForRequests indicates that even after multiple attempts, could not find enough utxos to satisfy the requests.
+	ErrNoUTXOsForRequests = fmt.Errorf("could not find enough utxos to satisfy the requests")
+
+	// ErrNoFundsToSpend indicates that the scripts have no funds to spend.
+	// Occurs when the spend requests have no funds to spend.
+	ErrNoFundsToSpend = fmt.Errorf("scripts have no funds to spend")
+
+	// ErrScriptNotFoundInWitness indicates that the script is not found in the witness while validating the witness.
+	// Script should be always present at the end of the witness for p2wsh scripts and
+	// at the second last for p2tr scripts.
+	ErrScriptNotFoundInWitness = fmt.Errorf("script not found in the witness")
+
+	// ErrInvalidP2wpkhScript indicates that the script is invalid for p2wpkh spend.
+	ErrInvalidP2wpkhScript = fmt.Errorf("invalid script")
+
+	// ErrInvalidP2wpkhWitness indicates that the witness is invalid for the given p2wpkh script.
+	// use AddSignatureSegwitOp and AddPubkeyCompressedOp for p2wpkh scripts.
+	ErrInvalidP2wpkhWitness = fmt.Errorf("invalid p2wpkh witness")
+
+	// ErrInvalidSigOp indicates that the signature operation is invalid.
+	// Use AddSignatureSegwitOp for segwit v0 scripts and AddSignatureSchnorrOp for segwit v1 scripts.
+	ErrInvalidSigOp = func(op string) error {
+		return fmt.Errorf("invalid sig, use %s", op)
+	}
+
+	// ErrInvalidPubkeyOp indicates that the pubkey operation is invalid.
+	// Use AddPubkeyCompressedOp for compressed pubkeys and AddXOnlyPubkeyOp for xonly pubkeys.
+	ErrInvalidPubkeyOp = func(op string) error {
+		return fmt.Errorf("invalid pubkey, use %s", op)
+	}
+
+	// ErrInsufficientFunds indicates that the funds are insufficient to spend the script.
+	ErrInsufficientFunds = func(have int64, need int64) error {
+		return fmt.Errorf("insufficient funds: have %d, need %d", have, need)
+	}
+
+	// ErrNoUTXOsFoundForAddress indicates that no utxos are found for the given address.
+	ErrNoUTXOsFoundForAddress = func(addr string) error {
+		return fmt.Errorf("utxos not found for address %s", addr)
+	}
+)
+
+var (
+	// Adds a 64 or 65 byte schnorr signature based on hash type
 	AddSignatureSchnorrOp = []byte("add_signature_segwit_v1")
 	// Adds a 72 byte ECDSA signature
 	AddSignatureSegwitOp = []byte("add_signature_segwit_v0")
@@ -47,8 +102,8 @@ type SpendRequest struct {
 	// Hash type for the signature. Default is SigHashDefault (tapscript only)
 	HashType txscript.SigHashType
 
-	// Recipient address
-	To btcutil.Address
+	//Sequence number for the input
+	Sequence uint32
 }
 
 type SendRequest struct {
@@ -84,7 +139,19 @@ type Wallet interface {
 	// 			Script: script,
 	// 			ScriptAddress: scriptAddress,
 	// 		},
-	Send(ctx context.Context, sendReq []SendRequest, spendReq []SpendRequest) (string, error)
+	// 	}, nil)
+	Send(ctx context.Context, sendReq []SendRequest, spendReq []SpendRequest, sacps [][]byte) (string, error)
+
+	// Generate the signature necessary to spend the script.
+	//
+	// Uses the hash type SigHashSingleAnyoneCanPay.
+	GenerateSACP(ctx context.Context, spendReq SpendRequest, to btcutil.Address) ([]byte, error)
+
+	// SignSACPTx generates a schnorr signature for the given details.
+	// Returns the witness containing the schnorr signature and an error if any.
+	//
+	// tx is not mutated instead a new copy is created internally to perform the signing.
+	SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf txscript.TapLeaf, scriptAddr btcutil.Address, witness [][]byte) ([][]byte, error)
 
 	// Status checks the status of a transaction using its transaction ID (txid).
 	// Returns the transaction and a boolean indicating whether the transaction is submitted or not and an error
@@ -123,90 +190,161 @@ func (sw *SimpleWallet) Address() btcutil.Address {
 	return sw.signerAddr
 }
 
-func (sw *SimpleWallet) Send(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest) (string, error) {
+func (sw *SimpleWallet) Send(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest, sacps [][]byte) (string, error) {
 	//TODO: Estimate a fee based on requests
 	fee := 1000
-	// validate the spend requests
-	err := validateSpendRequest(spendRequests)
+
+	// validate the requests
+	err := validateRequests(spendRequests, sendRequests)
 	if err != nil {
 		return "", err
 	}
 
-	//validate the send requests
-	for _, r := range sendRequests {
-		if r.Amount <= DustAmount {
-			return "", fmt.Errorf("amount is less than dust")
-		}
+	sacpsFee, err := feeUsedInSACPs(sacps, sw.indexer)
+	if err != nil {
+		return "", err
 	}
 
-	return sw.spendAndSend(ctx, sendRequests, spendRequests, fee, 0)
+	tx, err := sw.spendAndSend(ctx, sendRequests, spendRequests, sacps, sacpsFee, fee, 0)
+	if err != nil {
+		return "", err
+	}
+
+	return submitTx(ctx, sw.indexer, tx)
 }
 
-func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest, fee int, depth int) (string, error) {
-
-	// This means we made 100 recursive calls and still could not find enough utxos to send the amount
-	if depth > 100 {
-		return "", fmt.Errorf("could not find enough utxos to satisfy the requests")
-	}
-
-	// These variables will be empty if there are no spend requests
-	spendUTXOs, spendUTXOsMap, balanceOfScripts, err := getUTXOsForSpendRequest(ctx, sw.indexer, spendRequests)
+// SignSACPTx generates a schnorr signature for the given details.
+func (sw *SimpleWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf txscript.TapLeaf, scriptAddr btcutil.Address, witness [][]byte) ([][]byte, error) {
+	cTx := tx.Copy()
+	script, err := txscript.PayToAddrScript(scriptAddr)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	// If there are any spend requests, check if the scripts have funds to spend
-	if balanceOfScripts == 0 && len(spendRequests) > 0 {
-		return "", fmt.Errorf("scripts have no funds to spend")
-	}
-
-	// coverUTXOs are the UTXOs used to cover the remaining amount required to send
-	var coverUTXOs UTXOs
-
-	totalSendAmount := calculateTotalSendAmount(sendRequests)
-	if balanceOfScripts <= totalSendAmount {
-		utxos, _, err := sw.indexer.GetUTXOsForAmount(ctx, sw.signerAddr, totalSendAmount-balanceOfScripts+int64(fee))
-		if err != nil {
-			return "", err
-		}
-		coverUTXOs = append(coverUTXOs, utxos...)
-	}
-
-	// build the transaction
-	tx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sendRequests, sw.signerAddr, fee)
+	fetcher := txscript.NewCannedPrevOutputFetcher(script, amount)
+	err = signTx(cTx, fetcher, amount, idx, witness, script, &leaf, SigHashSingleAnyoneCanPay, sw.privateKey)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+	return cTx.TxIn[idx].Witness, nil
+}
+
+// GenerateSACP generates a SACP tx for the given spend request.
+func (sw *SimpleWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest, to btcutil.Address) ([]byte, error) {
+	if spendReq.HashType != txscript.SigHashDefault && spendReq.HashType != SigHashSingleAnyoneCanPay {
+		return nil, ErrSACPInvalidHashType
+	}
+	if spendReq.HashType == txscript.SigHashDefault {
+		spendReq.HashType = SigHashSingleAnyoneCanPay
 	}
 
-	// Sign the spend inputs
-	err = signSpendTx(tx, spendRequests, spendUTXOsMap, sw.privateKey)
+	if err := validateRequests([]SpendRequest{spendReq}, nil); err != nil {
+		return nil, err
+	}
+	if to == nil {
+		to = sw.signerAddr
+	}
+	return sw.generateSACP(ctx, spendReq, to, 1000)
+}
 
-	// get the send signing script
-	script, err := txscript.PayToAddrScript(sw.signerAddr)
+func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequest, to btcutil.Address, fee int64) ([]byte, error) {
+
+	// get the utxos for the script
+	utxos, utxoMap, utxosBalance, err := getUTXOsForSpendRequest(ctx, sw.indexer, []SpendRequest{spendRequest})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	// Sign the cover inputs
-	// This is a no op if there are no cover utxos
-	err = signSendTx(tx, coverUTXOs, len(spendUTXOs), script, sw.privateKey)
+	if utxosBalance-int64(fee) <= 0 {
+		return nil, ErrFeeExceedsValue
+	}
+
+	sequenceMap := generateSequenceMap(utxoMap, []SpendRequest{spendRequest})
+
+	// build the transaction with no recipients or sacps
+	tx, _, err := buildTransaction(utxos, nil, nil, to, fee, sequenceMap)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+
+	// sign the transaction
+	err = signSpendTx(tx, 0, []SpendRequest{spendRequest}, utxoMap, sw.indexer, sw.privateKey)
+	if err != nil {
+		return nil, err
 	}
 
 	// estimate the fee required to make the transaction
 	feeToBePaid, err := EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	// if the fee required is more than the fee we are willing to pay, we try again with the new fee
+	if int64(feeToBePaid) > fee {
+		return sw.generateSACP(ctx, spendRequest, to, int64(feeToBePaid))
+	}
+
+	// serialize the transaction
+	var buf bytes.Buffer
+	err = tx.Serialize(&buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest, sacps [][]byte, sacpFee, fee int, depth int) (*wire.MsgTx, error) {
+
+	// This means we made 100 recursive calls and still could not find enough utxos to send the amount
+	if depth > 100 {
+		return nil, ErrNoUTXOsForRequests
+	}
+
+	// spendUTXOs are the UTXOs used to spend the scripts
+	// coverUTXOs are the UTXOs used to cover the remaining amount required to send
+	// utxoMap is a map of script address to UTXOs
+	spendUTXOs, coverUTXOs, utxoMap, err := getUTXOsForRequests(ctx, sw.indexer, spendRequests, sendRequests, sw.signerAddr, fee, sacpFee)
+	if err != nil {
+		return nil, err
+	}
+
+	// generate sequence map (used to set sequence number for each input)
+	sequenceMap := generateSequenceMap(utxoMap, spendRequests)
+
+	// build the transaction
+	// Signing index indicates from which index we need to start signing the transaction
+	tx, signingIdx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sacps, sendRequests, sw.signerAddr, int64(fee), sequenceMap)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign the spend inputs
+	err = signSpendTx(tx, signingIdx, spendRequests, utxoMap, sw.indexer, sw.privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign the cover inputs
+	// This is a no op if there are no cover utxos
+	err = signSendTx(tx, coverUTXOs, signingIdx+len(spendRequests), sw.signerAddr, sw.privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// estimate the fee required to make the transaction
+	feeToBePaid, err := EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	// sacpFee is the fee used in the SACPs
+	// This could be zero if there are no SACPs or SACPs have no fee
+	feeToBePaid -= sacpFee
+
 	if feeToBePaid > fee {
-		return sw.spendAndSend(ctx, sendRequests, spendRequests, feeToBePaid, depth+1)
+		return sw.spendAndSend(ctx, sendRequests, spendRequests, sacps, sacpFee, feeToBePaid, depth+1)
 	}
 
-	// submit the transaction
-	return tx.TxHash().String(), sw.indexer.SubmitTx(ctx, tx)
+	return tx, nil
 }
 
 // Returns the status of submitted transaction either via `send` or `spend`
@@ -222,23 +360,157 @@ func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, boo
 	return tx, true, nil
 }
 
+type UTXOMap map[btcutil.Address]UTXOs
+
 // ------------------ Helper functions ------------------
 
-// Builds an unsigned transaction with the given utxos, recipients, change address and fee.
-// If deductFeeFromSendAmount is true, the fee is deducted from the send amount.
-func buildTransaction(utxos UTXOs, recipients []SendRequest, changeAddr btcutil.Address, fee int) (*wire.MsgTx, error) {
+// feeUsedInSACPs returns the amount of fee used in the given SACPs
+func feeUsedInSACPs(sacps [][]byte, indexer IndexerClient) (int, error) {
+	tx, _, err := buildTxFromSacps(sacps)
+	if err != nil {
+		return 0, err
+	}
+
+	// go through each input and get the amount it holds
+	// add all the inputs and subtract the outputs to get the fee
+	totalInputAmount := int64(0)
+	for _, in := range tx.TxIn {
+		txFromIndexer, err := indexer.GetTx(context.Background(), in.PreviousOutPoint.Hash.String())
+		if err != nil {
+			return 0, err
+		}
+		totalInputAmount += int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)
+	}
+
+	totalOutputAmount := int64(0)
+	for _, out := range tx.TxOut {
+		totalOutputAmount += out.Value
+	}
+
+	return int(totalInputAmount - totalOutputAmount), nil
+}
+
+func submitTx(ctx context.Context, indexer IndexerClient, tx *wire.MsgTx) (string, error) {
+	txid := tx.TxHash().String()
+	err := indexer.SubmitTx(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	return txid, nil
+}
+
+// getPrevoutsForSACPs returns the previous outputs and txouts for the given SACPs used to build the prevOutFetcher
+func getPrevoutsForSACPs(tx *wire.MsgTx, endingSACPIdx int, indexer IndexerClient) ([]wire.OutPoint, []*wire.TxOut, error) {
+	prevouts := []wire.OutPoint{}
+	txOuts := []*wire.TxOut{}
+	for i := 0; i < endingSACPIdx; i++ {
+		outpoint := tx.TxIn[i].PreviousOutPoint
+		prevouts = append(prevouts, outpoint)
+
+		// The only way to get the txOut is to get the transaction from the indexer
+		txFromIndexer, err := indexer.GetTx(context.Background(), outpoint.Hash.String())
+		if err != nil {
+			return nil, nil, err
+		}
+		pkScriptHex := txFromIndexer.VOUTs[outpoint.Index].ScriptPubKey
+		pkScript, err := hex.DecodeString(pkScriptHex)
+		if err != nil {
+			return nil, nil, err
+		}
+		txOuts = append(txOuts, &wire.TxOut{PkScript: pkScript, Value: int64(txFromIndexer.VOUTs[outpoint.Index].Value)})
+	}
+	return prevouts, txOuts, nil
+}
+
+// getUTXOsForRequests returns the UTXOs required to spend the scripts and cover the send amount.
+func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs []SpendRequest, sendReqs []SendRequest, feePayer btcutil.Address, fee, sacpFee int) (UTXOs, UTXOs, UTXOMap, error) {
+
+	spendUTXOs, spendUTXOsMap, balanceOfScripts, err := getUTXOsForSpendRequest(ctx, indexer, spendReqs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// coverUTXOs are the UTXOs used to cover the remaining amount required to send
+	var coverUTXOs UTXOs
+	totalSendAmount := calculateTotalSendAmount(sendReqs)
+	if balanceOfScripts <= totalSendAmount && sacpFee <= fee {
+		utxos, _, err := indexer.GetUTXOsForAmount(ctx, feePayer, totalSendAmount-balanceOfScripts+int64(fee))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		coverUTXOs = append(coverUTXOs, utxos...)
+	}
+
+	// SpendUTXOMap only contains the UTXOs of the scripts but not the cover UTXOs
+	// We need to add the cover UTXOs to the map
+	spendUTXOsMap[feePayer] = append(spendUTXOsMap[feePayer], coverUTXOs...)
+
+	return spendUTXOs, coverUTXOs, spendUTXOsMap, nil
+}
+
+// generateSequenceMap returns a map of txid to sequence number for the given spend requests
+func generateSequenceMap(utxosMap UTXOMap, spendRequest []SpendRequest) map[string]uint32 {
+	sequencesMap := make(map[string]uint32)
+	for _, req := range spendRequest {
+		utxos, ok := utxosMap[req.ScriptAddress]
+		if !ok {
+			continue
+		}
+		for _, utxo := range utxos {
+			if req.Sequence != 0 {
+				sequencesMap[utxo.TxID] = req.Sequence
+			}
+		}
+	}
+	return sequencesMap
+}
+
+// Merge multiple sacps into a single transaction
+func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
+	idx := 0
 	tx := wire.NewMsgTx(DefaultTxVersion)
+	for _, sacp := range sacps {
+		btcTx, error := btcutil.NewTxFromBytes(sacp)
+		if error != nil {
+			return nil, 0, error
+		}
+		sacpTx := btcTx.MsgTx()
+		for _, in := range sacpTx.TxIn {
+			tx.AddTxIn(in)
+			idx++
+		}
+
+		for _, out := range sacpTx.TxOut {
+			tx.AddTxOut(out)
+		}
+	}
+	return tx, idx, nil
+}
+
+// Builds an unsigned transaction with the given utxos, recipients, change address and fee.
+func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
+
+	tx, idx, err := buildTxFromSacps(sacps)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	// add inputs to the transaction
 	totalUTXOAmount := int64(0)
 	for _, utxo := range utxos {
 		txid, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		vout := utxo.Vout
 		txIn := wire.NewTxIn(wire.NewOutPoint(txid, vout), nil, nil)
 		tx.AddTxIn(txIn)
+
+		sequence, ok := sequencesMap[utxo.TxID]
+		if ok {
+			tx.TxIn[len(tx.TxIn)-1].Sequence = sequence
+		}
+
 		totalUTXOAmount += utxo.Amount
 	}
 
@@ -247,72 +519,72 @@ func buildTransaction(utxos UTXOs, recipients []SendRequest, changeAddr btcutil.
 	for _, r := range recipients {
 		script, err := txscript.PayToAddrScript(r.To)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if r.Amount < 0 {
-			r.Amount = totalUTXOAmount
-		}
+
 		tx.AddTxOut(wire.NewTxOut(r.Amount, script))
 		totalSendAmount += r.Amount
 	}
-
 	// add change output to the transaction if required
-	if totalUTXOAmount >= totalSendAmount+int64(fee) {
+	if totalUTXOAmount >= totalSendAmount+fee {
 		script, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		if totalUTXOAmount >= totalSendAmount+int64(fee)+DustAmount {
-			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-int64(fee), script))
+		if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
 		}
-	} else {
-		return nil, fmt.Errorf("insufficient funds")
+	} else if len(recipients) != 0 && len(utxos) != 0 {
+		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+fee)
 	}
 
 	// return the transaction
-	return tx, nil
+	return tx, idx, nil
 }
 
-func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, req []SpendRequest) (UTXOs, map[string]UTXOs, int64, error) {
+func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq []SpendRequest) (UTXOs, UTXOMap, int64, error) {
 	utxos := UTXOs{}
 	totalValue := int64(0)
-	utxosByAddress := make(map[string]UTXOs)
+	utxoMap := make(UTXOMap)
 
-	for _, in := range req {
-		utxosForAddress, err := indexer.GetUTXOs(ctx, in.ScriptAddress)
+	for _, req := range spendReq {
+		utxosForAddress, err := indexer.GetUTXOs(ctx, req.ScriptAddress)
 		if err != nil {
 			return nil, nil, 0, err
 		}
+
 		utxos = append(utxos, utxosForAddress...)
 		for _, utxo := range utxosForAddress {
 			totalValue += utxo.Amount
 		}
-		utxosByAddress[in.ScriptAddress.EncodeAddress()] = utxosForAddress
+		utxoMap[req.ScriptAddress] = utxosForAddress
 	}
-	return utxos, utxosByAddress, totalValue, nil
+
+	// If there are any spend requests, check if the scripts have funds to spend
+	if totalValue == 0 && len(spendReq) > 0 {
+		return nil, nil, 0, ErrNoFundsToSpend
+	}
+
+	return utxos, utxoMap, totalValue, nil
 }
 
-// Useful for tapscript spend where we need to sign all inputs and their respective amounts
-func buildPrevOutFetcher(utxosByAddressMap map[string]UTXOs, req []SpendRequest) (txscript.PrevOutputFetcher, error) {
-	prevOutFetcher := txscript.NewMultiPrevOutFetcher(nil)
-	for _, in := range req {
-		utxos, ok := utxosByAddressMap[in.ScriptAddress.EncodeAddress()]
-		if !ok {
-			return nil, fmt.Errorf("utxos not found for address %s", in.ScriptAddress.EncodeAddress())
-		}
-		for _, utxo := range utxos {
-			script, err := txscript.PayToAddrScript(in.ScriptAddress)
-			if err != nil {
-				continue
-			}
-			txId, err := chainhash.NewHashFromStr(utxo.TxID)
-			if err != nil {
-				continue
-			}
-			prevOutFetcher.AddPrevOut(*wire.NewOutPoint(txId, utxo.Vout), wire.NewTxOut(utxo.Amount, script))
+// Builds a prevOutFetcher for the given utxoMap, outpoints and txouts.
+//
+// outpoints should have corresponding txouts in the same order.
+func buildPrevOutFetcher(utxosByAddressMap UTXOMap, outpoints []wire.OutPoint, txouts []*wire.TxOut) (txscript.PrevOutputFetcher, error) {
+	fetcher := NewPrevOutFetcherBuilder()
+	for addr, utxos := range utxosByAddressMap {
+		err := fetcher.AddFromUTXOs(utxos, addr)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return prevOutFetcher, nil
+
+	err := fetcher.AddPrevOuts(outpoints, txouts)
+	if err != nil {
+		return nil, err
+	}
+	return fetcher.Build(), nil
 }
 
 // Returns the script to sign based on the script address type.
@@ -332,14 +604,25 @@ func getScriptToSign(scriptAddr btcutil.Address, script []byte) ([]byte, error) 
 }
 
 // Signs the spend transaction
-func signSpendTx(tx *wire.MsgTx, inputs []SpendRequest, utxosByAddressMap map[string]UTXOs, privateKey *secp256k1.PrivateKey) error {
-	idx := 0
-	// build the prevOutFetcher
-	// This is an important step if we are spending from p2tr scripts which contain signature checks
-	prevOutFetcher, err := buildPrevOutFetcher(utxosByAddressMap, inputs)
+//
+// Internally signTx is called for each input to sign the transaction.
+func signSpendTx(tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap UTXOMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
+
+	// building the prevOutFetcherBuilder
+	// get the prevouts and txouts for the sacps to build the prevOutFetcher
+	outpoints, txouts, err := getPrevoutsForSACPs(tx, startingIdx, indexer)
 	if err != nil {
 		return err
 	}
+
+	// This is an important step if we are spending from p2tr scripts which contain signature checks
+	prevOutFetcher, err := buildPrevOutFetcher(utxoMap, outpoints, txouts)
+	if err != nil {
+		return err
+	}
+
+	idx := startingIdx
+
 	// Loop through all the inputs, get utxos and sign the transaction
 	for _, in := range inputs {
 
@@ -350,9 +633,9 @@ func signSpendTx(tx *wire.MsgTx, inputs []SpendRequest, utxosByAddressMap map[st
 			return err
 		}
 
-		utxos, ok := utxosByAddressMap[in.ScriptAddress.EncodeAddress()]
+		utxos, ok := utxoMap[in.ScriptAddress]
 		if !ok {
-			return fmt.Errorf("utxos not found for address %s", in.ScriptAddress.EncodeAddress())
+			return ErrNoUTXOsFoundForAddress(in.ScriptAddress.String())
 		}
 
 		for _, utxo := range utxos {
@@ -382,7 +665,6 @@ func signTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount in
 			if err != nil {
 				return err
 			}
-
 			newWitness = append(newWitness, sig)
 		// Adds ecdsa signature
 		// Make sure to use this only with segwit v0 scripts
@@ -411,7 +693,13 @@ func signTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount in
 
 // Signs the send transaction (p2wpkh spend).
 // Use startingIdx to start signing from a specific index
-func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, script []byte, privateKey *secp256k1.PrivateKey) error {
+func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, scriptAddr btcutil.Address, privateKey *secp256k1.PrivateKey) error {
+	// get the send signing script
+	script, err := txscript.PayToAddrScript(scriptAddr)
+	if err != nil {
+		return err
+	}
+
 	// for p2wpkh, we only need to add the signature and pubkey
 	witness := [][]byte{
 		AddSignatureSegwitOp,
@@ -429,8 +717,8 @@ func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, script []byte, pri
 	return nil
 }
 
-func validateSpendRequest(req []SpendRequest) error {
-	for _, in := range req {
+func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest) error {
+	for _, in := range spendReqs {
 		if len(in.Witness) == 0 {
 			return fmt.Errorf("witness is required")
 		}
@@ -463,39 +751,46 @@ func validateSpendRequest(req []SpendRequest) error {
 				return err
 			}
 			if !bytes.Equal(in.Script, script) {
-				return fmt.Errorf("invalid script for p2wpkh spend")
+				return ErrInvalidP2wpkhScript
 			}
 
 			// len of witness should be 2
 			if len(in.Witness) != 2 {
-				return fmt.Errorf("invalid witness for p2wpkh spend")
+				return ErrInvalidP2wpkhWitness
 			}
 			// witness[0] should be signature
 			if string(in.Witness[0]) != string(AddSignatureSegwitOp) {
-				return fmt.Errorf("invalid signature op for p2wpkh spend")
+				return ErrInvalidSigOp(string(AddSignatureSegwitOp))
 			}
 			// witness[1] should be pubkey
 			if string(in.Witness[1]) != string(AddPubkeyCompressedOp) {
-				return fmt.Errorf("invalid pubkey op for p2wpkh spend")
+				return ErrInvalidPubkeyOp(string(AddPubkeyCompressedOp))
 			}
 		case *btcutil.AddressWitnessScriptHash:
 			// the script should match the last element in the witness
 			scriptInWitness := in.Witness[len(in.Witness)-1]
 			if !bytes.Equal(scriptInWitness, in.Script) {
-				return fmt.Errorf("no script found in witness")
+				return ErrScriptNotFoundInWitness
 			}
 			// should not contain Schnorr signature or xonly pubkey
 			for _, w := range in.Witness {
 				if string(w) == string(AddSignatureSchnorrOp) {
-					return fmt.Errorf("invalid signature op for p2wsh spend, use segwit signature op")
+					return ErrInvalidSigOp(string(AddSignatureSegwitOp))
 				}
 				if string(w) == string(AddXOnlyPubkeyOp) {
-					return fmt.Errorf("invalid pubkey op for p2wsh spend, use compressed pubkey op")
+					return ErrInvalidPubkeyOp(string(AddPubkeyCompressedOp))
 				}
 			}
 		}
 
 	}
+
+	for _, r := range sendReqs {
+		if r.Amount <= DustAmount {
+			return ErrAmountLessThanDust
+		}
+	}
+
 	return nil
 }
 

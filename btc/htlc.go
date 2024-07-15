@@ -1,399 +1,484 @@
 package btc
 
-// import (
-// 	"context"
-// 	"crypto/sha256"
-// 	"fmt"
-// 	"math"
-// 	"math/big"
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
 
-// 	"github.com/btcsuite/btcd/btcec/v2"
-// 	"github.com/btcsuite/btcd/btcjson"
-// 	"github.com/btcsuite/btcd/btcutil"
-// 	"github.com/btcsuite/btcd/chaincfg"
-// 	"github.com/btcsuite/btcd/txscript"
-// )
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
+)
 
-// type Leaf string
+var (
+	// ErrSACPInvalidInputsLen is returned when the signed inputs are less than the available inputs
+	// Occurs in the case of instant refunds
+	ErrSACPInvalidInputsLen = fmt.Errorf("signed inputs less than available inputs")
 
-// const (
-// 	Redeem        Leaf = "redeem"
-// 	Refund        Leaf = "refund"
-// 	InstantRefund Leaf = "instant_refund"
-// )
+	// ErrSACPInvalidInput is returned when the input in the signed tx is not the same as the utxo
+	// Occurs in the case of instant refunds
+	ErrSACPInvalidInput = fmt.Errorf("invalid signed input")
 
-// // RedeemLeaf is one of the leaf scripts in the HTLC script which can be spent by revealing the secret
-// // by the redeemer.
-// //
-// // redeemerPubkey must be x-only pubkey of the redeemer.
-// func RedeemLeaf(redeemerPubkey, secretHash []byte) (txscript.TapLeaf, error) {
-// 	script, err := txscript.NewScriptBuilder().
-// 		AddOp(txscript.OP_SHA256).
-// 		AddData(secretHash).
-// 		AddOp(txscript.OP_EQUALVERIFY).
-// 		AddData(redeemerPubkey).
-// 		AddOp(txscript.OP_CHECKSIG).
-// 		Script()
-// 	if err != nil {
-// 		return txscript.TapLeaf{}, err
-// 	}
-// 	return toLeaf(script), nil
+	// ErrSACPInvalidOutput is returned when the output script in the signed tx is not the same as the wallet address
+	ErrSACPInvalidOutput = fmt.Errorf("invalid output script in the signed tx")
 
-// }
+	// ErrInvalidSecret is returned when the secret is invalid while redeeming the HTLC
+	ErrInvalidSecret = fmt.Errorf("invalid secret")
 
-// // RefundLeaf is one of the leaf scripts in the HTLC script which can be spent by the initiator
-// // after the lock time.
-// //
-// // initiatorPubkey must be x-only pubkey of the initiator.
-// func RefundLeaf(initiatorPubkey []byte, lockTime int64) (txscript.TapLeaf, error) {
-// 	if lockTime > math.MaxUint16 || lockTime < 0 {
-// 		return txscript.TapLeaf{}, ErrInvalidLockTime
-// 	}
-// 	script, err := txscript.NewScriptBuilder().
-// 		AddOp(byte(lockTime)).
-// 		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
-// 		AddOp(txscript.OP_DROP).
-// 		AddData(initiatorPubkey).
-// 		AddOp(txscript.OP_CHECKSIG).
-// 		Script()
-// 	if err != nil {
-// 		return txscript.TapLeaf{}, err
-// 	}
-// 	return toLeaf(script), nil
-// }
+	// ErrInvalidInstantRefundSACPWitnessLen is returned when the witness length of the SACP tx is invalid
+	ErrInvalidInstantRefundSACPWitnessLen = fmt.Errorf("invalid witness length")
 
-// // InstantRefundLeaf is one of the leaf scripts in the HTLC script which can be spent by the initiator
-// // if both parties agree to refund instantly.
-// //
-// // pubkeys must be x-only pubkeys of the initiator and the redeemer.
-// func InstantRefundLeaf(initiatorPubkey, redeemerPubkey []byte) (txscript.TapLeaf, error) {
-// 	script, err := txscript.NewScriptBuilder().
-// 		AddData(initiatorPubkey).
-// 		AddOp(txscript.OP_CHECKSIG).
-// 		AddData(redeemerPubkey).
-// 		AddOp(txscript.OP_CHECKSIGADD).
-// 		AddOp(txscript.OP_2).
-// 		AddOp(txscript.OP_NUMEQUAL).
-// 		Script()
-// 	if err != nil {
-// 		return txscript.TapLeaf{}, err
-// 	}
-// 	return toLeaf(script), nil
-// }
+	// ErrInvalidControlBlock is returned when the control block in the signed SACP tx is invalid
+	ErrInvalidControlBlock = fmt.Errorf("invalid control block")
 
-// type HTLC struct {
-// 	InitiatorPubkey []byte
-// 	RedeemerPubkey  []byte
-// 	SecretHash      []byte
-// 	LockTime        int64
-// }
+	// ErrInvalidInstantRefundScript is returned when the instant refund script is invalid in the SACP tx
+	ErrInvalidInstantRefundScript = fmt.Errorf("invalid instant refund script")
 
-// type InstantRefundSignature struct {
-// 	Signature []byte
-// 	UtxoTxId  string
-// }
+	ErrHTLCNeedMoreBlocks = func(blocks uint64) error { return fmt.Errorf("need more %d blocks to refund", blocks) }
+)
 
-// type HTLCWallet interface {
-// 	Initiate(htlc *HTLC, amount uint64) (string, error)
-// 	Redeem(htlc *HTLC, secret []byte) (string, error)
-// 	Refund(htlc *HTLC, sigs []InstantRefundSignature) (string, error)
-// 	Address(htlc *HTLC) (btcutil.Address, error)
+type HTLC struct {
+	// X-only pubkey of the initiator
+	InitiatorPubkey []byte
+	// X-only pubkey of the redeemer
+	RedeemerPubkey []byte
+	SecretHash     []byte
+	// Locktime in blocks
+	LockTime uint32
+}
 
-// 	Status(id string) (*btcjson.TxRawResult, bool, error)
-// }
+type HTLCWallet interface {
+	// Initiate sends the amount to the HTLC address
+	Initiate(ctx context.Context, htlc *HTLC, amount int64) (string, error)
+	// Redeem redeems the HTLC with the secret
+	Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error)
+	// Refund refunds the HTLC if the htlc is expired.
+	// For instant refunds, the SACP tx signed by counterparty should be passed
+	Refund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte) (string, error)
+	// GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds.
+	//
+	// Signature is added at the first index of the witness of the transaction inputs.
+	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error)
+	// Address returns the tapscript address of the HTLC
+	Address(htlc *HTLC) (btcutil.Address, error)
+	// Status returns the transaction if submitted and bool indicating whether the transaction
+	// is submitted or not
+	Status(ctx context.Context, id string) (Transaction, bool, error)
+}
 
-// type htlcWallet struct {
-// 	// Wallet here could be a batcher wallet or RBF wallet or simple wallet
-// 	wallet      Wallet
-// 	chain       *chaincfg.Params
-// 	internalKey *btcec.PublicKey
-// 	indexer     IndexerClient
-// }
+type htlcWallet struct {
+	// Wallet here could be a batcher wallet or RBF wallet or simple wallet
+	wallet      Wallet
+	chain       *chaincfg.Params
+	internalKey *btcec.PublicKey
+	indexer     IndexerClient
+}
 
-// func NewHTLCWallet(wallet Wallet, chain *chaincfg.Params) *htlcWallet {
-// 	return &htlcWallet{
-// 		wallet:      wallet,
-// 		chain:       chain,
-// 		internalKey: gardenNums(),
-// 	}
+func NewHTLCWallet(wallet Wallet, indexer IndexerClient, chain *chaincfg.Params) (HTLCWallet, error) {
+	internalKey, err := GardenNUMS()
+	if err != nil {
+		return nil, err
+	}
 
-// }
+	return &htlcWallet{
+		wallet:      wallet,
+		chain:       chain,
+		internalKey: internalKey,
+		indexer:     indexer,
+	}, nil
+}
 
-// func (w *htlcWallet) Initiate(htlc *HTLC, amount uint64) (string, error) {
-// 	addr, err := w.Address(htlc)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return w.wallet.AddOutput(TxOutputRequest{
-// 		Value:   amount,
-// 		Address: addr.EncodeAddress(),
-// 	})
-// }
+func (hw *htlcWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
+	return hw.wallet.Status(ctx, id)
+}
 
-// // Generates the p2tr output key using the provided htlc
-// func (w *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
-// 	emptyAddr := &btcutil.AddressTaproot{}
-// 	redeemLeaf, err := RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
-// 	if err != nil {
-// 		return emptyAddr, err
-// 	}
-// 	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
-// 	if err != nil {
-// 		return emptyAddr, err
-// 	}
-// 	instantRefundLeaf, err := InstantRefundLeaf(htlc.InitiatorPubkey, htlc.RedeemerPubkey)
-// 	if err != nil {
-// 		return emptyAddr, err
-// 	}
+// Address returns the tapscript address of the HTLC
+func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 
-// 	refundsBranch := txscript.NewTapBranch(refundLeaf, instantRefundLeaf)
+	leaves, err := htlcLeaves(htlc)
+	if err != nil {
+		return nil, err
+	}
 
-// 	rootBranch := txscript.NewTapBranch(redeemLeaf, refundsBranch)
-// 	rootHash := rootBranch.TapHash()
+	tapScriptTree := txscript.AssembleTaprootScriptTree(leaves.ToArray()...)
 
-// 	outputKey := txscript.ComputeTaprootOutputKey(w.internalKey, rootHash[:])
+	tapScriptRootHash := tapScriptTree.RootNode.TapHash()
+	outputKey := txscript.ComputeTaprootOutputKey(
+		hw.internalKey, tapScriptRootHash[:],
+	)
 
-// 	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), w.chain)
-// 	if err != nil {
-// 		return &btcutil.AddressTaproot{}, err
-// 	}
+	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), hw.chain)
+	if err != nil {
+		return nil, err
+	}
+	return addr, nil
+}
 
-// 	// convert addr into btcuti.Address
+// GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds
+func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error) {
+	instantRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
+	if err != nil {
+		return nil, err
+	}
+	witness := [][]byte{
+		AddSignatureSchnorrOp,
+		// insert random sig placeholder for other parties to insert their signature
+		// this is for proper fee calculation
+		randomSig(),
+		instantRefundLeaf.Script,
+		cbBytes,
+	}
 
-// 	return addr, nil
-// }
+	scriptAddr, err := hw.Address(htlc)
+	if err != nil {
+		return nil, err
+	}
 
-// func (hw *htlcWallet) generateControlBlockFor(htlc *HTLC, leaf Leaf) ([]byte, error) {
-// 	rootHash, err := rootHash(htlc)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	outputKey := txscript.ComputeTaprootOutputKey(hw.internalKey, rootHash)
-// 	parityBtye := byte(0xc0)
-// 	if outputKey.Y().Bit(0) == 1 {
-// 		parityBtye = byte(0xc1)
-// 	}
+	txBytes, err := hw.wallet.GenerateSACP(ctx, SpendRequest{
+		Witness:       witness,
+		Leaf:          instantRefundLeaf,
+		ScriptAddress: scriptAddr,
+		HashType:      SigHashSingleAnyoneCanPay,
+	}, recipient)
+	if err != nil {
+		return nil, err
+	}
 
-// 	controlBlock := []byte{parityBtye}
-// 	controlBlock = append(controlBlock, hw.internalKey.X().Bytes()...)
+	return txBytes, nil
+}
 
-// 	redeemLeaf, err := RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	instantRefundLeaf, err := InstantRefundLeaf(htlc.InitiatorPubkey, htlc.RedeemerPubkey)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+// Initiate sends the amount to the HTLC address
+func (hw *htlcWallet) Initiate(ctx context.Context, htlc *HTLC, amount int64) (string, error) {
+	addr, err := hw.Address(htlc)
+	if err != nil {
+		return "", err
+	}
+	return hw.wallet.Send(ctx, []SendRequest{
+		{
+			To:     addr,
+			Amount: amount,
+		},
+	}, nil, nil)
+}
 
-// 	instantRefundLeafHash := instantRefundLeaf.TapHash()
-// 	refundLeafHash := refundLeaf.TapHash()
-// 	redeemLeafHash := redeemLeaf.TapHash()
-// 	switch leaf {
-// 	case Redeem:
-// 		refundsHash := txscript.NewTapBranch(refundLeaf, instantRefundLeaf).TapHash()
-// 		controlBlock = append(controlBlock, refundsHash[:]...)
-// 	case Refund:
-// 		controlBlock = append(controlBlock, instantRefundLeafHash[:]...)
-// 		controlBlock = append(controlBlock, redeemLeafHash[:]...)
-// 	case InstantRefund:
-// 		controlBlock = append(controlBlock, refundLeafHash[:]...)
-// 		controlBlock = append(controlBlock, redeemLeafHash[:]...)
-// 	default:
-// 		return nil, fmt.Errorf("invalid leaf type")
-// 	}
+// Redeem redeems the HTLC with the secret
+func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error) {
+	if !isSecretValid(secret, htlc) {
+		return "", ErrInvalidSecret
+	}
 
-// 	_, err = txscript.ParseControlBlock(controlBlock)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	redeemTapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRedeem)
+	if err != nil {
+		return "", err
+	}
+	witness := [][]byte{
+		AddSignatureSchnorrOp,
+		secret,
+		redeemTapLeaf.Script,
+		cbBytes,
+	}
 
-// 	return controlBlock, nil
+	scriptAddr, err := hw.Address(htlc)
+	if err != nil {
+		return "", err
+	}
 
-// }
+	return hw.wallet.Send(ctx, nil, []SpendRequest{
+		{
+			Witness:       witness,
+			Leaf:          redeemTapLeaf,
+			ScriptAddress: scriptAddr,
+			HashType:      txscript.SigHashAll,
+		},
+	}, nil)
+}
 
-// func (hw *htlcWallet) Refund(htlc *HTLC, sigs []InstantRefundSignature) (string, error) {
-// 	address, err := hw.Address(htlc)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	currentTip, err := hw.indexer.GetTipBlockHeight(context.Background())
-// 	if err != nil {
-// 		return "", err
-// 	}
+// instantRefund refunds given the counterparty signed SACP tx
+func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP []byte) (string, error) {
 
-// 	utxos, err := hw.indexer.GetUTXOs(context.Background(), address)
-// 	if err != nil {
-// 		return "", err
-// 	}
+	scriptAddr, err := hw.Address(htlc)
+	if err != nil {
+		return "", err
+	}
 
-// 	for _, utxo := range utxos {
-// 		needMoreBlocks := int64(0)
-// 		// check if utxo has been expired
-// 		if utxo.Status.Confirmed && int64(*utxo.Status.BlockHeight)+htlc.LockTime > int64(currentTip) {
-// 			needMoreBlocks = int64(*utxo.Status.BlockHeight) + htlc.LockTime - int64(currentTip) + 1
-// 		} else if !utxo.Status.Confirmed {
-// 			needMoreBlocks = htlc.LockTime + 1
-// 		}
-// 		if needMoreBlocks > 0 {
-// 			return "", fmt.Errorf("utxo has not been expired yet")
-// 		}
-// 	}
+	utxos, err := hw.indexer.GetUTXOs(ctx, scriptAddr)
+	if err != nil {
+		return "", err
+	}
+	utxoValue := int64(0)
+	for _, utxo := range utxos {
+		utxoValue += utxo.Amount
+	}
+	instandRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
+	if err != nil {
+		return "", err
+	}
+	tx, err := validateInstantRefundSACP(refundSACP, utxos, hw.wallet.Address(), cbBytes, instandRefundLeaf)
+	if err != nil {
+		return "", err
+	}
 
-// 	leaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
+	instantRefundWitness := [][]byte{
+		AddSignatureSchnorrOp,
+		// insert invalid placeholder signature for other parties to insert their signature
+		// this is for proper fee calculation
+		randomSig(),
+		instandRefundLeaf.Script,
+		cbBytes,
+	}
 
-// 	if err != nil {
-// 		return "", err
-// 	}
+	for i := range tx.TxIn {
+		// 0th index is the signature of this wallet
+		witnessWithSig, err := hw.wallet.SignSACPTx(tx, i, utxoValue, instandRefundLeaf, scriptAddr, instantRefundWitness)
+		if err != nil {
+			return "", err
+		}
 
-// 	inputs := make([]InputWithWitness, 0, len(utxos))
+		// Format the witness to include the signature of the initiator at the 1st index of the witness
+		// 0th index should be the signature of the redeemer
+		// 1st index should be the signature of the initiator
+		tx.TxIn[i].Witness[1] = witnessWithSig[0]
+	}
 
-// 	for _, utxo := range utxos {
-// 		cb, err := hw.generateControlBlockFor(htlc, Refund)
-// 		if err != nil {
-// 			return "", err
-// 		}
+	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+	err = tx.Serialize(buf)
+	if err != nil {
+		return "", err
+	}
+	// submit an SACP tx
+	return hw.wallet.Send(ctx, nil, nil, [][]byte{buf.Bytes()})
 
-// 		// find the utxo txid in the sigs
-// 		var sig []byte
-// 		for _, s := range sigs {
-// 			if s.UtxoTxId == utxo.TxID {
-// 				sig = s.Signature
-// 				break
-// 			}
-// 		}
+}
 
-// 		witness := [][]byte{
-// 			sig,
-// 			leaf.Script,
-// 			cb,
-// 		}
-// 		inputs = append(inputs, InputWithWitness{
-// 			Witness: witness,
-// 			Utxo:    utxo,
-// 		})
-// 	}
+func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (string, error) {
+	if sigTx != nil {
+		return hw.instantRefund(ctx, htlc, sigTx)
+	}
 
-// 	tx := SpendRequest{
-// 		Inputs: inputs,
-// 		isSACP: false,
-// 	}
+	scriptAddr, err := hw.Address(htlc)
+	if err != nil {
+		return "", err
+	}
 
-// 	return hw.wallet.AddInput(&tx)
+	currentTip, err := hw.indexer.GetTipBlockHeight(context.Background())
+	if err != nil {
+		return "", err
+	}
 
-// }
+	utxos, err := hw.indexer.GetUTXOs(context.Background(), scriptAddr)
+	if err != nil {
+		return "", err
+	}
 
-// func (hw *htlcWallet) Redeem(htlc *HTLC, secret []byte) (string, error) {
-// 	address, err := hw.Address(htlc)
-// 	if err != nil {
-// 		return "", err
-// 	}
+	canRefund, needMoreBlocks := canRefund(utxos, htlc, currentTip)
+	if !canRefund {
+		return "", ErrHTLCNeedMoreBlocks(needMoreBlocks)
+	}
+	tapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRefund)
 
-// 	utxos, err := hw.indexer.GetUTXOs(context.Background(), address)
-// 	if err != nil {
-// 		return "", err
-// 	}
+	witness := [][]byte{
+		AddSignatureSchnorrOp,
+		tapLeaf.Script,
+		cbBytes,
+	}
 
-// 	leaf, err := RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
-// 	if err != nil {
-// 		return "", err
-// 	}
+	return hw.wallet.Send(ctx, nil, []SpendRequest{
+		{
+			Witness:       witness,
+			Leaf:          tapLeaf,
+			ScriptAddress: scriptAddr,
+			HashType:      txscript.SigHashAll,
+			Sequence:      htlc.LockTime,
+		},
+	}, nil)
+}
 
-// 	inputs := make([]InputWithWitness, 0, len(utxos))
+// ------------------ Helper functions ------------------
 
-// 	for _, utxo := range utxos {
-// 		cb, err := hw.generateControlBlockFor(htlc, Redeem)
-// 		if err != nil {
-// 			return "", err
-// 		}
-// 		witness := [][]byte{
-// 			AddSignatureOp,
-// 			secret,
-// 			leaf.Script,
-// 			cb,
-// 		}
-// 		inputs = append(inputs, InputWithWitness{
-// 			Witness: witness,
-// 			Utxo:    utxo,
-// 		})
-// 	}
+func isSecretValid(secret []byte, htlc *HTLC) bool {
+	hash := sha256.Sum256(secret)
+	return bytes.Equal(hash[:], htlc.SecretHash)
+}
 
-// 	tx := SpendRequest{
-// 		Inputs: inputs,
-// 		isSACP: false,
-// 	}
+func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcutil.Address, cb []byte, instantRefundLeaf txscript.TapLeaf) (*wire.MsgTx, error) {
+	btcTx, err := btcutil.NewTxFromBytes(refundSACP)
+	if err != nil {
+		return nil, err
+	}
 
-// 	return hw.wallet.AddInput(&tx)
-// }
+	tx := btcTx.MsgTx()
 
-// func rootHash(htlc *HTLC) ([]byte, error) {
-// 	redeemLeaf, err := RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	instantRefundLeaf, err := InstantRefundLeaf(htlc.InitiatorPubkey, htlc.RedeemerPubkey)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	// Validate the tx
+	if len(tx.TxIn) != len(utxos) {
+		return nil, ErrSACPInvalidInputsLen
+	}
 
-// 	refundsBranch := txscript.NewTapBranch(refundLeaf, instantRefundLeaf)
+	pkScript, err := txscript.PayToAddrScript(recipient)
+	if err != nil {
+		return nil, err
+	}
 
-// 	rootBranch := txscript.NewTapBranch(redeemLeaf, refundsBranch)
-// 	hash := rootBranch.TapHash()
-// 	return hash[:], nil
-// }
+	// Check if txHashs match with the utxos
+	for i, txIn := range tx.TxIn {
+		if txIn.PreviousOutPoint.Hash.String() != utxos[i].TxID {
+			return nil, ErrSACPInvalidInput
+		}
+		if !bytes.Equal(tx.TxOut[i].PkScript, pkScript) {
+			return nil, ErrSACPInvalidOutput
+		}
+	}
 
-// func gardenNums() *btcec.PublicKey {
-// 	// H value from BIP-341
-// 	xCoordHex := "0x50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
+	// witness should have 4 elements
+	if len(tx.TxIn[0].Witness) != 4 {
+		return nil, ErrInvalidInstantRefundSACPWitnessLen
+	}
 
-// 	// Convert the x coordinate from hex to a big integer
-// 	xCoord, _ := new(big.Int).SetString(xCoordHex[2:], 16)
+	//TODO: check if the signature is valid
 
-// 	// Calculate the y coordinate for the given x coordinate
-// 	curve := btcec.S256()
-// 	yCoord := new(big.Int).ModSqrt(new(big.Int).Exp(xCoord, big.NewInt(3), curve.P), curve.P)
-// 	format := byte(0x03)
-// 	if yCoord.Bit(0) == 0 {
-// 		format = byte(0x02)
-// 	}
+	// first two should be signature lens
+	if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
+		return nil, ErrInvalidInstantRefundSACPWitnessLen
+	}
+	// instant refund script should be the same
+	if !bytes.Equal(tx.TxIn[0].Witness[2], instantRefundLeaf.Script) {
+		return nil, ErrInvalidInstantRefundScript
+	}
+	// control block should be the same
+	if !bytes.Equal(tx.TxIn[0].Witness[3], cb) {
+		return nil, ErrInvalidControlBlock
+	}
 
-// 	compressedH := append([]byte{format}, xCoord.Bytes()...)
-// 	H, err := btcec.ParsePubKey(compressedH[:])
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	return tx, nil
+}
 
-// 	r := sha256.Sum256([]byte("GardenHTLC"))
-// 	_, rG := btcec.PrivKeyFromBytes(r[:])
+// checks if the utxos can be refunded
+func canRefund(utxos []UTXO, htlc *HTLC, currentTip uint64) (bool, uint64) {
+	for _, utxo := range utxos {
+		needMoreBlocks := uint64(0)
+		timelock := uint64(htlc.LockTime)
 
-// 	numsX, numsY := curve.Add(H.X(), H.Y(), rG.X(), rG.Y())
-// 	if !curve.IsOnCurve(numsX, numsY) {
-// 		panic("invalid nums")
-// 	}
+		// check if utxo has been expired
+		if utxo.Status.Confirmed && *utxo.Status.BlockHeight+timelock-1 > currentTip {
+			needMoreBlocks = *utxo.Status.BlockHeight + timelock - currentTip + 1
+		} else if !utxo.Status.Confirmed {
+			needMoreBlocks = timelock + 1
+		}
+		if needMoreBlocks > 0 {
+			return false, needMoreBlocks
+		}
+	}
+	return true, 0
+}
 
-// 	formatNums := byte(0x03)
-// 	if numsY.Bit(0) == 0 {
-// 		formatNums = byte(0x02)
-// 	}
+func randomSig() []byte {
+	sig := make([]byte, 65)
+	_, _ = rand.Read(sig)
+	return sig
+}
 
-// 	compressedNums := append([]byte{formatNums}, numsX.Bytes()...)
-// 	nums, err := btcec.ParsePubKey(compressedNums)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	return nums
-// }
+func htlcLeaves(htlc *HTLC) (*htlcTapLeaves, error) {
+	redeemLeaf, err := RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
+	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
 
-// // Helper function to convert a script to a leaf with version 0xc0.
-// func toLeaf(script []byte) txscript.TapLeaf {
-// 	return txscript.NewTapLeaf(0xc0, script)
-// }
+	instantRefundLeaf, err := MultiSigLeaf(htlc.InitiatorPubkey, htlc.RedeemerPubkey)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
+	return NewLeaves(redeemLeaf, refundLeaf, instantRefundLeaf)
+}
+
+// Helper struct to manage HTLC leaves
+type htlcTapLeaves struct {
+	redeem        txscript.TapLeaf
+	refund        txscript.TapLeaf
+	instantRefund txscript.TapLeaf
+}
+
+type Leaf string
+
+const (
+	LeafRedeem        Leaf = "redeem"
+	LeafRefund        Leaf = "refund"
+	LeafInstantRefund Leaf = "instantRefund"
+)
+
+func NewLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, error) {
+
+	return &htlcTapLeaves{
+		redeem:        redeem,
+		refund:        refund,
+		instantRefund: instantRefund,
+	}, nil
+}
+
+func (l *htlcTapLeaves) ToArray() []txscript.TapLeaf {
+	return []txscript.TapLeaf{l.redeem, l.refund, l.instantRefund}
+}
+
+func getControlBlock(internalKey *btcec.PublicKey, htlc *HTLC, leaf Leaf) (txscript.TapLeaf, []byte, error) {
+	leaves, err := htlcLeaves(htlc)
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
+
+	tapScriptTree := txscript.AssembleTaprootScriptTree(leaves.ToArray()...)
+
+	controlBlock := tapScriptTree.LeafMerkleProofs[leaves.IndexOf(leaf)].ToControlBlock(
+		internalKey,
+	)
+
+	cbBytes, err := controlBlock.ToBytes()
+
+	tapLeaf, err := leaves.GetTapLeaf(leaf)
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
+
+	return tapLeaf, cbBytes, nil
+}
+
+func (l *htlcTapLeaves) GetTapLeaf(leaf Leaf) (txscript.TapLeaf, error) {
+	switch leaf {
+	case LeafRedeem:
+		return l.redeem, nil
+	case LeafRefund:
+		return l.refund, nil
+	case LeafInstantRefund:
+		return l.instantRefund, nil
+	default:
+		return txscript.TapLeaf{}, nil
+	}
+}
+
+func (l *htlcTapLeaves) IndexOf(leaf Leaf) int {
+	var leafScript []byte
+
+	switch leaf {
+	case LeafRedeem:
+		leafScript = l.redeem.Script
+	case LeafRefund:
+		leafScript = l.refund.Script
+	case LeafInstantRefund:
+		leafScript = l.instantRefund.Script
+	default:
+		return -1
+	}
+
+	leaves := l.ToArray()
+	for i, l := range leaves {
+		if bytes.Equal(l.Script, leafScript) {
+			return i
+		}
+	}
+	return -1
+}

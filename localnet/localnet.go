@@ -157,17 +157,46 @@ func FundBitcoin(addr string, indexer btc.IndexerClient) (*chainhash.Hash, error
 	if err != nil {
 		return nil, err
 	}
-	for {
+	for start := time.Now(); ; {
 		_, err = indexer.GetTx(context.Background(), txHash.String())
 		if err == nil {
 			return txHash, nil
 		}
 		if err.Error() == "Transaction not found" {
 			time.Sleep(10 * time.Millisecond)
+			if time.Since(start) > 1*time.Minute {
+				return nil, fmt.Errorf("timeout while waiting for transaction to be indexed")
+			}
 			continue
 		}
 		return txHash, err
 
+	}
+}
+
+// MineBitcoinBlocks will mine n blocks in the Bitcoin regtest.
+// It also waits for the blocks to be indexed by the indexer.
+func MineBitcoinBlocks(n int, indexer btc.IndexerClient) error {
+	currentHeight, err := indexer.GetTipBlockHeight(context.Background())
+	if err != nil {
+		return err
+	}
+	_, err = RunOutput("merry", "rpc", "--generate", fmt.Sprintf("%d", n))
+	if err != nil {
+		return err
+	}
+	for start := time.Now(); ; {
+		height, err := indexer.GetTipBlockHeight(context.Background())
+		if err != nil {
+			return err
+		}
+		if height >= currentHeight+uint64(n) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+		if time.Since(start) > 1*time.Minute {
+			return fmt.Errorf("timeout while waiting for blocks to be indexed")
+		}
 	}
 }
 
