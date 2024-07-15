@@ -3,6 +3,7 @@ package btc_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"time"
@@ -481,6 +482,14 @@ var _ = Describe("Bitcoin scripts", func() {
 				Expect(err).To(BeNil())
 				Expect(btc.IsHtlc(htlcScript)).Should(BeFalse())
 			})
+		})
+	})
+	Context("GardenNUMS", func() {
+		It("should be able to create static GardenNUMS point", func() {
+			gardenNUMS, err := btc.GardenNUMS()
+			Expect(err).To(BeNil())
+			Expect(gardenNUMS).ShouldNot(BeNil())
+			Expect(hex.EncodeToString(gardenNUMS.X().Bytes())).Should(Equal("2160e11a135f94e536a5b222e5d09fd9db1be5f5f5e753920290c0410cf388f0"))
 		})
 	})
 })

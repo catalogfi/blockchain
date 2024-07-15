@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math"
+	"math/big"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -23,6 +25,65 @@ var (
 )
 
 var ErrInvalidLockTime = fmt.Errorf("invalid lock-time")
+
+// RedeemLeaf is one of the leaf scripts in the HTLC script which can be spent by revealing the secret
+// by the redeemer.
+//
+// redeemerPubkey must be x-only pubkey of the redeemer.
+func RedeemLeaf(redeemerPubkey, secretHash []byte) (txscript.TapLeaf, error) {
+	script, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_SHA256).
+		AddData(secretHash).
+		AddOp(txscript.OP_EQUALVERIFY).
+		AddData(redeemerPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
+
+// RefundLeaf is one of the leaf scripts in the HTLC script which can be spent by the initiator
+// after the lock time.
+//
+// initiatorPubkey must be x-only pubkey of the initiator.
+func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, error) {
+	if lockTime > math.MaxUint16 {
+		return txscript.TapLeaf{}, ErrInvalidLockTime
+	}
+
+	script, err := txscript.NewScriptBuilder().
+		AddInt64(int64(lockTime)).
+		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddData(initiatorPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
+
+// MultiSigLeaf is a 2 on 2 multisig leaf script
+//
+// pubkeys must be x-only pubkeys of the initiator and the redeemer.
+func MultiSigLeaf(initiatorPubkey, redeemerPubkey []byte) (txscript.TapLeaf, error) {
+
+	script, err := txscript.NewScriptBuilder().
+		AddData(initiatorPubkey).
+		AddOp(txscript.OP_CHECKSIG).
+		AddData(redeemerPubkey).
+		AddOp(txscript.OP_CHECKSIGADD).
+		AddOp(txscript.OP_2).
+		AddOp(txscript.OP_NUMEQUAL).
+		Script()
+	if err != nil {
+		return txscript.TapLeaf{}, err
+	}
+	return toLeaf(script), nil
+}
 
 // MultisigScript generates a 2-out-2 multisig script.
 func MultisigScript(pubKeyA, pubKeyB []byte) ([]byte, error) {
@@ -162,6 +223,48 @@ func P2wshAddress(script []byte, network *chaincfg.Params) (btcutil.Address, err
 	return btcutil.NewAddressWitnessScriptHash(scriptHash[:], network)
 }
 
+func GardenNUMS() (*btcec.PublicKey, error) {
+	// H value from BIP-341
+	xCoordHex := "0x50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
+
+	// Convert the x coordinate from hex to a big integer
+	xCoord, _ := new(big.Int).SetString(xCoordHex[2:], 16)
+
+	// Calculate the y coordinate for the given x coordinate
+	curve := btcec.S256()
+	yCoord := new(big.Int).ModSqrt(new(big.Int).Exp(xCoord, big.NewInt(3), curve.P), curve.P)
+	format := byte(0x03)
+	if yCoord.Bit(0) == 0 {
+		format = byte(0x02)
+	}
+
+	compressedH := append([]byte{format}, xCoord.Bytes()...)
+	H, err := btcec.ParsePubKey(compressedH[:])
+	if err != nil {
+		return nil, err
+	}
+
+	r := sha256.Sum256([]byte("GardenHTLC"))
+	_, rG := btcec.PrivKeyFromBytes(r[:])
+
+	numsX, numsY := curve.Add(H.X(), H.Y(), rG.X(), rG.Y())
+	if !curve.IsOnCurve(numsX, numsY) {
+		return nil, fmt.Errorf("invalid NUMS point")
+	}
+
+	formatNums := byte(0x03)
+	if numsY.Bit(0) == 0 {
+		formatNums = byte(0x02)
+	}
+
+	compressedNums := append([]byte{formatNums}, numsX.Bytes()...)
+	nums, err := btcec.ParsePubKey(compressedNums)
+	if err != nil {
+		panic(err)
+	}
+	return nums, nil
+}
+
 // modified from https://github.com/btcsuite/btcd/blob/4171854739fa2590a99c486341209d3aea8404dc/txscript/scriptnum.go#L198
 func decodeLocktime(v []byte) int64 {
 	// Zero is encoded as an empty byte slice.
@@ -187,4 +290,9 @@ func decodeLocktime(v []byte) int64 {
 	}
 
 	return result
+}
+
+// Helper function to convert a script to a leaf with version 0xc0.
+func toLeaf(script []byte) txscript.TapLeaf {
+	return txscript.NewTapLeaf(0xc0, script)
 }

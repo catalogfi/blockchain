@@ -22,6 +22,14 @@ const (
 	BlockstreamAPI = "https://blockstream.info/api/fee-estimates"
 )
 
+type FeeLevel string
+
+var (
+	MediumFee FeeLevel = "medium"
+	HighFee   FeeLevel = "high"
+	LowFee    FeeLevel = "low"
+)
+
 var (
 	// RedeemHtlcRefundSigScriptSize is an estimate of the sigScript size when refunding an htlc script
 	// stack number + stack size * 4 + signature + public key + script size
@@ -45,6 +53,31 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	baseSize += extraBaseSize
 	swSize := 2 + extraSegwitSize
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
+}
+
+// EstimateFee will return the estimated fee for the given transaction.
+// Tx should be a fully signed segwit transaction.
+func EstimateSegwitFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel) (int, error) {
+	baseSize := tx.SerializeSizeStripped()
+	totalSize := tx.SerializeSize()
+	weight := baseSize*3 + totalSize
+	vSize := weight / blockchain.WitnessScaleFactor
+
+	fees, err := estimator.FeeSuggestion()
+	if err != nil {
+		return 0, err
+	}
+	feeRate := fees.Medium
+	switch feeLevel {
+	case MediumFee:
+		feeRate = fees.Medium
+	case HighFee:
+		feeRate = fees.High
+	case LowFee:
+		feeRate = fees.Low
+	}
+
+	return vSize * feeRate, nil
 }
 
 // TxVirtualSize returns the virtual size of a transaction.
