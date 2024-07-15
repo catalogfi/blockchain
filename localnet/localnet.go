@@ -157,13 +157,16 @@ func FundBitcoin(addr string, indexer btc.IndexerClient) (*chainhash.Hash, error
 	if err != nil {
 		return nil, err
 	}
-	for {
+	for start := time.Now(); ; {
 		_, err = indexer.GetTx(context.Background(), txHash.String())
 		if err == nil {
 			return txHash, nil
 		}
 		if err.Error() == "Transaction not found" {
 			time.Sleep(10 * time.Millisecond)
+			if time.Since(start) > 1*time.Minute {
+				return nil, fmt.Errorf("timeout while waiting for transaction to be indexed")
+			}
 			continue
 		}
 		return txHash, err
@@ -182,7 +185,7 @@ func MineBitcoinBlocks(n int, indexer btc.IndexerClient) error {
 	if err != nil {
 		return err
 	}
-	for {
+	for start := time.Now(); ; {
 		height, err := indexer.GetTipBlockHeight(context.Background())
 		if err != nil {
 			return err
@@ -191,6 +194,9 @@ func MineBitcoinBlocks(n int, indexer btc.IndexerClient) error {
 			return nil
 		}
 		time.Sleep(10 * time.Millisecond)
+		if time.Since(start) > 1*time.Minute {
+			return fmt.Errorf("timeout while waiting for blocks to be indexed")
+		}
 	}
 }
 
