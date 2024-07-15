@@ -8,7 +8,6 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"go.uber.org/zap"
 )
@@ -36,18 +35,20 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	// Filter requests to get spend and send requests
-	spendRequests, sendRequests, reqIds := func() ([]SpendRequest, []SendRequest, map[string]bool) {
+	spendRequests, sendRequests, sacps, reqIds := func() ([]SpendRequest, []SendRequest, [][]byte, map[string]bool) {
 		spendRequests := []SpendRequest{}
 		sendRequests := []SendRequest{}
+		sacps := [][]byte{}
 		reqIds := make(map[string]bool)
 
 		for _, req := range requests {
 			spendRequests = append(spendRequests, req.Spends...)
 			sendRequests = append(sendRequests, req.Sends...)
+			sacps = append(sacps, req.SACPs...)
 			reqIds[req.ID] = true
 		}
 
-		return spendRequests, sendRequests, reqIds
+		return spendRequests, sendRequests, sacps, reqIds
 	}()
 
 	// Return error if no requests found
@@ -56,7 +57,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	// Validate spend requests
-	err = validateSpendRequest(spendRequests)
+	err = validateRequests(spendRequests, sendRequests)
 	if err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
-		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true)
+		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true, CPFP)
 	})
 	if err != nil {
 		return err
@@ -113,6 +114,8 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		utxos, // all utxos available in the wallet
 		spendRequests,
 		sendRequests,
+		sacps,
+		nil,
 		0,                 // will be calculated in the buildCPFPTx function
 		feeStats.FeeDelta, // fee needed to bump the existing batches
 		requiredFeeRate,
@@ -186,7 +189,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
-		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true)
+		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true, CPFP)
 	})
 	if err != nil {
 		return err
@@ -224,6 +227,8 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 		utxos,
 		[]SpendRequest{},
 		[]SendRequest{},
+		nil,
+		nil,
 		0,
 		feeStats.FeeDelta,
 		requiredFeeRate,
@@ -255,7 +260,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 }
 
 // buildCPFPTx builds a CPFP transaction
-func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendRequests []SpendRequest, sendRequests []SendRequest, fee, feeOverhead, feeRate int, depth int) (*wire.MsgTx, error) {
+func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendRequests []SpendRequest, sendRequests []SendRequest, sacps [][]byte, sequencesMap map[string]uint32, fee, feeOverhead, feeRate int, depth int) (*wire.MsgTx, error) {
 	// Check recursion depth to prevent infinite loops
 	// 1 depth is optimal for most cases
 	if depth < 0 {
@@ -263,7 +268,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	var spendUTXOs UTXOs
-	var spendUTXOMap map[string]UTXOs
+	var spendUTXOMap map[btcutil.Address]UTXOs
 	var balanceOfScripts int64
 	var err error
 
@@ -274,6 +279,11 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	spendUTXOMap[w.address] = append(spendUTXOMap[w.address], utxos...)
+	if sequencesMap == nil {
+		sequencesMap = generateSequenceMap(spendUTXOMap, spendRequests)
 	}
 
 	// Check if there are no funds to spend for the given scripts
@@ -297,25 +307,19 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	// Build the transaction with the available UTXOs and requests
-	tx, err := buildTransaction(append(spendUTXOs, utxos...), tempSendRequests, w.address, fee+feeOverhead)
+	tx, signIdx, err := buildTransaction(append(spendUTXOs, utxos...), sacps, tempSendRequests, w.address, int64(fee+feeOverhead), sequencesMap)
 	if err != nil {
 		return nil, err
 	}
 
 	// Sign the spend inputs
-	err = signSpendTx(tx, spendRequests, spendUTXOMap, w.privateKey)
+	err = signSpendTx(tx, signIdx, spendRequests, spendUTXOMap, w.indexer, w.privateKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get the send signing script
-	script, err := txscript.PayToAddrScript(w.address)
-	if err != nil {
-		return tx, err
-	}
-
 	// Sign the fee providing inputs, if any
-	err = signSendTx(tx, utxos, len(spendUTXOs), script, w.privateKey)
+	err = signSendTx(tx, utxos, len(spendUTXOs), w.address, w.privateKey)
 	if err != nil {
 		return tx, err
 	}
@@ -329,7 +333,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 
 	// If the new fee estimate exceeds the current fee, rebuild the CPFP transaction
 	if newFeeEstimate > fee+feeOverhead {
-		return w.buildCPFPTx(c, utxos, spendRequests, sendRequests, newFeeEstimate, 0, feeRate, depth-1)
+		return w.buildCPFPTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, newFeeEstimate, 0, feeRate, depth-1)
 	}
 
 	return tx, nil

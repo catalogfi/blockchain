@@ -61,16 +61,21 @@ func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
 	return nil
 }
 
-func (m *mockCache) UpdateBatchStatuses(ctx context.Context, txIds []string, status bool) error {
+func (m *mockCache) UpdateBatchStatuses(ctx context.Context, txIds []string, status bool, strategy btc.Strategy) error {
+	confirmedBatchIds := make(map[string]bool)
 	for _, id := range txIds {
 		batch, ok := m.batches[id]
 		if !ok {
 			return fmt.Errorf("batch not found")
 		}
+		if status {
+			confirmedBatchIds[id] = true
+		}
+
 		batch.Tx.Status.Confirmed = status
 		m.batches[id] = batch
 	}
-	return nil
+	return m.DeletePendingBatches(ctx, confirmedBatchIds, strategy)
 }
 
 func (m *mockCache) ReadRequest(ctx context.Context, id string) (btc.BatcherRequest, error) {

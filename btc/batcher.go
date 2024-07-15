@@ -10,6 +10,8 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -18,7 +20,7 @@ import (
 
 var (
 	AddSignatureOp        = []byte("add_signature")
-	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight - 10 // removes 10vb of overhead for segwit
+	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight // removes 10vb of overhead for segwit
 )
 var (
 	ErrBatchNotFound             = errors.New("batch not found")
@@ -64,7 +66,7 @@ type Cache interface {
 	ReadLatestBatch(ctx context.Context, strategy Strategy) (Batch, error)
 	ReadPendingChangeUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
 	ReadPendingFundingUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
-	UpdateBatchStatuses(ctx context.Context, txId []string, status bool) error
+	UpdateBatchStatuses(ctx context.Context, txId []string, status bool, strategy Strategy) error
 	UpdateBatchFees(ctx context.Context, txId []string, fee int64) error
 	SaveBatch(ctx context.Context, batch Batch) error
 	DeletePendingBatches(ctx context.Context, confirmedTxIds map[string]bool, strategy Strategy) error
@@ -81,6 +83,7 @@ type BatcherRequest struct {
 	ID     string
 	Spends []SpendRequest
 	Sends  []SendRequest
+	SACPs  [][]byte
 	Status bool
 }
 
@@ -127,6 +130,7 @@ type batcherWallet struct {
 	privateKey *secp256k1.PrivateKey
 	logger     *zap.Logger
 
+	sw           Wallet
 	opts         BatcherOptions
 	indexer      IndexerClient
 	feeEstimator FeeEstimator
@@ -163,6 +167,13 @@ func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, f
 			return nil, err
 		}
 	}
+
+	simpleWallet, err := NewSimpleWallet(privateKey, chainParams, indexer, feeEstimator, wallet.opts.TxOptions.FeeLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	wallet.sw = simpleWallet
 	return wallet, nil
 }
 
@@ -218,9 +229,17 @@ func (w *batcherWallet) Address() btcutil.Address {
 	return w.address
 }
 
+func (w *batcherWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest, to btcutil.Address) ([]byte, error) {
+	return w.sw.GenerateSACP(ctx, spendReq, to)
+}
+
+func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf txscript.TapLeaf, scriptAddr btcutil.Address, witness [][]byte) ([][]byte, error) {
+	return w.sw.SignSACPTx(tx, idx, amount, leaf, scriptAddr, witness)
+}
+
 // Send creates a batch request , saves it in the cache and returns a tracking id
-func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest) (string, error) {
-	if err := validateSpendRequest(spends); err != nil {
+func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
+	if err := validateRequests(spends, sends); err != nil {
 		return "", err
 	}
 
@@ -229,6 +248,7 @@ func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []
 		ID:     id,
 		Spends: spends,
 		Sends:  sends,
+		SACPs:  sacps,
 		Status: false,
 	}
 	return id, w.cache.SaveRequest(ctx, id, req)
