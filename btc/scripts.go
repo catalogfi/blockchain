@@ -49,7 +49,7 @@ func RedeemLeaf(redeemerPubkey, secretHash []byte) (txscript.TapLeaf, error) {
 //
 // initiatorPubkey must be x-only pubkey of the initiator.
 func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, error) {
-	if lockTime > math.MaxUint16 || lockTime < 0 {
+	if lockTime > math.MaxUint16 {
 		return txscript.TapLeaf{}, ErrInvalidLockTime
 	}
 	// 64b275202a003722cb3cd5207b5cd37bab158ddd36a1000abfa316bbd8811987139247fdac
