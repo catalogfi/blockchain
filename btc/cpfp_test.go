@@ -54,7 +54,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			},
 		}
 
-		id, err := wallet.Send(context.Background(), req, nil)
+		id, err := wallet.Send(context.Background(), req, nil, nil)
 		Expect(err).To(BeNil())
 
 		var tx btc.Transaction
@@ -116,7 +116,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			},
 		}
 
-		id, err := wallet.Send(context.Background(), req, nil)
+		id, err := wallet.Send(context.Background(), req, nil, nil)
 		Expect(err).To(BeNil())
 
 		var tx btc.Transaction
@@ -142,10 +142,9 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	})
 
 	It("should be able to spend multiple scripts and send to multiple parties", func() {
-		Skip("signing is not working") // will be fixed by merging master
 		amount := int64(100000)
 
-		p2wshSigCheckScript, p2wshSigCheckScriptAddr, err := sigCheckScript(*chainParams)
+		p2wshSigCheckScript, p2wshSigCheckScriptAddr, err := sigCheckScript(*chainParams, privateKey)
 		Expect(err).To(BeNil())
 
 		p2wshAdditionScript, p2wshScriptAddr, err := additionScript(*chainParams)
@@ -163,26 +162,6 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			p2trScriptAddr.EncodeAddress(),
 			checkSigScriptAddr.EncodeAddress(),
 		})
-
-		By("Fund the scripts")
-		_, err = wallet.Send(context.Background(), []btc.SendRequest{
-			{
-				Amount: amount,
-				To:     p2wshScriptAddr,
-			},
-			{
-				Amount: amount,
-				To:     p2wshSigCheckScriptAddr,
-			},
-			{
-				Amount: amount,
-				To:     p2trScriptAddr,
-			},
-			{
-				Amount: amount,
-				To:     checkSigScriptAddr,
-			},
-		}, nil)
 		Expect(err).To(BeNil())
 
 		By("Let's create recipients")
@@ -220,7 +199,6 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			{
 				Witness: [][]byte{
 					btc.AddSignatureSegwitOp,
-					btc.AddPubkeyCompressedOp,
 					p2wshSigCheckScript,
 				},
 				Script:        p2wshSigCheckScript,
@@ -247,7 +225,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 				ScriptAddress: checkSigScriptAddr,
 				HashType:      txscript.SigHashAll,
 			},
-		})
+		}, nil)
 		Expect(err).To(BeNil())
 		Expect(id).ShouldNot(BeEmpty())
 
