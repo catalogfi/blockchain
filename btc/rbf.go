@@ -15,10 +15,12 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+// createRBFBatch creates a new RBF batch or re-submits an existing one based on pending requests
 func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	var pendingRequests []BatcherRequest
 	var err error
 
+	// Read pending requests from the cache
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		pendingRequests, err = w.cache.ReadPendingRequests(ctx)
 		return err
@@ -27,39 +29,49 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 		return err
 	}
 
+	// If there are no pending requests, return an error
 	if len(pendingRequests) == 0 {
 		return ErrBatchParametersNotMet
 	}
 
+	// Attempt to read the latest RBF batch from the cache
 	var latestBatch Batch
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		latestBatch, err = w.cache.ReadLatestBatch(ctx, RBF)
 		return err
 	})
 	if err != nil {
+		// If no batch is found, create a new RBF batch
 		if err == ErrBatchNotFound {
 			return w.createNewRBFBatch(c, pendingRequests, 0)
 		}
 		return err
 	}
 
+	// Fetch the transaction details for the latest batch
 	tx, err := getTransaction(w.indexer, latestBatch.Tx.TxID)
 	if err != nil {
 		return err
 	}
 
+	// If the transaction is confirmed, create a new RBF batch
 	if tx.Status.Confirmed {
 		return w.createNewRBFBatch(c, pendingRequests, 0)
 	}
 
+	// Update the latest batch with the transaction details
 	latestBatch.Tx = tx
 
+	// Re-submit the existing RBF batch with pending requests
 	return w.reSubmitRBFBatch(c, latestBatch, pendingRequests, 0)
 }
 
+// reSubmitRBFBatch re-submits an existing RBF batch with updated fee rate if necessary
 func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pendingRequests []BatcherRequest, requiredFeeRate int) error {
 	var batchedRequests []BatcherRequest
 	var err error
+
+	// Read batched requests from the cache
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		batchedRequests, err = w.cache.ReadRequests(ctx, maps.Keys(batch.RequestIds))
 		return err
@@ -68,10 +80,12 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 		return err
 	}
 
+	// Attempt to create a new RBF batch with combined requests
 	if err = w.createNewRBFBatch(c, append(batchedRequests, pendingRequests...), 0); err != ErrTxInputsMissingOrSpent {
 		return err
 	}
 
+	// Get the confirmed batch
 	var confirmedBatch Batch
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		confirmedBatch, err = w.getConfirmedBatch(ctx)
@@ -81,6 +95,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 		return err
 	}
 
+	// Delete the pending batch from the cache
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		return w.cache.DeletePendingBatches(ctx, map[string]bool{batch.Tx.TxID: true}, RBF)
 	})
@@ -88,6 +103,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 		return err
 	}
 
+	// Read the missing requests from the cache
 	var missingRequests []BatcherRequest
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		missingRequestIds := getMissingRequestIds(batch.RequestIds, confirmedBatch.RequestIds)
@@ -98,12 +114,16 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 		return err
 	}
 
+	// Create a new RBF batch with missing and pending requests
 	return w.createNewRBFBatch(c, append(missingRequests, pendingRequests...), requiredFeeRate)
 }
 
+// getConfirmedBatch retrieves the confirmed RBF batch from the cache
 func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 	var batches []Batch
 	var err error
+
+	// Read pending batches from the cache
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		batches, err = w.cache.ReadPendingBatches(ctx, RBF)
 		return err
@@ -113,6 +133,8 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 	}
 
 	confirmedBatch := Batch{}
+
+	// Loop through the batches to find a confirmed batch
 	for _, batch := range batches {
 		var tx Transaction
 		err := withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
@@ -139,6 +161,7 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 	return confirmedBatch, nil
 }
 
+// getMissingRequestIds identifies request IDs that are missing from the confirmed batch
 func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 	missingIds := []string{}
 	for id := range batchedIds {
@@ -149,6 +172,7 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 	return missingIds
 }
 
+// createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
 func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []BatcherRequest, requiredFeeRate int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, reqIds := func() ([]SpendRequest, []SendRequest, map[string]bool) {
@@ -168,6 +192,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 	var avoidUtxos map[string]bool
 	var err error
 
+	// Get unconfirmed UTXOs to avoid them in the new transaction
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		avoidUtxos, err = w.getUnconfirmedUtxos(ctx, RBF)
 		return err
@@ -176,6 +201,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 		return err
 	}
 
+	// Determine the required fee rate if not provided
 	if requiredFeeRate == 0 {
 		var feeRates FeeSuggestion
 		err := withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
@@ -209,6 +235,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 		return err
 	}
 
+	// Submit the new RBF transaction to the indexer
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		return w.indexer.SubmitTx(ctx, tx)
 	})
@@ -227,6 +254,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 		return err
 	}
 
+	// Create a new batch with the transaction details and save it to the cache
 	batch := Batch{
 		Tx:          transaction,
 		RequestIds:  reqIds,
@@ -251,22 +279,25 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 	return nil
 }
 
+// updateRBF updates the fee rate of the latest RBF batch transaction
 func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error {
 
 	var latestBatch Batch
 	var err error
+	// Read the latest RBF batch from the cache
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		latestBatch, err = w.cache.ReadLatestBatch(ctx, RBF)
 		return err
 	})
 	if err != nil {
 		if err == ErrBatchNotFound {
-			return nil
+			return ErrFeeUpdateNotNeeded
 		}
 		return err
 	}
 
 	var tx Transaction
+	// Check if the transaction is already confirmed
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
 		tx, err = getTransaction(w.indexer, latestBatch.Tx.TxID)
 		return err
@@ -285,15 +316,21 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 	size := tx.Weight / 4
 	currentFeeRate := int(tx.Fee) / size
 
+	// Validate the fee rate update according to the wallet options
 	err = validateUpdate(currentFeeRate, requiredFeeRate, w.opts)
 	if err != nil {
 		return err
 	}
 
 	latestBatch.Tx = tx
+
+	// Re-submit the RBF batch with the updated fee rate
 	return w.reSubmitRBFBatch(c, latestBatch, nil, requiredFeeRate)
 }
 
+// createRBFTx creates a new RBF transaction with the given UTXOs, spend requests, and send requests
+// checkValidity is used to determine if the transaction should be validated while building
+// depth is used to limit the number of add cover utxos to the transaction
 func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequests []SpendRequest, sendRequests []SendRequest, avoidUtxos map[string]bool, fee uint, requiredFeeRate int, checkValidity bool, depth int) (*wire.MsgTx, UTXOs, error) {
 	if depth < 0 {
 		return nil, nil, ErrBuildRBFDepthExceeded
@@ -317,7 +354,7 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 		return nil, nil, fmt.Errorf("scripts have no funds to spend")
 	}
 
-	tx, err = buildTransaction1(append(spendUTXOs, utxos...), sendRequests, w.address, int(fee), checkValidity)
+	tx, err = buildRBFTransaction(append(spendUTXOs, utxos...), sendRequests, w.address, int(fee), checkValidity)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -357,6 +394,8 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 	return tx, utxos, nil
 }
 
+// getUTXOsForSpendRequest returns UTXOs required to cover amount
+// also return change amount if any
 func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int, avoidUtxos map[string]bool) ([]UTXO, int, error) {
 	var prevUtxos, coverUtxos UTXOs
 	var err error
@@ -405,6 +444,8 @@ func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int,
 	return selectedUtxos, change, nil
 }
 
+// getUnconfirmedUtxos returns UTXOs that are currently being spent in unconfirmed transactions
+// to double spend them in the new transaction
 func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context, strategy Strategy) (map[string]bool, error) {
 	var pendingChangeUtxos []UTXO
 	var err error
@@ -424,7 +465,8 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context, strategy Strate
 	return avoidUtxos, nil
 }
 
-func buildTransaction1(utxos UTXOs, recipients []SendRequest, changeAddr btcutil.Address, fee int, checkValidity bool) (*wire.MsgTx, error) {
+// buildRBFTransaction is same as buildTransaction but with validity checks
+func buildRBFTransaction(utxos UTXOs, recipients []SendRequest, changeAddr btcutil.Address, fee int, checkValidity bool) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultTxVersion)
 
 	totalUTXOAmount := int64(0)
