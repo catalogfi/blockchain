@@ -10,7 +10,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -34,7 +33,8 @@ var (
 	ErrCPFPBatchingCorrupted     = errors.New("CPFP batching corrupted")
 	ErrSavingBatch               = errors.New("failed to save batch")
 	ErrStrategyNotSupported      = errors.New("strategy not supported")
-	ErrCPFPDepthExceeded         = errors.New("CPFP depth exceeded")
+	ErrBuildCPFPDepthExceeded    = errors.New("build CPFP depth exceeded")
+	ErrBuildRBFDepthExceeded     = errors.New("build RBF depth exceeded")
 )
 
 // Batcher is a wallet that runs as a service and batches requests
@@ -61,11 +61,16 @@ type Cache interface {
 	ReadBatch(ctx context.Context, txId string) (Batch, error)
 	ReadBatchByReqId(ctx context.Context, reqId string) (Batch, error)
 	ReadPendingBatches(ctx context.Context, strategy Strategy) ([]Batch, error)
+	ReadLatestBatch(ctx context.Context, strategy Strategy) (Batch, error)
+	ReadPendingChangeUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
+	ReadPendingFundingUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
 	UpdateBatchStatuses(ctx context.Context, txId []string, status bool) error
 	UpdateBatchFees(ctx context.Context, txId []string, fee int64) error
 	SaveBatch(ctx context.Context, batch Batch) error
+	DeletePendingBatches(ctx context.Context, confirmedTxIds map[string]bool, strategy Strategy) error
 
 	ReadRequest(ctx context.Context, id string) (BatcherRequest, error)
+	ReadRequests(ctx context.Context, id []string) ([]BatcherRequest, error)
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
 	SaveRequest(ctx context.Context, id string, req BatcherRequest) error
 }
@@ -127,39 +132,14 @@ type batcherWallet struct {
 	feeEstimator FeeEstimator
 	cache        Cache
 }
-
-type Inputs map[string][]RawInputs
-
-type Output struct {
-	wire.OutPoint
-	Recipient
-}
-
-type Outputs map[string][]Output
-
-type FeeUTXOS struct {
-	Utxos []UTXO
-	Used  map[string]bool
-}
-
-type FeeData struct {
-	Fee  int64
-	Size int
-}
-
-type FeeStats struct {
-	MaxFeeRate int
-	TotalSize  int
-	FeeDelta   int
-}
-
 type Batch struct {
-	Tx          Transaction
-	RequestIds  map[string]bool
-	IsStable    bool
-	IsConfirmed bool
-	Strategy    Strategy
-	ChangeUtxo  UTXO
+	Tx           Transaction
+	RequestIds   map[string]bool
+	IsStable     bool
+	IsConfirmed  bool
+	Strategy     Strategy
+	ChangeUtxo   UTXO
+	FundingUtxos []UTXO
 }
 
 func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
@@ -240,6 +220,10 @@ func (w *batcherWallet) Address() btcutil.Address {
 
 // Send creates a batch request , saves it in the cache and returns a tracking id
 func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest) (string, error) {
+	if err := validateSpendRequest(spends); err != nil {
+		return "", err
+	}
+
 	id := chainhash.HashH([]byte(fmt.Sprintf("%v_%v", spends, sends))).String()
 	req := BatcherRequest{
 		ID:     id,
@@ -346,9 +330,17 @@ func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 						w.logger.Info("waiting for new batch")
 					}
 
-					if err := w.updateFeeRate(); err != nil && !errors.Is(err, ErrFeeUpdateNotNeeded) {
-						w.logger.Error("failed to update fee rate", zap.Error(err))
+					if err := w.updateFeeRate(); err != nil {
+						if !errors.Is(err, ErrFeeUpdateNotNeeded) {
+							w.logger.Error("failed to update fee rate", zap.Error(err))
+						} else {
+							w.logger.Info("fee update skipped")
+						}
+					} else {
+						w.logger.Info("batch fee updated", zap.String("strategy", string(w.opts.Strategy)))
 					}
+				} else {
+					w.logger.Info("new batch created", zap.String("strategy", string(w.opts.Strategy)))
 				}
 			}
 
@@ -365,11 +357,14 @@ func (w *batcherWallet) updateFeeRate() error {
 	}
 	requiredFeeRate := selectFee(feeRates, w.opts.TxOptions.FeeLevel)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	switch w.opts.Strategy {
 	case CPFP:
-		return w.updateCPFP(requiredFeeRate)
-	// case RBF:
-	// 	return w.updateRBF(feeStats, requiredFeeRate)
+		return w.updateCPFP(ctx, requiredFeeRate)
+	case RBF:
+		return w.updateRBF(ctx, requiredFeeRate)
 	default:
 		panic("fee update for strategy not implemented")
 	}
@@ -377,31 +372,23 @@ func (w *batcherWallet) updateFeeRate() error {
 
 // createBatch creates a batch based on the strategy
 func (w *batcherWallet) createBatch() error {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	switch w.opts.Strategy {
 	case CPFP:
-		return w.createCPFPBatch()
-	// case RBF:
-	// 	return w.createRBFBatch()
+		return w.createCPFPBatch(ctx)
+	case RBF:
+		return w.createRBFBatch(ctx)
 	default:
 		panic("batch creation for strategy not implemented")
 	}
 }
 
-// Generate fee stats based on the required fee rate
-// Fee stats are used to determine how much fee is required
-// to bump existing batches
-func getFeeStats(requiredFeeRate int, pendingBatches []Batch, opts BatcherOptions) (FeeStats, error) {
-
-	feeStats := calculateFeeStats(requiredFeeRate, pendingBatches)
-	if err := validateUpdate(feeStats.MaxFeeRate, requiredFeeRate, opts); err != nil {
-		return FeeStats{}, err
-	}
-	return feeStats, nil
-}
-
 // verifies if the fee rate delta is within the threshold
 func validateUpdate(currentFeeRate, requiredFeeRate int, opts BatcherOptions) error {
-	if currentFeeRate > requiredFeeRate {
+	if currentFeeRate >= requiredFeeRate {
 		return ErrFeeUpdateNotNeeded
 	}
 	if opts.TxOptions.MinFeeDelta > 0 && requiredFeeRate-currentFeeRate < opts.TxOptions.MinFeeDelta {
@@ -414,30 +401,6 @@ func validateUpdate(currentFeeRate, requiredFeeRate int, opts BatcherOptions) er
 		return ErrHighFeeEstimate
 	}
 	return nil
-}
-
-// calculates the fee stats based on the required fee rate
-func calculateFeeStats(reqFeeRate int, batches []Batch) FeeStats {
-	maxFeeRate := int(0)
-	totalSize := int(0)
-	feeDelta := int(0)
-
-	for _, batch := range batches {
-		size := batch.Tx.Weight / 4
-		feeRate := int(batch.Tx.Fee) / size
-		if feeRate > maxFeeRate {
-			maxFeeRate = feeRate
-		}
-		if reqFeeRate > feeRate {
-			feeDelta += (reqFeeRate - feeRate) * size
-		}
-		totalSize += size
-	}
-	return FeeStats{
-		MaxFeeRate: maxFeeRate,
-		TotalSize:  totalSize,
-		FeeDelta:   feeDelta,
-	}
 }
 
 // selects the fee rate based on the fee level option
@@ -473,4 +436,27 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 		pendingTxs = append(pendingTxs, tx.TxID)
 	}
 	return pendingBatches, confirmedTxs, pendingTxs, nil
+}
+
+func getTransaction(indexer IndexerClient, txid string) (Transaction, error) {
+	if txid == "" {
+		return Transaction{}, fmt.Errorf("txid is empty")
+	}
+	for i := 1; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tx, err := indexer.GetTx(ctx, txid)
+		if err != nil {
+			time.Sleep(time.Duration(i) * time.Second)
+			continue
+		}
+		return tx, nil
+	}
+	return Transaction{}, ErrTxNotFound
+}
+
+func withContextTimeout(parentContext context.Context, duration time.Duration, fn func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(parentContext, duration)
+	defer cancel()
+	return fn(ctx)
 }

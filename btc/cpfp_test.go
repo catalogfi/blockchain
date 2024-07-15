@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
@@ -17,7 +20,7 @@ import (
 
 var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 
-	chainParams := chaincfg.RegressionNetParams
+	chainParams := &chaincfg.RegressionNetParams
 	logger, err := zap.NewDevelopment()
 	Expect(err).To(BeNil())
 
@@ -27,8 +30,8 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	Expect(err).To(BeNil())
 
 	mockFeeEstimator := NewMockFeeEstimator(10)
-	cache := NewMockCache()
-	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
+	cache := NewTestCache()
+	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
 	Expect(err).To(BeNil())
 
 	BeforeAll(func() {
@@ -77,132 +80,209 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	})
 
 	It("should be able to update fee with CPFP", func() {
-		mockFeeEstimator.UpdateFee(20)
+		neeFeeRate := 20
+		mockFeeEstimator.UpdateFee(neeFeeRate)
+
 		time.Sleep(10 * time.Second)
+
+		pendingBatches, err := cache.ReadPendingBatches(context.Background(), btc.CPFP)
+		Expect(err).To(BeNil())
+
+		for _, batch := range pendingBatches {
+			feeRate := (batch.Tx.Fee * 4) / int64(batch.Tx.Weight)
+			Expect(feeRate).Should(BeNumerically(">=", neeFeeRate))
+		}
+	})
+
+	It("should be able to send funds to multiple addresses", func() {
+		pk1, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		address1, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk1.PubKey())
+		Expect(err).To(BeNil())
+
+		pk2, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
+		Expect(err).To(BeNil())
+
+		req := []btc.SendRequest{
+			{
+				Amount: 100000,
+				To:     address1,
+			},
+			{
+				Amount: 100000,
+				To:     address2,
+			},
+		}
+
+		id, err := wallet.Send(context.Background(), req, nil)
+		Expect(err).To(BeNil())
+
+		var tx btc.Transaction
+		var ok bool
+
+		for {
+			fmt.Println("waiting for tx", id)
+			tx, ok, err = wallet.Status(context.Background(), id)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+		// first vout address
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(address1.EncodeAddress()))
+		// second vout address
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
+		// change address
+		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+	})
+
+	It("should be able to spend multiple scripts and send to multiple parties", func() {
+		amount := int64(100000)
+
+		p2wshSigCheckScript, p2wshSigCheckScriptAddr, err := sigCheckScript(*chainParams)
+		Expect(err).To(BeNil())
+
+		p2wshAdditionScript, p2wshScriptAddr, err := additionScript(*chainParams)
+		Expect(err).To(BeNil())
+
+		p2trAdditionScript, p2trScriptAddr, cb, err := additionTapscript(*chainParams)
+		Expect(err).To(BeNil())
+
+		checkSigScript, checkSigScriptAddr, checkSigScriptCb, err := sigCheckTapScript(*chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
+		Expect(err).To(BeNil())
+
+		err = fundScripts([]string{
+			p2wshScriptAddr.EncodeAddress(),
+			p2wshSigCheckScriptAddr.EncodeAddress(),
+			p2trScriptAddr.EncodeAddress(),
+			checkSigScriptAddr.EncodeAddress(),
+		})
+
+		By("Fund the scripts")
+		_, err = wallet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: amount,
+				To:     p2wshScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     p2wshSigCheckScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     p2trScriptAddr,
+			},
+			{
+				Amount: amount,
+				To:     checkSigScriptAddr,
+			},
+		}, nil)
+		Expect(err).To(BeNil())
+
+		By("Let's create recipients")
+		pk1, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		address1, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk1.PubKey())
+		Expect(err).To(BeNil())
+
+		pk2, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
+		Expect(err).To(BeNil())
+
+		By("Send funds to Bob and Dave by spending the scripts")
+		id, err := wallet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: amount,
+				To:     address1,
+			},
+			{
+				Amount: amount,
+				To:     address2,
+			},
+		}, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshAdditionScript,
+				},
+				Script:        p2wshAdditionScript,
+				ScriptAddress: p2wshScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSegwitOp,
+					btc.AddPubkeyCompressedOp,
+					p2wshSigCheckScript,
+				},
+				Script:        p2wshSigCheckScript,
+				ScriptAddress: p2wshSigCheckScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2trAdditionScript,
+					cb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, p2trAdditionScript),
+				ScriptAddress: p2trScriptAddr,
+			},
+			{
+				Witness: [][]byte{
+					btc.AddSignatureSchnorrOp,
+					checkSigScript,
+					checkSigScriptCb,
+				},
+				Leaf:          txscript.NewTapLeaf(0xc0, checkSigScript),
+				ScriptAddress: checkSigScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(id).ShouldNot(BeEmpty())
+
+		for {
+			fmt.Println("waiting for tx", id)
+			tx, ok, err := wallet.Status(context.Background(), id)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+		By("The tx should have 3 outputs")
+		tx, _, err := wallet.Status(context.Background(), id)
+		Expect(err).To(BeNil())
+		Expect(tx).ShouldNot(BeNil())
+		Expect(tx.VOUTs).Should(HaveLen(3))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(address1.EncodeAddress()))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
+		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+
+		//Validate whether dave and bob received the right amount
+		Expect(tx.VOUTs[0].Value).Should(Equal(int(amount)))
+		Expect(tx.VOUTs[1].Value).Should(Equal(int(amount)))
+
 	})
 })
 
-type mockCache struct {
-	batches  map[string]btc.Batch
-	requests map[string]btc.BatcherRequest
-}
-
-func NewMockCache() btc.Cache {
-	return &mockCache{
-		batches:  make(map[string]btc.Batch),
-		requests: make(map[string]btc.BatcherRequest),
-	}
-}
-
-func (m *mockCache) ReadBatchByReqId(ctx context.Context, id string) (btc.Batch, error) {
-	for _, batch := range m.batches {
-		if _, ok := batch.RequestIds[id]; ok {
-			return batch, nil
+func fundScripts(addresses []string) error {
+	for _, address := range addresses {
+		_, err := localnet.FundBitcoin(address, indexer)
+		if err != nil {
+			return err
 		}
-	}
-	return btc.Batch{}, fmt.Errorf("batch not found")
-}
-
-func (m *mockCache) ReadBatch(ctx context.Context, txId string) (btc.Batch, error) {
-	batch, ok := m.batches[txId]
-	if !ok {
-		return btc.Batch{}, fmt.Errorf("batch not found")
-	}
-	return batch, nil
-}
-
-func (m *mockCache) ReadPendingBatches(ctx context.Context, strategy btc.Strategy) ([]btc.Batch, error) {
-	batches := []btc.Batch{}
-	for _, batch := range m.batches {
-		if batch.Tx.Status.Confirmed == false {
-			batches = append(batches, batch)
-		}
-	}
-	return batches, nil
-}
-func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
-	if _, ok := m.batches[batch.Tx.TxID]; ok {
-		return fmt.Errorf("batch already exists")
-	}
-	m.batches[batch.Tx.TxID] = batch
-	for id, _ := range batch.RequestIds {
-		request := m.requests[id]
-		request.Status = true
-		m.requests[id] = request
 	}
 	return nil
-}
-
-func (m *mockCache) UpdateBatchStatuses(ctx context.Context, txId []string, status bool) error {
-	for _, id := range txId {
-		batch, ok := m.batches[id]
-		if !ok {
-			return fmt.Errorf("batch not found")
-		}
-		batch.Tx.Status.Confirmed = status
-		m.batches[id] = batch
-	}
-	return nil
-}
-
-func (m *mockCache) ReadRequest(ctx context.Context, id string) (btc.BatcherRequest, error) {
-	request, ok := m.requests[id]
-	if !ok {
-		return btc.BatcherRequest{}, fmt.Errorf("request not found")
-	}
-	return request, nil
-}
-func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]btc.BatcherRequest, error) {
-	requests := []btc.BatcherRequest{}
-	for _, request := range m.requests {
-		if request.Status == false {
-			requests = append(requests, request)
-		}
-	}
-	return requests, nil
-}
-
-func (m *mockCache) SaveRequest(ctx context.Context, id string, req btc.BatcherRequest) error {
-	if _, ok := m.requests[id]; ok {
-		return fmt.Errorf("request already exists")
-	}
-	m.requests[id] = req
-	return nil
-}
-
-func (m *mockCache) UpdateBatchFees(ctx context.Context, txId []string, feeRate int64) error {
-	for _, id := range txId {
-		batch, ok := m.batches[id]
-		if !ok {
-			return fmt.Errorf("batch not found")
-		}
-
-		batch.Tx.Fee = int64(batch.Tx.Weight) * feeRate / 4
-		m.batches[id] = batch
-	}
-	return nil
-}
-
-type mockFeeEstimator struct {
-	fee int
-}
-
-func (f *mockFeeEstimator) UpdateFee(newFee int) {
-	f.fee = newFee
-}
-
-func (f *mockFeeEstimator) FeeSuggestion() (btc.FeeSuggestion, error) {
-	return btc.FeeSuggestion{
-		Minimum: f.fee,
-		Economy: f.fee,
-		Low:     f.fee,
-		Medium:  f.fee,
-		High:    f.fee,
-	}, nil
-}
-
-func NewMockFeeEstimator(fee int) *mockFeeEstimator {
-	return &mockFeeEstimator{
-		fee: fee,
-	}
 }
