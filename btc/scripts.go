@@ -52,7 +52,6 @@ func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, erro
 	if lockTime > math.MaxUint16 {
 		return txscript.TapLeaf{}, ErrInvalidLockTime
 	}
-	// 64b275202a003722cb3cd5207b5cd37bab158ddd36a1000abfa316bbd8811987139247fdac
 
 	script, err := txscript.NewScriptBuilder().
 		AddInt64(int64(lockTime)).

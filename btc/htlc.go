@@ -121,7 +121,9 @@ func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 // GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds
 func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error) {
 	instantRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
-
+	if err != nil {
+		return nil, err
+	}
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
 		// insert random sig placeholder for other parties to insert their signature
@@ -170,6 +172,9 @@ func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (st
 	}
 
 	redeemTapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRedeem)
+	if err != nil {
+		return "", err
+	}
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
 		secret,
@@ -209,7 +214,9 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		utxoValue += utxo.Amount
 	}
 	instandRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
-
+	if err != nil {
+		return "", err
+	}
 	tx, err := validateInstantRefundSACP(refundSACP, utxos, hw.wallet.Address(), cbBytes, instandRefundLeaf)
 	if err != nil {
 		return "", err
@@ -223,8 +230,6 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		instandRefundLeaf.Script,
 		cbBytes,
 	}
-
-	// TODO: sign all idxs
 
 	for i := range tx.TxIn {
 		// 0th index is the signature of this wallet
