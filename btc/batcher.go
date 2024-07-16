@@ -20,7 +20,7 @@ import (
 
 var (
 	AddSignatureOp        = []byte("add_signature")
-	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight // removes 10vb of overhead for segwit
+	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight 
 )
 var (
 	ErrBatchNotFound             = errors.New("batch not found")
@@ -60,20 +60,34 @@ type Lifecycle interface {
 // should implement example implementations include in-memory cache and
 // rdbs cache
 type Cache interface {
+	// ReadBatch reads a batch based on the transaction ID.
 	ReadBatch(ctx context.Context, txId string) (Batch, error)
+	// ReadBatchByReqId reads a batch based on the request ID.
 	ReadBatchByReqId(ctx context.Context, reqId string) (Batch, error)
+	// ReadPendingBatches reads all pending batches for a given strategy.
 	ReadPendingBatches(ctx context.Context, strategy Strategy) ([]Batch, error)
+	// ReadLatestBatch reads the latest batch for a given strategy.
 	ReadLatestBatch(ctx context.Context, strategy Strategy) (Batch, error)
+	// ReadPendingChangeUtxos reads all pending change UTXOs for a given strategy.
 	ReadPendingChangeUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
+	// ReadPendingFundingUtxos reads all pending funding UTXOs for a given strategy.
 	ReadPendingFundingUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
+	// UpdateBatchStatuses updates the status of multiple batches and delete pending batches based on confirmed transaction IDs.
 	UpdateBatchStatuses(ctx context.Context, txId []string, status bool, strategy Strategy) error
+	// UpdateBatchFees updates the fees for multiple batches.
 	UpdateBatchFees(ctx context.Context, txId []string, fee int64) error
+	// SaveBatch saves a batch.
 	SaveBatch(ctx context.Context, batch Batch) error
+	// DeletePendingBatches deletes pending batches based on confirmed transaction IDs and strategy.
 	DeletePendingBatches(ctx context.Context, confirmedTxIds map[string]bool, strategy Strategy) error
 
+	// ReadRequest reads a request based on its ID.
 	ReadRequest(ctx context.Context, id string) (BatcherRequest, error)
+	// ReadRequests reads multiple requests based on their IDs.
 	ReadRequests(ctx context.Context, id []string) ([]BatcherRequest, error)
+	// ReadPendingRequests reads all pending requests.
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
+	// SaveRequest saves a request.
 	SaveRequest(ctx context.Context, id string, req BatcherRequest) error
 }
 
@@ -239,7 +253,7 @@ func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 
 // Send creates a batch request , saves it in the cache and returns a tracking id
 func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
-	if err := validateRequests(spends, sends); err != nil {
+	if err := w.validateBatchRequest(ctx, spends, sends, sacps); err != nil {
 		return "", err
 	}
 
@@ -404,6 +418,42 @@ func (w *batcherWallet) createBatch() error {
 	default:
 		panic("batch creation for strategy not implemented")
 	}
+}
+
+func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []SpendRequest, sends []SendRequest, sacps [][]byte) error {
+	if len(spends) == 0 && len(sends) == 0 && len(sacps) == 0 {
+		return ErrBatchParametersNotMet
+	}
+
+	utxos, err := w.indexer.GetUTXOs(ctx, w.address)
+	if err != nil {
+		return err
+	}
+
+	walletBalance := int64(0)
+	for _, utxo := range utxos {
+		walletBalance += utxo.Amount
+	}
+
+	sendsAmount := int64(0)
+	for _, send := range sends {
+		sendsAmount += send.Amount
+	}
+
+	spendsAmount := int64(0)
+	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
+		_, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	if walletBalance+spendsAmount < sendsAmount {
+		return ErrBatchParametersNotMet
+	}
+
+	return validateRequests(spends, sends, sacps)
 }
 
 // verifies if the fee rate delta is within the threshold
