@@ -195,12 +195,12 @@ func (sw *SimpleWallet) Send(ctx context.Context, sendRequests []SendRequest, sp
 	fee := 1000
 
 	// validate the requests
-	err := validateRequests(spendRequests, sendRequests)
+	err := validateRequests(spendRequests, sendRequests, sacps)
 	if err != nil {
 		return "", err
 	}
 
-	sacpsFee, err := feeUsedInSACPs(sacps, sw.indexer)
+	sacpsFee, err := getFeeUsedInSACPs(ctx, sacps, sw.indexer)
 	if err != nil {
 		return "", err
 	}
@@ -238,7 +238,7 @@ func (sw *SimpleWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest,
 		spendReq.HashType = SigHashSingleAnyoneCanPay
 	}
 
-	if err := validateRequests([]SpendRequest{spendReq}, nil); err != nil {
+	if err := validateRequests([]SpendRequest{spendReq}, nil, nil); err != nil {
 		return nil, err
 	}
 	if to == nil {
@@ -268,7 +268,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 	}
 
 	// sign the transaction
-	err = signSpendTx(tx, 0, []SpendRequest{spendRequest}, utxoMap, sw.indexer, sw.privateKey)
+	err = signSpendTx(ctx, tx, 0, []SpendRequest{spendRequest}, utxoMap, sw.indexer, sw.privateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	}
 
 	// Sign the spend inputs
-	err = signSpendTx(tx, signingIdx, spendRequests, utxoMap, sw.indexer, sw.privateKey)
+	err = signSpendTx(ctx, tx, signingIdx, spendRequests, utxoMap, sw.indexer, sw.privateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ type UTXOMap map[btcutil.Address]UTXOs
 // ------------------ Helper functions ------------------
 
 // feeUsedInSACPs returns the amount of fee used in the given SACPs
-func feeUsedInSACPs(sacps [][]byte, indexer IndexerClient) (int, error) {
+func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return 0, err
@@ -375,7 +375,7 @@ func feeUsedInSACPs(sacps [][]byte, indexer IndexerClient) (int, error) {
 	// add all the inputs and subtract the outputs to get the fee
 	totalInputAmount := int64(0)
 	for _, in := range tx.TxIn {
-		txFromIndexer, err := indexer.GetTx(context.Background(), in.PreviousOutPoint.Hash.String())
+		txFromIndexer, err := indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
 		if err != nil {
 			return 0, err
 		}
@@ -400,7 +400,7 @@ func submitTx(ctx context.Context, indexer IndexerClient, tx *wire.MsgTx) (strin
 }
 
 // getPrevoutsForSACPs returns the previous outputs and txouts for the given SACPs used to build the prevOutFetcher
-func getPrevoutsForSACPs(tx *wire.MsgTx, endingSACPIdx int, indexer IndexerClient) ([]wire.OutPoint, []*wire.TxOut, error) {
+func getPrevoutsForSACPs(ctx context.Context, tx *wire.MsgTx, endingSACPIdx int, indexer IndexerClient) ([]wire.OutPoint, []*wire.TxOut, error) {
 	prevouts := []wire.OutPoint{}
 	txOuts := []*wire.TxOut{}
 	for i := 0; i < endingSACPIdx; i++ {
@@ -408,7 +408,7 @@ func getPrevoutsForSACPs(tx *wire.MsgTx, endingSACPIdx int, indexer IndexerClien
 		prevouts = append(prevouts, outpoint)
 
 		// The only way to get the txOut is to get the transaction from the indexer
-		txFromIndexer, err := indexer.GetTx(context.Background(), outpoint.Hash.String())
+		txFromIndexer, err := indexer.GetTx(ctx, outpoint.Hash.String())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -470,11 +470,15 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 	idx := 0
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	for _, sacp := range sacps {
-		btcTx, error := btcutil.NewTxFromBytes(sacp)
-		if error != nil {
-			return nil, 0, error
+		btcTx, err := btcutil.NewTxFromBytes(sacp)
+		if err != nil {
+			return nil, 0, err
 		}
 		sacpTx := btcTx.MsgTx()
+		err = validateSacp(sacpTx)
+		if err != nil {
+			return nil, 0, err
+		}
 		for _, in := range sacpTx.TxIn {
 			tx.AddTxIn(in)
 			idx++
@@ -606,11 +610,11 @@ func getScriptToSign(scriptAddr btcutil.Address, script []byte) ([]byte, error) 
 // Signs the spend transaction
 //
 // Internally signTx is called for each input to sign the transaction.
-func signSpendTx(tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap UTXOMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
+func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap UTXOMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
 
 	// building the prevOutFetcherBuilder
 	// get the prevouts and txouts for the sacps to build the prevOutFetcher
-	outpoints, txouts, err := getPrevoutsForSACPs(tx, startingIdx, indexer)
+	outpoints, txouts, err := getPrevoutsForSACPs(ctx, tx, startingIdx, indexer)
 	if err != nil {
 		return err
 	}
@@ -717,7 +721,7 @@ func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, scriptAddr btcutil
 	return nil
 }
 
-func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest) error {
+func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest, sacps [][]byte) error {
 	for _, in := range spendReqs {
 		if len(in.Witness) == 0 {
 			return fmt.Errorf("witness is required")
@@ -791,6 +795,11 @@ func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest) error {
 		}
 	}
 
+	_, _, err := buildTxFromSacps(sacps)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -800,4 +809,32 @@ func calculateTotalSendAmount(req []SendRequest) int64 {
 		totalSendAmount += r.Amount
 	}
 	return totalSendAmount
+}
+
+func getNumberOfSigs(spends []SpendRequest) (int, int) {
+	numSegWitSigs := 0
+	numSchnorrSigs := 0
+	for _, spend := range spends {
+		for _, w := range spend.Witness {
+			if string(w) == string(AddSignatureSegwitOp) {
+				numSegWitSigs++
+			} else if string(w) == string(AddSignatureSchnorrOp) {
+				numSchnorrSigs++
+			}
+		}
+	}
+	return numSegWitSigs, numSchnorrSigs
+}
+
+func validateSacp(tx *wire.MsgTx) error {
+	// TODO : simulate the tx and check if it is valid
+	if len(tx.TxIn) == 0 {
+		return fmt.Errorf("no inputs found in sacp")
+	}
+
+	if len(tx.TxIn) != len(tx.TxOut) {
+		return fmt.Errorf("number of inputs and outputs should be same in sacp")
+	}
+
+	return nil
 }

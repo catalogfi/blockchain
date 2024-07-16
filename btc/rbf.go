@@ -1,6 +1,7 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -343,8 +344,21 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 // createRBFTx creates a new RBF transaction with the given UTXOs, spend requests, and send requests
 // checkValidity is used to determine if the transaction should be validated while building
 // depth is used to limit the number of add cover utxos to the transaction
-func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequests []SpendRequest, sendRequests []SendRequest, sacps [][]byte, sequencesMap map[string]uint32, avoidUtxos map[string]bool, fee uint, requiredFeeRate int, checkValidity bool, depth int) (*wire.MsgTx, UTXOs, error) {
+func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequests []SpendRequest, sendRequests []SendRequest, sacps [][]byte, sequencesMap map[string]uint32, avoidUtxos map[string]bool, fee uint, feeRate int, checkValidity bool, depth int) (*wire.MsgTx, UTXOs, error) {
 	if depth < 0 {
+		w.logger.Debug(
+			ErrBuildRBFDepthExceeded.Error(),
+			zap.Any("utxos", utxos),
+			zap.Any("spendRequests", spendRequests),
+			zap.Any("sendRequests", sendRequests),
+			zap.Any("sacps", sacps),
+			zap.Any("sequencesMap", sequencesMap),
+			zap.Any("avoidUtxos", avoidUtxos),
+			zap.Uint("fee", fee),
+			zap.Int("requiredFeeRate", feeRate),
+			zap.Bool("checkValidity", checkValidity),
+			zap.Int("depth", depth),
+		)
 		return nil, nil, ErrBuildRBFDepthExceeded
 	}
 
@@ -379,7 +393,10 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 		return nil, nil, err
 	}
 
-	err = signSpendTx(tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
+	// Sign the spend inputs
+	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
+		return signSpendTx(ctx, tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -391,12 +408,13 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 
 	txb := btcutil.NewTx(tx)
 	trueSize := mempool.GetTxVirtualSize(txb)
-	newFeeEstimate := int(trueSize) * requiredFeeRate
 
-	fmt.Println("newFeeEstimate", newFeeEstimate, "fee", fee, "requiredFeeRate", requiredFeeRate, len(tx.TxIn), len(tx.TxOut))
-	for _, txIn := range tx.TxIn {
-		fmt.Println("txIn", txIn.PreviousOutPoint.String(), txIn.Sequence)
+	swSigs, trSigs := getNumberOfSigs(spendRequests)
+	bufferFee := 0
+	if depth > 0 {
+		bufferFee = ((4*swSigs + trSigs) / 2) * feeRate
 	}
+	newFeeEstimate := (int(trueSize) * feeRate) + bufferFee
 
 	if newFeeEstimate > int(fee) {
 		totalIn, totalOut := func() (int, int) {
@@ -413,11 +431,15 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 			return totalIn, int(totalOut)
 		}()
 
-		fmt.Println("totalIn", totalIn, "totalOut", totalOut, "newFeeEstimate", newFeeEstimate)
-
 		if totalIn < totalOut+newFeeEstimate {
+			w.logger.Debug(
+				"getting cover utxos",
+				zap.Int("totalIn", totalIn),
+				zap.Int("totalOut", totalOut),
+				zap.Int("newFeeEstimate", newFeeEstimate),
+			)
 			err := withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
-				utxos, _, err = w.getUtxosForFee(ctx, totalOut+newFeeEstimate-totalIn, requiredFeeRate, avoidUtxos)
+				utxos, _, err = w.getUtxosForFee(ctx, totalOut+newFeeEstimate-totalIn, feeRate, avoidUtxos)
 				return err
 			})
 			if err != nil {
@@ -425,7 +447,19 @@ func (w *batcherWallet) createRBFTx(c context.Context, utxos UTXOs, spendRequest
 			}
 		}
 
-		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), requiredFeeRate, true, depth-1)
+		buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+		err = tx.Serialize(buf)
+		w.logger.Info(
+			"rebuilding rbf tx",
+			zap.Int("depth", depth),
+			zap.Uint("fee", fee),
+			zap.Int("newFeeEstimate", newFeeEstimate),
+			zap.Int("requiredFeeRate", feeRate),
+			zap.Int("TxIns", len(tx.TxIn)),
+			zap.Int("TxOuts", len(tx.TxOut)),
+			zap.Int("TxSize", len(buf.Bytes())),
+		)
+		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)
 	}
 
 	return tx, utxos, nil
@@ -465,7 +499,7 @@ func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int,
 		}
 		total += int(utxo.Amount)
 		selectedUtxos = append(selectedUtxos, utxo)
-		overHead = (len(selectedUtxos) * SegwitSpendWeight * feeRate)
+		overHead = (len(selectedUtxos) * (SegwitSpendWeight) * feeRate)
 		if total >= amount+overHead {
 			break
 		}
