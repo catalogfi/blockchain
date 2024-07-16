@@ -1,6 +1,8 @@
 package btc_test
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"testing"
 
@@ -18,13 +20,38 @@ var (
 	btcUsername string
 	btcPassword string
 	indexerHost string
+	mode        MODE
 
 	// Vars
 	network *chaincfg.Params
 	logger  *zap.Logger
 	indexer btc.IndexerClient
 	client  btc.Client
+
+	modeFlag = flag.String("mode", string(SIMPLE), "Mode to run the tests: simple, batcher_rbf, batcher_cpfp")
 )
+
+type MODE string
+
+const (
+	// MODES
+	SIMPLE       MODE = "simple"
+	BATCHER_RBF  MODE = "batcher_rbf"
+	BATCHER_CPFP MODE = "batcher_cpfp"
+)
+
+func parseMode(mode string) (MODE, error) {
+	switch mode {
+	case string(SIMPLE):
+		return SIMPLE, nil
+	case string(BATCHER_RBF):
+		return BATCHER_RBF, nil
+	case string(BATCHER_CPFP):
+		return BATCHER_CPFP, nil
+	default:
+		return "", fmt.Errorf("unknown mode %s", mode)
+	}
+}
 
 func TestBtc(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -43,8 +70,13 @@ var _ = BeforeSuite(func() {
 	indexerHost, ok = os.LookupEnv("BTC_REGNET_INDEXER")
 	Expect(ok).Should(BeTrue())
 
-	By("Initialise some variables used across tests")
+	By("Select the mode to run the tests")
+
 	var err error
+	mode, err = parseMode(*modeFlag)
+	Expect(err).Should(BeNil())
+
+	By("Initialise some variables used across tests")
 	network = &chaincfg.RegressionNetParams
 	logger, err = zap.NewDevelopment()
 	Expect(err).Should(BeNil())

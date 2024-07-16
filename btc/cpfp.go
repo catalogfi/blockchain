@@ -323,7 +323,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	swSigs, trSigs := getNumberOfSigs(spendRequests)
 	bufferFee := 0
 	if depth > 0 {
-		bufferFee = ((4*swSigs + trSigs) / 2) * feeRate
+		bufferFee = ((4*(swSigs+len(utxos)) + trSigs) / 2) * feeRate
 	}
 
 	// Sign the spend inputs
