@@ -323,6 +323,11 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	swSigs, trSigs := getNumberOfSigs(spendRequests)
 	bufferFee := 0
 	if depth > 0 {
+		// buffer fee accounts for
+		// 4 bytes for each sewgwit signature in the spend requests
+		// 4 bytes per each UTXO in the spend requests
+		// 1 byte for each taproot signature in the spend requests
+		// /2 is to convert the bytes to virtual size
 		bufferFee = ((4*(swSigs+len(utxos)) + trSigs) / 2) * feeRate
 	}
 
