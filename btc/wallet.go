@@ -364,7 +364,7 @@ type UTXOMap map[btcutil.Address]UTXOs
 
 // ------------------ Helper functions ------------------
 
-// feeUsedInSACPs returns the amount of fee used in the given SACPs
+// getFeeUsedInSACPs returns the amount of fee used in the given SACPs
 func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {

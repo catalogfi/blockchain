@@ -428,7 +428,7 @@ func getTrailingBatches(batches []Batch, utxos []UTXO) ([]Batch, error) {
 }
 
 // reconstructCPFPBatches reconstructs the CPFP batches
-func reconstructCPFPBatches(batches []Batch, trailingBatch Batch, walletAddr btcutil.Address) error {
+func reconstructCPFPBatches([]Batch, Batch, btcutil.Address) error {
 	// TODO: Verify that the trailing batch can trace back to the funding UTXOs from the wallet address
 	// This is essential to ensure that all the pending transactions are moved to the estimated
 	// fee rate and the trailing batch is the only one that needs to be bumped

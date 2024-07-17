@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -29,38 +28,25 @@ import (
 var _ = Describe("Wallets", Ordered, func() {
 
 	var (
-		chainParams       chaincfg.Params
-		logger            *zap.Logger
-		indexer           btc.IndexerClient
-		privateKey        *btcec.PrivateKey
-		fixedFeeEstimator btc.FeeEstimator
-		feeLevel          btc.FeeLevel
-		wallet            btc.Wallet
-		err               error
+		chainParams       chaincfg.Params   = chaincfg.RegressionNetParams
+		logger            *zap.Logger       = zap.NewNop()
+		indexer           btc.IndexerClient = localnet.BTCIndexer()
+		fixedFeeEstimator btc.FeeEstimator  = btc.NewFixFeeEstimator(10)
+		feeLevel          btc.FeeLevel      = btc.HighFee
+
+		privateKey *btcec.PrivateKey
+		wallet     btc.Wallet
 	)
 
 	BeforeAll(func() {
-		chainParams = chaincfg.RegressionNetParams
-		logger, err = zap.NewDevelopment()
+		privateKey, err := btcec.NewPrivateKey()
 		Expect(err).To(BeNil())
 
-		indexer = btc.NewElectrsIndexerClient(logger, os.Getenv("BTC_REGNET_INDEXER"), time.Millisecond*500)
-
-		privateKey, err = btcec.NewPrivateKey()
-		Expect(err).To(BeNil())
-
-		fixedFeeEstimator = btc.NewFixFeeEstimator(10)
-		feeLevel = btc.HighFee
 		switch mode {
 		case SIMPLE:
 			wallet, err = btc.NewSimpleWallet(privateKey, &chainParams, indexer, fixedFeeEstimator, feeLevel)
 			Expect(err).To(BeNil())
-		case BATCHER_CPFP:
-			mockFeeEstimator := NewMockFeeEstimator(10)
-			cache := NewTestCache()
-			wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
-			Expect(err).To(BeNil())
-		case BATCHER_RBF:
+		case BATCHER_CPFP, BATCHER_RBF:
 			mockFeeEstimator := NewMockFeeEstimator(10)
 			cache := NewTestCache()
 			wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
@@ -79,7 +65,7 @@ var _ = Describe("Wallets", Ordered, func() {
 	AfterAll(func() {
 		switch w := wallet.(type) {
 		case btc.BatcherWallet:
-			err = w.Stop()
+			err := w.Stop()
 			Expect(err).To(BeNil())
 		}
 	})
@@ -780,7 +766,7 @@ var _ = Describe("Wallets", Ordered, func() {
 
 	It("should be able to send multiple SACPs", func() {
 		skipFor(mode, BATCHER_CPFP, BATCHER_RBF)
-		err = localnet.MineBitcoinBlocks(1, indexer)
+		err := localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
 		bobPk, err := btcec.NewPrivateKey()
