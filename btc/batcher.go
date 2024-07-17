@@ -19,8 +19,7 @@ import (
 )
 
 var (
-	AddSignatureOp        = []byte("add_signature")
-	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight 
+	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight
 )
 var (
 	ErrBatchNotFound             = errors.New("batch not found")
@@ -60,8 +59,6 @@ type Lifecycle interface {
 // should implement example implementations include in-memory cache and
 // rdbs cache
 type Cache interface {
-	// ReadBatch reads a batch based on the transaction ID.
-	ReadBatch(ctx context.Context, txId string) (Batch, error)
 	// ReadBatchByReqId reads a batch based on the request ID.
 	ReadBatchByReqId(ctx context.Context, reqId string) (Batch, error)
 	// ReadPendingBatches reads all pending batches for a given strategy.
@@ -331,9 +328,7 @@ func (w *batcherWallet) Restart(ctx context.Context) error {
 // 3. Exponential Time Interval (ETI) - Batches are created at exponential intervals but the interval is custom
 func (w *batcherWallet) run(ctx context.Context) {
 	switch w.opts.Strategy {
-	case CPFP:
-		w.runPTIBatcher(ctx)
-	case RBF:
+	case CPFP, RBF:
 		w.runPTIBatcher(ctx)
 	default:
 		panic("strategy not implemented")
@@ -435,11 +430,6 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []Spend
 		walletBalance += utxo.Amount
 	}
 
-	sendsAmount := int64(0)
-	for _, send := range sends {
-		sendsAmount += send.Amount
-	}
-
 	spendsAmount := int64(0)
 	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
 		_, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
@@ -449,7 +439,9 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []Spend
 		return err
 	}
 
-	if walletBalance+spendsAmount < sendsAmount {
+	totalSendAmt := calculateTotalSendAmount(sends)
+
+	if walletBalance+spendsAmount < totalSendAmt {
 		return ErrBatchParametersNotMet
 	}
 
