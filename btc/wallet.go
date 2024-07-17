@@ -470,12 +470,7 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 	idx := 0
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	for _, sacp := range sacps {
-		btcTx, err := btcutil.NewTxFromBytes(sacp)
-		if err != nil {
-			return nil, 0, err
-		}
-		sacpTx := btcTx.MsgTx()
-		err = validateSacp(sacpTx)
+		sacpTx, err := buildAndValidateSacpTx(sacp)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -795,9 +790,11 @@ func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest, sacps []
 		}
 	}
 
-	_, _, err := buildTxFromSacps(sacps)
-	if err != nil {
-		return err
+	for _, sacp := range sacps {
+		_, err := buildAndValidateSacpTx(sacp)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -812,18 +809,31 @@ func calculateTotalSendAmount(req []SendRequest) int64 {
 }
 
 func getNumberOfSigs(spends []SpendRequest) (int, int) {
-	numSegWitSigs := 0
+	numSegwitSigs := 0
 	numSchnorrSigs := 0
 	for _, spend := range spends {
 		for _, w := range spend.Witness {
 			if string(w) == string(AddSignatureSegwitOp) {
-				numSegWitSigs++
+				numSegwitSigs++
 			} else if string(w) == string(AddSignatureSchnorrOp) {
 				numSchnorrSigs++
 			}
 		}
 	}
-	return numSegWitSigs, numSchnorrSigs
+	return numSegwitSigs, numSchnorrSigs
+}
+
+func buildAndValidateSacpTx(sacp []byte) (*wire.MsgTx, error) {
+	btcTx, err := btcutil.NewTxFromBytes(sacp)
+	if err != nil {
+		return nil, err
+	}
+	sacpTx := btcTx.MsgTx()
+	err = validateSacp(sacpTx)
+	if err != nil {
+		return nil, err
+	}
+	return sacpTx, nil
 }
 
 func validateSacp(tx *wire.MsgTx) error {
