@@ -172,7 +172,7 @@ func (m *mockCache) ReadPendingChangeUtxos(ctx context.Context, strategy btc.Str
 	utxos := []btc.UTXO{}
 	for _, id := range m.batchList {
 		if m.batches[id].Strategy == strategy && m.batches[id].Tx.Status.Confirmed == false {
-			utxos = append(utxos, m.batches[id].ChangeUtxo)
+			utxos = append(utxos, m.batches[id].SelfUtxos...)
 		}
 	}
 	return utxos, nil

@@ -231,9 +231,10 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	var tx *wire.MsgTx
 	var fundingUtxos UTXOs
+	var selfUtxos UTXOs
 	// Create a new RBF transaction
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
-		tx, fundingUtxos, err = w.createRBFTx(
+		tx, fundingUtxos, selfUtxos, err = w.createRBFTx(
 			c,
 			nil,
 			spendRequests,
@@ -273,16 +274,12 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	// Create a new batch with the transaction details and save it to the cache
 	batch := Batch{
-		Tx:          transaction,
-		RequestIds:  reqIds,
-		IsStable:    false, // RBF transactions are not stable meaning they can be replaced
-		IsConfirmed: false,
-		Strategy:    RBF,
-		ChangeUtxo: UTXO{
-			TxID:   tx.TxHash().String(),
-			Vout:   uint32(len(tx.TxOut) - 1),
-			Amount: tx.TxOut[len(tx.TxOut)-1].Value,
-		},
+		Tx:           transaction,
+		RequestIds:   reqIds,
+		IsStable:     false, // RBF transactions are not stable meaning they can be replaced
+		IsConfirmed:  false,
+		Strategy:     RBF,
+		SelfUtxos:    selfUtxos,
 		FundingUtxos: fundingUtxos,
 	}
 
@@ -363,7 +360,7 @@ func (w *batcherWallet) createRBFTx(
 	feeRate int, // required fee rate per vByte
 	checkValidity bool, // Flag to check the transaction's validity during construction
 	depth int, // Depth to limit the recursion
-) (*wire.MsgTx, UTXOs, error) {
+) (*wire.MsgTx, UTXOs, UTXOs, error) {
 	// Check if the recursion depth is exceeded
 	if depth < 0 {
 		w.logger.Debug(
@@ -379,13 +376,20 @@ func (w *batcherWallet) createRBFTx(
 			zap.Bool("checkValidity", checkValidity),
 			zap.Int("depth", depth),
 		)
-		return nil, nil, ErrBuildRBFDepthExceeded
+		return nil, nil, nil, ErrBuildRBFDepthExceeded
 	}
+
+	var sacpsIn int
+	var sacpOut int
+	var err error
+	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
+		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+		return err
+	})
 
 	var spendUTXOs UTXOs
 	var spendUTXOsMap map[btcutil.Address]UTXOs
 	var balanceOfSpendScripts int64
-	var err error
 
 	// Fetch UTXOs for spend requests
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
@@ -393,7 +397,7 @@ func (w *batcherWallet) createRBFTx(
 		return err
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Add the provided UTXOs to the spend map
@@ -405,16 +409,34 @@ func (w *batcherWallet) createRBFTx(
 
 	// Check if there are funds to spend
 	if balanceOfSpendScripts == 0 && len(spendRequests) > 0 {
-		return nil, nil, fmt.Errorf("scripts have no funds to spend")
+		return nil, nil, nil, fmt.Errorf("scripts have no funds to spend")
 	}
 
 	// Combine spend UTXOs with provided UTXOs
 	totalUtxos := append(spendUTXOs, utxos...)
 
 	// Build the RBF transaction
-	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
+	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, sacpsIn-sacpOut, sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+
+	var selfUtxos UTXOs
+	for i := 0; i < len(tx.TxOut); i++ {
+		script := tx.TxOut[i].PkScript
+		// convert script to btcutil.Address
+		class, addrs, _, err := txscript.ExtractPkScriptAddrs(script, w.chainParams)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		if class == txscript.WitnessV0PubKeyHashTy && len(addrs) > 0 && addrs[0] == w.address {
+			selfUtxos = append(selfUtxos, UTXO{
+				TxID:   tx.TxHash().String(),
+				Vout:   uint32(i),
+				Amount: tx.TxOut[i].Value,
+			})
+		}
 	}
 
 	// Sign the inputs related to spend requests
@@ -422,13 +444,13 @@ func (w *batcherWallet) createRBFTx(
 		return signSpendTx(ctx, tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Sign the inputs related to provided UTXOs
-	err = signSendTx(tx, utxos, len(spendUTXOs), w.address, w.privateKey)
+	err = signSendTx(tx, utxos, signIdx+len(spendUTXOs), w.address, w.privateKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Calculate the transaction size
@@ -439,9 +461,9 @@ func (w *batcherWallet) createRBFTx(
 	swSigs, trSigs := getNumberOfSigs(spendRequests)
 	bufferFee := 0
 	if depth > 0 {
-		bufferFee = ((4*(swSigs+len(utxos)) + trSigs + 10) / 2) * feeRate
+		bufferFee = ((4*(swSigs+len(utxos)) + trSigs) / 2) * feeRate
 	}
-	newFeeEstimate := (int(trueSize) * feeRate) + bufferFee
+	newFeeEstimate := ((int(trueSize)) * feeRate) + bufferFee
 
 	// Check if the new fee estimate exceeds the provided fee
 	if newFeeEstimate > int(fee) {
@@ -455,6 +477,8 @@ func (w *batcherWallet) createRBFTx(
 			for _, utxo := range totalUtxos {
 				totalIn += int(utxo.Amount)
 			}
+
+			totalIn += sacpsIn
 
 			return totalIn, int(totalOut)
 		}()
@@ -472,7 +496,7 @@ func (w *batcherWallet) createRBFTx(
 				return err
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 
@@ -493,8 +517,9 @@ func (w *batcherWallet) createRBFTx(
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)
 	}
 
+	fmt.Println("RBF TX", tx.TxHash().String(), "FEE", newFeeEstimate, "DEPTH", depth, trueSize, feeRate)
 	// Return the created transaction and utxo used to fund the transaction
-	return tx, utxos, nil
+	return tx, utxos, selfUtxos, nil
 }
 
 // getUTXOsForSpendRequest returns UTXOs required to cover amount and also returns change amount if any
@@ -580,14 +605,14 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context, strategy Strate
 
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
 // checkValidity is used to determine if the transaction should be validated while building
-func buildRBFTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
+func buildRBFTransaction(utxos UTXOs, sacps [][]byte, scapsFee int, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// Add inputs to the transaction
-	totalUTXOAmount := int64(0)
+	totalUTXOAmount := int64(scapsFee)
 	for _, utxo := range utxos {
 		txid, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
@@ -605,9 +630,17 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, 
 		totalUTXOAmount += utxo.Amount
 	}
 
+	// Amount being sent to the change address
+	pendingAmount := int64(0)
+
 	// Add outputs to the transaction
 	totalSendAmount := int64(0)
 	for _, r := range recipients {
+		if r.To == changeAddr {
+			pendingAmount += r.Amount
+			continue
+		}
+
 		script, err := txscript.PayToAddrScript(r.To)
 		if err != nil {
 			return nil, 0, err
@@ -618,7 +651,7 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, 
 	}
 
 	// Add change output to the transaction if required
-	if totalUTXOAmount >= totalSendAmount+fee {
+	if totalUTXOAmount+pendingAmount >= totalSendAmount+fee {
 		script, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
 			return nil, 0, err

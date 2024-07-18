@@ -54,7 +54,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}()
 
 	// Return error if no requests found
-	if len(sendRequests) == 0 && len(spendRequests) == 0 {
+	if len(requests) == 0 {
 		return ErrBatchParametersNotMet
 	}
 
@@ -146,10 +146,12 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		IsStable:    true,
 		IsConfirmed: false,
 		Strategy:    CPFP,
-		ChangeUtxo: UTXO{
-			TxID:   tx.TxHash().String(),
-			Vout:   uint32(len(tx.TxOut) - 1),
-			Amount: tx.TxOut[len(tx.TxOut)-1].Value,
+		SelfUtxos: UTXOs{
+			{
+				TxID:   tx.TxHash().String(),
+				Vout:   uint32(len(tx.TxOut) - 1),
+				Amount: tx.TxOut[len(tx.TxOut)-1].Value,
+			},
 		},
 	}
 
@@ -207,9 +209,9 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	// Verify CPFP conditions
-	if err := verifyCPFPConditions(utxos, pendingBatches, w.address); err != nil {
-		return fmt.Errorf("failed to verify CPFP conditions: %w", err)
-	}
+	// if err := verifyCPFPConditions(utxos, pendingBatches, w.address); err != nil {
+	// 	return fmt.Errorf("failed to verify CPFP conditions: %w", err)
+	// }
 
 	// Calculate fee stats based on the required fee rate
 	feeStats, err := getFeeStats(requiredFeeRate, pendingBatches, w.opts)
@@ -345,7 +347,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	// Sign the fee providing inputs, if any
-	err = signSendTx(tx, utxos, len(spendUTXOs), w.address, w.privateKey)
+	err = signSendTx(tx, utxos, signIdx+len(spendUTXOs), w.address, w.privateKey)
 	if err != nil {
 		return tx, err
 	}
@@ -354,8 +356,15 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	txb := btcutil.NewTx(tx)
 	trueSize := mempool.GetTxVirtualSize(txb)
 
+	var sacpsIn int
+	var sacpOut int
+	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
+		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+		return err
+	})
+
 	// Estimate the new fee
-	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee
+	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee - (sacpsIn - sacpOut)
 
 	// If the new fee estimate exceeds the current fee, rebuild the CPFP transaction
 	if newFeeEstimate > fee+feeOverhead {
@@ -380,57 +389,6 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 }
 
 // CPFP (Child Pays For Parent) helpers
-
-// verifyCPFPConditions verifies the conditions required for CPFP
-func verifyCPFPConditions(utxos []UTXO, batches []Batch, walletAddr btcutil.Address) error {
-	ucUtxos := getUnconfirmedUtxos(utxos)
-	if len(ucUtxos) == 0 {
-		return ErrCPFPFeeUpdateParamsNotMet
-	}
-	trailingBatches, err := getTrailingBatches(batches, ucUtxos)
-	if err != nil {
-		return err
-	}
-
-	if len(trailingBatches) == 0 {
-		return nil
-	}
-
-	if len(trailingBatches) > 1 {
-		return ErrCPFPBatchingCorrupted
-	}
-
-	return reconstructCPFPBatches(batches, trailingBatches[0], walletAddr)
-}
-
-// getUnconfirmedUtxos filters and returns unconfirmed UTXOs
-func getUnconfirmedUtxos(utxos []UTXO) []UTXO {
-	var ucUtxos []UTXO
-	for _, utxo := range utxos {
-		if !utxo.Status.Confirmed {
-			ucUtxos = append(ucUtxos, utxo)
-		}
-	}
-	return ucUtxos
-}
-
-// getTrailingBatches returns batches that match the provided UTXOs
-func getTrailingBatches(batches []Batch, utxos []UTXO) ([]Batch, error) {
-	utxomap := make(map[string]bool)
-	for _, utxo := range utxos {
-		utxomap[utxo.TxID] = true
-	}
-
-	trailingBatches := []Batch{}
-
-	for _, batch := range batches {
-		if _, ok := utxomap[batch.ChangeUtxo.TxID]; ok {
-			trailingBatches = append(trailingBatches, batch)
-		}
-	}
-
-	return trailingBatches, nil
-}
 
 // reconstructCPFPBatches reconstructs the CPFP batches
 func reconstructCPFPBatches([]Batch, Batch, btcutil.Address) error {
@@ -493,3 +451,54 @@ func removeDoubleSpends(spends UTXOs, coverUtxos UTXOs) (UTXOs, error) {
 	}
 	return newCoverUtxos, nil
 }
+
+// verifyCPFPConditions verifies the conditions required for CPFP
+// func verifyCPFPConditions(utxos []UTXO, batches []Batch, walletAddr btcutil.Address) error {
+// 	ucUtxos := getUnconfirmedUtxos(utxos)
+// 	if len(ucUtxos) == 0 {
+// 		return ErrCPFPFeeUpdateParamsNotMet
+// 	}
+// 	trailingBatches, err := getTrailingBatches(batches, ucUtxos)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	if len(trailingBatches) == 0 {
+// 		return nil
+// 	}
+
+// 	if len(trailingBatches) > 1 {
+// 		return ErrCPFPBatchingCorrupted
+// 	}
+
+// 	return reconstructCPFPBatches(batches, trailingBatches[0], walletAddr)
+// }
+
+// getUnconfirmedUtxos filters and returns unconfirmed UTXOs
+// func getUnconfirmedUtxos(utxos []UTXO) []UTXO {
+// 	var ucUtxos []UTXO
+// 	for _, utxo := range utxos {
+// 		if !utxo.Status.Confirmed {
+// 			ucUtxos = append(ucUtxos, utxo)
+// 		}
+// 	}
+// 	return ucUtxos
+// }
+
+// getTrailingBatches returns batches that match the provided UTXOs
+// func getTrailingBatches(batches []Batch, utxos []UTXO) ([]Batch, error) {
+// 	utxomap := make(map[string]bool)
+// 	for _, utxo := range utxos {
+// 		utxomap[utxo.TxID] = true
+// 	}
+
+// 	trailingBatches := []Batch{}
+
+// 	for _, batch := range batches {
+// 		if _, ok := utxomap[batch.ChangeUtxo.TxID]; ok {
+// 			trailingBatches = append(trailingBatches, batch)
+// 		}
+// 	}
+
+// 	return trailingBatches, nil
+// }

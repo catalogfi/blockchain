@@ -140,9 +140,10 @@ type batcherWallet struct {
 	quit chan struct{}
 	wg   sync.WaitGroup
 
-	address    btcutil.Address
-	privateKey *secp256k1.PrivateKey
-	logger     *zap.Logger
+	chainParams *chaincfg.Params
+	address     btcutil.Address
+	privateKey  *secp256k1.PrivateKey
+	logger      *zap.Logger
 
 	sw           Wallet
 	opts         BatcherOptions
@@ -156,8 +157,8 @@ type Batch struct {
 	IsStable     bool
 	IsConfirmed  bool
 	Strategy     Strategy
-	ChangeUtxo   UTXO
-	FundingUtxos []UTXO
+	SelfUtxos    UTXOs
+	FundingUtxos UTXOs
 }
 
 func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
@@ -173,6 +174,7 @@ func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, f
 		cache:        cache,
 		logger:       logger,
 		feeEstimator: feeEstimator,
+		chainParams:  chainParams,
 		opts:         defaultBatcherOptions(),
 	}
 	for _, opt := range opts {
@@ -257,7 +259,9 @@ func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []
 		return "", err
 	}
 
-	id := chainhash.HashH([]byte(fmt.Sprintf("%v_%v", spends, sends))).String()
+	// generate random id
+	id := chainhash.HashH([]byte(fmt.Sprintf("%v", time.Now().UnixNano()))).String()
+
 	req := BatcherRequest{
 		ID:     id,
 		Spends: spends,
@@ -457,14 +461,14 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	}
 
 	if walletBalance+spendsAmount < sendsAmount {
-		return ErrBatchParametersNotMet
+		return fmt.Errorf("%v , wallet balance %v, spends amount %v, sends amount %v", ErrBatchParametersNotMet, walletBalance, spendsAmount, sendsAmount)
 	}
 
 	switch strategy {
 	case RBF:
 		for _, utxo := range spendsUtxos {
 			if !utxo.Status.Confirmed {
-				return ErrBatchParametersNotMet
+				return fmt.Errorf("%v, unconfirmed utxo %v", ErrBatchParametersNotMet, utxo)
 			}
 		}
 	}
@@ -545,4 +549,30 @@ func withContextTimeout(parentContext context.Context, duration time.Duration, f
 	ctx, cancel := context.WithTimeout(parentContext, duration)
 	defer cancel()
 	return fn(ctx)
+}
+
+// getFeeUsedInSACPs returns the amount of fee used in the given SACPs
+func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, int, error) {
+	tx, _, err := buildTxFromSacps(sacps)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// go through each input and get the amount it holds
+	// add all the inputs and subtract the outputs to get the fee
+	totalInputAmount := int64(0)
+	for _, in := range tx.TxIn {
+		txFromIndexer, err := indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
+		if err != nil {
+			return 0, 0, err
+		}
+		totalInputAmount += int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)
+	}
+
+	totalOutputAmount := int64(0)
+	for _, out := range tx.TxOut {
+		totalOutputAmount += out.Value
+	}
+
+	return int(totalInputAmount), int(totalOutputAmount), nil
 }
