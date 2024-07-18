@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -89,7 +90,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		for _, batch := range pendingBatches {
-			feeRate := (batch.Tx.Fee * 4) / int64(batch.Tx.Weight)
+			feeRate := (batch.Tx.Fee * blockchain.WitnessScaleFactor) / int64(batch.Tx.Weight)
 			Expect(feeRate).Should(BeNumerically(">=", neeFeeRate))
 		}
 	})

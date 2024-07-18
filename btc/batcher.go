@@ -23,20 +23,27 @@ var (
 	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight
 )
 var (
-	ErrBatchNotFound             = errors.New("batch not found")
-	ErrBatcherStillRunning       = errors.New("batcher is still running")
-	ErrBatcherNotRunning         = errors.New("batcher is not running")
-	ErrBatchParametersNotMet     = errors.New("batch parameters not met")
-	ErrHighFeeEstimate           = errors.New("estimated fee too high")
-	ErrFeeDeltaHigh              = errors.New("fee delta too high")
-	ErrFeeUpdateNotNeeded        = errors.New("fee update not needed")
-	ErrMaxBatchLimitReached      = errors.New("max batch limit reached")
-	ErrCPFPFeeUpdateParamsNotMet = errors.New("CPFP fee update parameters not met")
-	ErrCPFPBatchingCorrupted     = errors.New("CPFP batching corrupted")
-	ErrSavingBatch               = errors.New("failed to save batch")
-	ErrStrategyNotSupported      = errors.New("strategy not supported")
-	ErrBuildCPFPDepthExceeded    = errors.New("build CPFP depth exceeded")
-	ErrBuildRBFDepthExceeded     = errors.New("build RBF depth exceeded")
+	ErrBatchNotFound              = errors.New("batch not found")
+	ErrBatcherStillRunning        = errors.New("batcher is still running")
+	ErrBatcherNotRunning          = errors.New("batcher is not running")
+	ErrBatchParametersNotMet      = errors.New("batch parameters not met")
+	ErrHighFeeEstimate            = errors.New("estimated fee too high")
+	ErrFeeDeltaHigh               = errors.New("fee delta too high")
+	ErrFeeUpdateNotNeeded         = errors.New("fee update not needed")
+	ErrMaxBatchLimitReached       = errors.New("max batch limit reached")
+	ErrCPFPFeeUpdateParamsNotMet  = errors.New("CPFP fee update parameters not met")
+	ErrCPFPBatchingCorrupted      = errors.New("CPFP batching corrupted")
+	ErrSavingBatch                = errors.New("failed to save batch")
+	ErrStrategyNotSupported       = errors.New("strategy not supported")
+	ErrBuildCPFPDepthExceeded     = errors.New("build CPFP depth exceeded")
+	ErrBuildRBFDepthExceeded      = errors.New("build RBF depth exceeded")
+	ErrTxIdEmpty                  = errors.New("txid is empty")
+	ErrInsufficientFundsInRequest = func(have, need int64) error {
+		return fmt.Errorf("%v , have :%v, need at least : %v", ErrBatchParametersNotMet, have, need)
+	}
+	ErrUnconfirmedUTXO = func(utxo UTXO) error {
+		return fmt.Errorf("%v ,unconfirmed utxo :%v", ErrBatchParametersNotMet, utxo)
+	}
 )
 
 // Batcher is a wallet that runs as a service and batches requests
@@ -350,11 +357,11 @@ func (w *batcherWallet) run(ctx context.Context) {
 //     if fee rate increases more than threshold and there are
 //     no batches to create
 func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
+	ticker := time.NewTicker(w.opts.PTI)
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
 		for {
-			ticker := time.NewTicker(w.opts.PTI)
 			select {
 			case <-w.quit:
 				return
@@ -429,6 +436,11 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 		return ErrBatchParametersNotMet
 	}
 
+	err := validateRequests(spends, sends, sacps)
+	if err != nil {
+		return err
+	}
+
 	for _, spend := range spends {
 		if spend.ScriptAddress == w.address {
 			return ErrBatchParametersNotMet
@@ -460,20 +472,29 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 		return err
 	}
 
-	if walletBalance+spendsAmount < sendsAmount {
-		return fmt.Errorf("%v , wallet balance %v, spends amount %v, sends amount %v", ErrBatchParametersNotMet, walletBalance, spendsAmount, sendsAmount)
+	var sacpsIn int
+	var sacpOut int
+	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
+		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+		return err
+	})
+
+	in := walletBalance + spendsAmount + int64(sacpsIn)
+	out := sendsAmount + int64(sacpOut)
+	if in < out+1000 {
+		return ErrInsufficientFundsInRequest(in, out)
 	}
 
 	switch strategy {
 	case RBF:
 		for _, utxo := range spendsUtxos {
 			if !utxo.Status.Confirmed {
-				return fmt.Errorf("%v, unconfirmed utxo %v", ErrBatchParametersNotMet, utxo)
+				return ErrUnconfirmedUTXO(utxo)
 			}
 		}
 	}
 
-	return validateRequests(spends, sends, sacps)
+	return nil
 }
 
 // verifies if the fee rate delta is within the threshold
@@ -530,7 +551,7 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 
 func getTransaction(indexer IndexerClient, txid string) (Transaction, error) {
 	if txid == "" {
-		return Transaction{}, fmt.Errorf("txid is empty")
+		return Transaction{}, ErrTxIdEmpty
 	}
 	for i := 1; i < 5; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

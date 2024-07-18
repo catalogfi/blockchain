@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/wire"
@@ -303,7 +303,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 
 	// Check if there are no funds to spend for the given scripts
 	if balanceOfScripts == 0 && len(spendRequests) > 0 {
-		return nil, fmt.Errorf("scripts have no funds to spend")
+		return nil, ErrNoFundsToSpend
 	}
 
 	// Temporary send requests for the transaction
@@ -421,7 +421,7 @@ func calculateFeeStats(reqFeeRate int, batches []Batch) FeeStats {
 	feeDelta := int(0)
 
 	for _, batch := range batches {
-		size := batch.Tx.Weight / 4
+		size := batch.Tx.Weight / blockchain.WitnessScaleFactor
 		feeRate := int(batch.Tx.Fee) / size
 		if feeRate > maxFeeRate {
 			maxFeeRate = feeRate

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/mempool"
@@ -83,7 +84,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 	}
 
 	// Calculate the current fee rate for the batch transaction.
-	currentFeeRate := int(batch.Tx.Fee) * 4 / (batch.Tx.Weight)
+	currentFeeRate := int(batch.Tx.Fee) * blockchain.WitnessScaleFactor / (batch.Tx.Weight)
 
 	// Attempt to create a new RBF batch with combined requests.
 	if err = w.createNewRBFBatch(c, append(batchedRequests, pendingRequests...), currentFeeRate, 0); err != ErrTxInputsMissingOrSpent {
@@ -409,7 +410,7 @@ func (w *batcherWallet) createRBFTx(
 
 	// Check if there are funds to spend
 	if balanceOfSpendScripts == 0 && len(spendRequests) > 0 {
-		return nil, nil, nil, fmt.Errorf("scripts have no funds to spend")
+		return nil, nil, nil, ErrNoFundsToSpend
 	}
 
 	// Combine spend UTXOs with provided UTXOs

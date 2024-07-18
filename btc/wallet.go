@@ -69,6 +69,12 @@ var (
 	ErrNoUTXOsFoundForAddress = func(addr string) error {
 		return fmt.Errorf("utxos not found for address %s", addr)
 	}
+
+	// ErrNoInputsFound indicates that no inputs are found in the sacp.
+	ErrSCAPNoInputsFound = fmt.Errorf("no inputs found in sacp")
+
+	// ErrSCAPInputsNotEqualOutputs indicates that the number of inputs and outputs are not equal in the sacp.
+	ErrSCAPInputsNotEqualOutputs = fmt.Errorf("number of inputs and outputs are not equal in sacp")
 )
 
 var (
@@ -839,11 +845,11 @@ func buildAndValidateSacpTx(sacp []byte) (*wire.MsgTx, error) {
 func validateSacp(tx *wire.MsgTx) error {
 	// TODO : simulate the tx and check if it is valid
 	if len(tx.TxIn) == 0 {
-		return fmt.Errorf("no inputs found in sacp")
+		return ErrSCAPNoInputsFound
 	}
 
 	if len(tx.TxIn) != len(tx.TxOut) {
-		return fmt.Errorf("number of inputs and outputs should be same in sacp")
+		return ErrSCAPInputsNotEqualOutputs
 	}
 
 	return nil
