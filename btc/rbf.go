@@ -3,6 +3,7 @@ package btc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -438,7 +439,7 @@ func (w *batcherWallet) createRBFTx(
 	swSigs, trSigs := getNumberOfSigs(spendRequests)
 	bufferFee := 0
 	if depth > 0 {
-		bufferFee = ((4*swSigs + trSigs) / 2) * feeRate
+		bufferFee = ((4*(swSigs+len(utxos)) + trSigs + 10) / 2) * feeRate
 	}
 	newFeeEstimate := (int(trueSize) * feeRate) + bufferFee
 
@@ -482,10 +483,11 @@ func (w *batcherWallet) createRBFTx(
 			zap.Int("depth", depth),
 			zap.Uint("fee", fee),
 			zap.Int("newFeeEstimate", newFeeEstimate),
+			zap.Int("bufferFee", bufferFee),
 			zap.Int("requiredFeeRate", feeRate),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),
-			zap.Int("TxSize", len(buf.Bytes())),
+			zap.String("TxData", hex.EncodeToString(buf.Bytes())),
 		)
 		// Recursively call createRBFTx with the updated parameters
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)
@@ -496,7 +498,7 @@ func (w *batcherWallet) createRBFTx(
 }
 
 // getUTXOsForSpendRequest returns UTXOs required to cover amount and also returns change amount if any
-func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int, avoidUtxos map[string]bool) ([]UTXO, int, error) {
+func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int, avoidUtxos map[string]bool) (UTXOs, int, error) {
 	var prevUtxos, coverUtxos UTXOs
 	var err error
 
