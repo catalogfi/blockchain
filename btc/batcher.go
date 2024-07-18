@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	AddSignatureOp        = []byte("add_signature")
-	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight
+	AddSignatureOp            = []byte("add_signature")
+	SegwitSpendWeight     int = txsizes.RedeemP2WPKHInputWitnessWeight
+	DefaultContextTimeout     = 5 * time.Second
 )
 var (
 	ErrBatchNotFound              = errors.New("batch not found")
@@ -464,7 +465,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 
 	spendsAmount := int64(0)
 	spendsUtxos := UTXOs{}
-	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
+	err = withContextTimeout(ctx, DefaultContextTimeout, func(ctx context.Context) error {
 		spendsUtxos, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
 		return err
 	})
@@ -474,7 +475,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 
 	var sacpsIn int
 	var sacpOut int
-	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
+	err = withContextTimeout(ctx, DefaultContextTimeout, func(ctx context.Context) error {
 		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
 		return err
 	})
@@ -533,7 +534,7 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 	confirmedTxs := []string{}
 	pendingTxs := []string{}
 	for _, batch := range batches {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 		defer cancel()
 		tx, err := indexer.GetTx(ctx, batch.Tx.TxID)
 		if err != nil {
@@ -554,7 +555,7 @@ func getTransaction(indexer IndexerClient, txid string) (Transaction, error) {
 		return Transaction{}, ErrTxIdEmpty
 	}
 	for i := 1; i < 5; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
 		defer cancel()
 		tx, err := indexer.GetTx(ctx, txid)
 		if err != nil {
