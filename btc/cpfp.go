@@ -16,7 +16,6 @@ import (
 
 type FeeStats struct {
 	MaxFeeRate int
-	TotalSize  int
 	FeeDelta   int
 }
 
@@ -58,13 +57,6 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		return ErrBatchParametersNotMet
 	}
 
-	// Fetch fee rates and select the appropriate fee rate based on the wallet's options
-	feeRates, err := w.feeEstimator.FeeSuggestion()
-	if err != nil {
-		return err
-	}
-	requiredFeeRate := selectFee(feeRates, w.opts.TxOptions.FeeLevel)
-
 	// Read pending batches from the cache
 	var batches []Batch
 	err = withContextTimeout(c, 5*time.Second, func(ctx context.Context) error {
@@ -87,6 +79,13 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Fetch fee rates and select the appropriate fee rate based on the wallet's options
+	feeRates, err := w.feeEstimator.FeeSuggestion()
+	if err != nil {
+		return err
+	}
+	requiredFeeRate := selectFee(feeRates, w.opts.TxOptions.FeeLevel)
 
 	// Calculate fee stats based on the required fee rate
 	feeStats, err := getFeeStats(requiredFeeRate, pendingBatches, w.opts)
@@ -470,7 +469,6 @@ func calculateFeeStats(reqFeeRate int, batches []Batch) FeeStats {
 	}
 	return FeeStats{
 		MaxFeeRate: maxFeeRate,
-		TotalSize:  totalSize,
 		FeeDelta:   feeDelta,
 	}
 }
