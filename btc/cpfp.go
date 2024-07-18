@@ -289,6 +289,11 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 		return nil, err
 	}
 
+	utxos, err = removeDoubleSpends(spendUTXOsMap[w.address], utxos)
+	if err != nil {
+		return nil, err
+	}
+
 	spendUTXOsMap[w.address] = append(spendUTXOsMap[w.address], utxos...)
 	if sequencesMap == nil {
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
@@ -366,7 +371,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 			zap.Int("coverUtxos", len(utxos)),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),
-			zap.String("tx", hex.EncodeToString(buf.Bytes())),
+			zap.String("TxData", hex.EncodeToString(buf.Bytes())),
 		)
 		return w.buildCPFPTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, newFeeEstimate, 0, feeRate, depth-1)
 	}
@@ -473,4 +478,18 @@ func calculateFeeStats(reqFeeRate int, batches []Batch) FeeStats {
 		TotalSize:  totalSize,
 		FeeDelta:   feeDelta,
 	}
+}
+
+func removeDoubleSpends(spends UTXOs, coverUtxos UTXOs) (UTXOs, error) {
+	var utxomap = make(map[string]bool)
+	for _, spendUtxo := range spends {
+		utxomap[spendUtxo.TxID] = true
+	}
+	var newCoverUtxos UTXOs
+	for _, coverUtxo := range coverUtxos {
+		if _, ok := utxomap[coverUtxo.TxID]; !ok {
+			newCoverUtxos = append(newCoverUtxos, coverUtxo)
+		}
+	}
+	return newCoverUtxos, nil
 }
