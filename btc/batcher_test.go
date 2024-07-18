@@ -52,7 +52,7 @@ func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
 		return fmt.Errorf("batch already exists")
 	}
 	m.batches[batch.Tx.TxID] = batch
-	for id, _ := range batch.RequestIds {
+	for id := range batch.RequestIds {
 		request := m.requests[id]
 		request.Status = true
 		m.requests[id] = request

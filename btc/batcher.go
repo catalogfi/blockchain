@@ -20,7 +20,7 @@ import (
 
 var (
 	AddSignatureOp        = []byte("add_signature")
-	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight 
+	SegwitSpendWeight int = txsizes.RedeemP2WPKHInputWitnessWeight
 )
 var (
 	ErrBatchNotFound             = errors.New("batch not found")
@@ -253,7 +253,7 @@ func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 
 // Send creates a batch request , saves it in the cache and returns a tracking id
 func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
-	if err := w.validateBatchRequest(ctx, spends, sends, sacps); err != nil {
+	if err := w.validateBatchRequest(ctx, w.opts.Strategy, spends, sends, sacps); err != nil {
 		return "", err
 	}
 
@@ -420,9 +420,15 @@ func (w *batcherWallet) createBatch() error {
 	}
 }
 
-func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []SpendRequest, sends []SendRequest, sacps [][]byte) error {
+func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strategy, spends []SpendRequest, sends []SendRequest, sacps [][]byte) error {
 	if len(spends) == 0 && len(sends) == 0 && len(sacps) == 0 {
 		return ErrBatchParametersNotMet
+	}
+
+	for _, spend := range spends {
+		if spend.ScriptAddress == w.address {
+			return ErrBatchParametersNotMet
+		}
 	}
 
 	utxos, err := w.indexer.GetUTXOs(ctx, w.address)
@@ -441,8 +447,9 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []Spend
 	}
 
 	spendsAmount := int64(0)
+	spendsUtxos := UTXOs{}
 	err = withContextTimeout(ctx, 5*time.Second, func(ctx context.Context) error {
-		_, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
+		spendsUtxos, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
 		return err
 	})
 	if err != nil {
@@ -451,6 +458,15 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, spends []Spend
 
 	if walletBalance+spendsAmount < sendsAmount {
 		return ErrBatchParametersNotMet
+	}
+
+	switch strategy {
+	case RBF:
+		for _, utxo := range spendsUtxos {
+			if !utxo.Status.Confirmed {
+				return ErrBatchParametersNotMet
+			}
+		}
 	}
 
 	return validateRequests(spends, sends, sacps)
