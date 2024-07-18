@@ -290,12 +290,11 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 	}
 
 	// serialize the transaction
-	var buf bytes.Buffer
-	err = tx.Serialize(&buf)
-	if err != nil {
+	var txBytes []byte
+	if txBytes, err = GetTxRawBytes(tx); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return txBytes, nil
 }
 
 func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest, sacps [][]byte, sacpFee, fee int, depth int) (*wire.MsgTx, error) {

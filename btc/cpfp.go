@@ -1,7 +1,6 @@
 package btc
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -368,8 +367,10 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 
 	// If the new fee estimate exceeds the current fee, rebuild the CPFP transaction
 	if newFeeEstimate > fee+feeOverhead {
-		buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-		err = tx.Serialize(buf)
+		var txBytes []byte
+		if txBytes, err = GetTxRawBytes(tx); err != nil {
+			return nil, err
+		}
 		w.logger.Info(
 			"rebuilding CPFP transaction",
 			zap.Int("depth", depth),
@@ -380,7 +381,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 			zap.Int("coverUtxos", len(utxos)),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),
-			zap.String("TxData", hex.EncodeToString(buf.Bytes())),
+			zap.String("TxData", hex.EncodeToString(txBytes)),
 		)
 		return w.buildCPFPTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, newFeeEstimate, 0, feeRate, depth-1)
 	}

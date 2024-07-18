@@ -244,13 +244,15 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		tx.TxIn[i].Witness[1] = witnessWithSig[0]
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-	err = tx.Serialize(buf)
+	var txBytes []byte
+	if txBytes, err = GetTxRawBytes(tx); err != nil {
+		return "", err
+	}
 	if err != nil {
 		return "", err
 	}
 	// submit an SACP tx
-	return hw.wallet.Send(ctx, nil, nil, [][]byte{buf.Bytes()})
+	return hw.wallet.Send(ctx, nil, nil, [][]byte{txBytes})
 
 }
 

@@ -1,7 +1,6 @@
 package btc
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -501,8 +500,10 @@ func (w *batcherWallet) createRBFTx(
 			}
 		}
 
-		buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-		err = tx.Serialize(buf)
+		var txBytes []byte
+		if txBytes, err = GetTxRawBytes(tx); err != nil {
+			return nil, nil, nil, err
+		}
 		w.logger.Info(
 			"rebuilding rbf tx",
 			zap.Int("depth", depth),
@@ -512,7 +513,7 @@ func (w *batcherWallet) createRBFTx(
 			zap.Int("requiredFeeRate", feeRate),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),
-			zap.String("TxData", hex.EncodeToString(buf.Bytes())),
+			zap.String("TxData", hex.EncodeToString(txBytes)),
 		)
 		// Recursively call createRBFTx with the updated parameters
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)

@@ -353,11 +353,11 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 		return err
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-	if err := tx.Serialize(buf); err != nil {
+	var txBytes []byte
+	if txBytes, err = GetTxRawBytes(tx); err != nil {
 		return err
 	}
-	strBuffer := bytes.NewBufferString(hex.EncodeToString(buf.Bytes()))
+	strBuffer := bytes.NewBufferString(hex.EncodeToString(txBytes))
 
 	// Send the request
 	err = retry(client.logger, ctx, client.retryInterval, func() error {
