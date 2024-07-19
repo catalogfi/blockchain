@@ -72,7 +72,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true, CPFP)
+		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
 	})
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-		return w.cache.UpdateBatchStatuses(ctx, confirmedTxs, true, CPFP)
+		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
 	})
 	if err != nil {
 		return err

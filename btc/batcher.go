@@ -77,8 +77,8 @@ type Cache interface {
 	ReadPendingChangeUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
 	// ReadPendingFundingUtxos reads all pending funding UTXOs for a given strategy.
 	ReadPendingFundingUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
-	// UpdateBatchStatuses updates the status of multiple batches and delete pending batches based on confirmed transaction IDs.
-	UpdateBatchStatuses(ctx context.Context, txId []string, status bool, strategy Strategy) error
+	// ConfirmBatchStatuses updates the status of multiple batches and delete pending batches based on confirmed transaction IDs.
+	ConfirmBatchStatuses(ctx context.Context, txIds []string, deletePending bool, strategy Strategy) error
 	// UpdateBatchFees updates the fees for multiple batches.
 	UpdateBatchFees(ctx context.Context, txId []string, fee int64) error
 	// SaveBatch saves a batch.
@@ -367,6 +367,7 @@ func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 				if err := w.createBatch(); err != nil {
 					if !errors.Is(err, ErrBatchParametersNotMet) {
 						w.logger.Error("failed to create batch", zap.Error(err))
+						continue
 					} else {
 						w.logger.Info("waiting for new batch")
 					}

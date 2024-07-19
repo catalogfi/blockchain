@@ -22,18 +22,22 @@ func NewTestCache() btc.Cache {
 }
 
 func (m *mockCache) ReadBatchByReqId(ctx context.Context, id string) (btc.Batch, error) {
-	for _, batch := range m.batches {
+	for _, batchId := range m.batchList {
+		batch, ok := m.batches[batchId]
+		if !ok {
+			return btc.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not recorded")
+		}
 		if _, ok := batch.RequestIds[id]; ok {
 			return batch, nil
 		}
 	}
-	return btc.Batch{}, fmt.Errorf("batch not found")
+	return btc.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not found")
 }
 
 func (m *mockCache) ReadBatch(ctx context.Context, txId string) (btc.Batch, error) {
 	batch, ok := m.batches[txId]
 	if !ok {
-		return btc.Batch{}, fmt.Errorf("batch not found")
+		return btc.Batch{}, fmt.Errorf("bReadBatch, batch not found")
 	}
 	return batch, nil
 }
@@ -61,21 +65,23 @@ func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
 	return nil
 }
 
-func (m *mockCache) UpdateBatchStatuses(ctx context.Context, txIds []string, status bool, strategy btc.Strategy) error {
+func (m *mockCache) ConfirmBatchStatuses(ctx context.Context, txIds []string, deletePending bool, strategy btc.Strategy) error {
 	confirmedBatchIds := make(map[string]bool)
 	for _, id := range txIds {
 		batch, ok := m.batches[id]
 		if !ok {
-			return fmt.Errorf("batch not found")
-		}
-		if status {
-			confirmedBatchIds[id] = true
+			return fmt.Errorf("UpdateBatchStatuses, batch not found")
 		}
 
-		batch.Tx.Status.Confirmed = status
+		confirmedBatchIds[id] = true
+
+		batch.Tx.Status.Confirmed = true
 		m.batches[id] = batch
 	}
-	return m.DeletePendingBatches(ctx, confirmedBatchIds, strategy)
+	if deletePending {
+		return m.DeletePendingBatches(ctx, confirmedBatchIds, strategy)
+	}
+	return nil
 }
 
 func (m *mockCache) ReadRequest(ctx context.Context, id string) (btc.BatcherRequest, error) {
@@ -108,7 +114,7 @@ func (m *mockCache) UpdateBatchFees(ctx context.Context, txId []string, feeRate 
 	for _, id := range txId {
 		batch, ok := m.batches[id]
 		if !ok {
-			return fmt.Errorf("batch not found")
+			return fmt.Errorf("UpdateBatchFees, batch not found")
 		}
 
 		batch.Tx.Fee = int64(batch.Tx.Weight) * feeRate / 4

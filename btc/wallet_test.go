@@ -1180,8 +1180,6 @@ func generateSACP(wallet btc.Wallet, chainParams chaincfg.Params, privKey *secp2
 		return nil, err
 	}
 
-	fmt.Println("Script Address: ", scriptAddr.EncodeAddress())
-
 	// fund the script
 	txid, err := wallet.Send(context.Background(), []btc.SendRequest{
 		{
