@@ -517,8 +517,6 @@ func (w *batcherWallet) createRBFTx(
 		// Recursively call createRBFTx with the updated parameters
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)
 	}
-
-	fmt.Println("RBF TX", tx.TxHash().String(), "FEE", newFeeEstimate, "DEPTH", depth, trueSize, feeRate)
 	// Return the created transaction and utxo used to fund the transaction
 	return tx, utxos, selfUtxos, nil
 }
