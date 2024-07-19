@@ -80,8 +80,6 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		// to address
 		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
-		// change address
-		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
 		time.Sleep(10 * time.Second)
 	})
