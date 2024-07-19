@@ -7,15 +7,17 @@ jobs:
             - name: Check out code
               uses: actions/checkout@v4
             - name: Setup golang
-              uses : actions/setup-go@v4
-              with :
-                  go-version : '>=1.19.0'
+              uses: actions/setup-go@v4
+              with:
+                  go-version: ">=1.19.0"
             - name: Install merry
               run: curl https://get.merry.dev | bash
-            - name : Start merry
+            - name: Start merry
               run: merry go --bare --headless
+            - name: Install Ginkgo
+              run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
             - name: generate test generate coverage
-              run: go test $(go list ./... | grep -v /localnet | grep -v /evm/bindings) -coverprofile=./cover.out
+              run: go test $(go list ./... | grep -v /localnet | grep -v /evm/bindings) -coverprofile=./cover.out && ginkgo --focus Wallets  -- -mode=batcher_rbf && ginkgo --focus Wallets  -- -mode=batcher_cpfp
               env:
                   BTC_REGNET_USERNAME: "admin1"
                   BTC_REGNET_PASSWORD: "123"
