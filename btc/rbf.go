@@ -366,8 +366,8 @@ func (w *batcherWallet) createRBFTx(
 		checkValidity = true
 	}
 
-	var sacpsInAmount int
-	var sacpsOutAmount int
+	var sacpsInAmount int64
+	var sacpsOutAmount int64
 	var err error
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
 		sacpsInAmount, sacpsOutAmount, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
@@ -392,7 +392,7 @@ func (w *batcherWallet) createRBFTx(
 	if sequencesMap == nil {
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
 	}
-	sequencesMap = generateSequenceForCoverUtxos(sequencesMap, utxos)
+	sequencesMap = getRbfSequenceMap(sequencesMap, utxos)
 
 	// Check if there are funds to spend
 	if balanceOfSpendScripts == 0 && len(spendRequests) > 0 {
@@ -403,7 +403,7 @@ func (w *batcherWallet) createRBFTx(
 	totalUtxos := append(spendUTXOs, utxos...)
 
 	// Build the RBF transaction
-	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, sacpsInAmount-sacpsOutAmount, sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
+	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, int(sacpsInAmount-sacpsOutAmount), sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -436,32 +436,32 @@ func (w *batcherWallet) createRBFTx(
 
 	// Check if the new fee estimate exceeds the provided fee
 	if newFeeEstimate > int(fee) {
-		totalIn, totalOut := func() (int, int) {
+		totalIn, totalOut := func() (int64, int64) {
 			totalOut := int64(0)
 			for _, txOut := range tx.TxOut {
 				totalOut += txOut.Value
 			}
 
-			totalIn := 0
+			totalIn := int64(0)
 			for _, utxo := range totalUtxos {
-				totalIn += int(utxo.Amount)
+				totalIn += utxo.Amount
 			}
 
 			totalIn += sacpsInAmount
 
-			return totalIn, int(totalOut)
+			return totalIn, totalOut
 		}()
 
 		// If total inputs are less than the required amount, get additional UTXOs
-		if totalIn < totalOut+newFeeEstimate {
+		if totalIn < totalOut+int64(newFeeEstimate) {
 			w.logger.Debug(
 				"getting cover utxos",
-				zap.Int("totalIn", totalIn),
-				zap.Int("totalOut", totalOut),
+				zap.Int64("totalIn", totalIn),
+				zap.Int64("totalOut", totalOut),
 				zap.Int("newFeeEstimate", newFeeEstimate),
 			)
 			err := withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-				utxos, _, err = w.getUtxosForFee(ctx, totalOut+newFeeEstimate-totalIn, feeRate, avoidUtxos)
+				utxos, _, err = w.getUtxosForFee(ctx, totalOut+int64(newFeeEstimate)-totalIn, int64(feeRate), avoidUtxos)
 				return err
 			})
 			if err != nil {
@@ -497,8 +497,8 @@ func (w *batcherWallet) createRBFTx(
 	return tx, utxos, selfUtxos, nil
 }
 
-// getUTXOsForSpendRequest returns UTXOs required to cover amount and also returns change amount if any
-func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int, avoidUtxos map[string]bool) (UTXOs, int, error) {
+// getUtxosForFee is an iterative function that returns self sufficient UTXOs to cover the required fee and the change
+func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int64, avoidUtxos map[string]bool) (UTXOs, int64, error) {
 	var prevUtxos, coverUtxos UTXOs
 	var err error
 
@@ -522,8 +522,8 @@ func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int,
 
 	// Combine previous UTXOs and cover UTXOs
 	utxos := append(prevUtxos, coverUtxos...)
-	total := 0
-	overHead := 0
+	total := int64(0)
+	overhead := int64(0)
 	selectedUtxos := []UTXO{}
 	for _, utxo := range utxos {
 		if utxo.Amount < DustAmount {
@@ -532,16 +532,16 @@ func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int,
 		if avoidUtxos[utxo.TxID] {
 			continue
 		}
-		total += int(utxo.Amount)
+		total += utxo.Amount
 		selectedUtxos = append(selectedUtxos, utxo)
-		overHead = (len(selectedUtxos) * (SegwitSpendWeight) * feeRate)
-		if total >= amount+overHead {
+		overhead = int64(len(selectedUtxos)*(SegwitSpendWeight)) * feeRate
+		if total >= amount+overhead {
 			break
 		}
 	}
 
 	// Calculate the required fee and change
-	requiredFee := amount + overHead
+	requiredFee := amount + overhead
 	if total < requiredFee {
 		return nil, 0, errors.New("insufficient funds")
 	}
@@ -649,7 +649,7 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 }
 
 // generateSequenceForCoverUtxos updates the sequence map with sequences for cover UTXOs
-func generateSequenceForCoverUtxos(sequencesMap map[string]uint32, coverUtxos UTXOs) map[string]uint32 {
+func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[string]uint32 {
 	for _, utxo := range coverUtxos {
 		sequencesMap[utxo.TxID] = wire.MaxTxInSequenceNum - 2
 	}

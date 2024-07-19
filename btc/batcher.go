@@ -464,8 +464,8 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 		return err
 	}
 
-	var sacpsIn int
-	var sacpOut int
+	var sacpsIn int64
+	var sacpOut int64
 	err = withContextTimeout(ctx, DefaultContextTimeout, func(ctx context.Context) error {
 		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
 		return err
@@ -567,7 +567,7 @@ func withContextTimeout(parentContext context.Context, duration time.Duration, f
 }
 
 // getFeeUsedInSACPs returns the amount of fee used in the given SACPs
-func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, int, error) {
+func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return 0, 0, err
@@ -589,7 +589,7 @@ func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerC
 		totalOutputAmount += out.Value
 	}
 
-	return int(totalInputAmount), int(totalOutputAmount), nil
+	return totalInputAmount, totalOutputAmount, nil
 }
 
 // unpackBatcherRequests unpacks the batcher requests into spend requests, send requests and SACPs

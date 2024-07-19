@@ -339,15 +339,15 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	txb := btcutil.NewTx(tx)
 	trueSize := mempool.GetTxVirtualSize(txb)
 
-	var sacpsInAmount int
-	var sacpOutAmount int
+	var sacpsInAmount int64
+	var sacpOutAmount int64
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
 		sacpsInAmount, sacpOutAmount, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
 		return err
 	})
 
 	// Estimate the new fee
-	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee - (sacpsInAmount - sacpOutAmount)
+	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee - int(sacpsInAmount-sacpOutAmount)
 
 	// If the new fee estimate exceeds the current fee, rebuild the CPFP transaction
 	if newFeeEstimate > fee+feeOverhead {
