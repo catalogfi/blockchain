@@ -335,16 +335,23 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 // depth is used to limit the number of add cover utxos to the transaction
 func (w *batcherWallet) createRBFTx(
 	c context.Context,
-	utxos UTXOs, // Unspent transaction outputs to be used in the transaction
+	// Unspent transaction outputs to be used in the transaction
+	utxos UTXOs,
 	spendRequests []SpendRequest,
 	sendRequests []SendRequest,
 	sacps [][]byte,
-	sequencesMap map[string]uint32, // Map for sequences of inputs
-	avoidUtxos map[string]bool, // Map to avoid using certain UTXOs , those which are generated from previous unconfirmed batches
-	fee uint, // Transaction fee ,if fee is not provided it will dynamically added
-	feeRate int, // required fee rate per vByte
-	checkValidity bool, // Flag to check the transaction's validity during construction
-	depth int, // Depth to limit the recursion
+	// Map for sequences of inputs
+	sequencesMap map[string]uint32,
+	// Map to avoid using certain UTXOs , those which are generated from previous unconfirmed batches
+	avoidUtxos map[string]bool,
+	// Transaction fee ,if fee is not provided it will dynamically added
+	fee uint,
+	// required fee rate per vByte
+	feeRate int,
+	// Flag to check the transaction's validity during construction
+	checkValidity bool,
+	// Depth to limit the recursion
+	depth int,
 ) (*wire.MsgTx, UTXOs, UTXOs, error) {
 	// Check if the recursion depth is exceeded
 	if depth < 0 {
