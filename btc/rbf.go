@@ -321,7 +321,7 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 
 	if tx.Status.Confirmed && !latestBatch.Tx.Status.Confirmed {
 		err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-			if err = w.cache.UpdateBatchStatuses(ctx, []string{tx.TxID}, true, RBF); err == nil {
+			if err = w.cache.ConfirmBatchStatuses(ctx, []string{tx.TxID}, true, RBF); err == nil {
 				return ErrFeeUpdateNotNeeded
 			}
 			return err
@@ -609,8 +609,12 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, scapsFee int, recipients [
 		return nil, 0, err
 	}
 
+	if fee > int64(scapsFee) {
+		fee -= int64(scapsFee)
+	}
+
 	// Add inputs to the transaction
-	totalUTXOAmount := int64(scapsFee)
+	totalUTXOAmount := int64(0)
 	for _, utxo := range utxos {
 		txid, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
@@ -649,16 +653,18 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, scapsFee int, recipients [
 	}
 
 	// Add change output to the transaction if required
-	if totalUTXOAmount+pendingAmount >= totalSendAmount+fee {
+	if totalUTXOAmount >= totalSendAmount+pendingAmount+fee {
 		script, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
 			return nil, 0, err
 		}
-		if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+		if totalUTXOAmount >= totalSendAmount+pendingAmount+fee+DustAmount {
 			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
+		} else if pendingAmount > 0 {
+			tx.AddTxOut(wire.NewTxOut(pendingAmount, script))
 		}
 	} else if checkValidity {
-		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+fee)
+		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+pendingAmount+fee)
 	}
 
 	// Return the built transaction and the index of inputs that need to be signed
