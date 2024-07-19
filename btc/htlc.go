@@ -248,9 +248,7 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 	if txBytes, err = GetTxRawBytes(tx); err != nil {
 		return "", err
 	}
-	if err != nil {
-		return "", err
-	}
+
 	// submit an SACP tx
 	return hw.wallet.Send(ctx, nil, nil, [][]byte{txBytes})
 
