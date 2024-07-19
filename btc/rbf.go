@@ -7,6 +7,7 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
@@ -407,24 +408,6 @@ func (w *batcherWallet) createRBFTx(
 		return nil, nil, nil, err
 	}
 
-	var selfUtxos UTXOs
-	for i := 0; i < len(tx.TxOut); i++ {
-		script := tx.TxOut[i].PkScript
-		// convert script to btcutil.Address
-		class, addrs, _, err := txscript.ExtractPkScriptAddrs(script, w.chainParams)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		if class == txscript.WitnessV0PubKeyHashTy && len(addrs) > 0 && addrs[0] == w.address {
-			selfUtxos = append(selfUtxos, UTXO{
-				TxID:   tx.TxHash().String(),
-				Vout:   uint32(i),
-				Amount: tx.TxOut[i].Value,
-			})
-		}
-	}
-
 	// Sign the inputs related to spend requests
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
 		return signSpendTx(ctx, tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
@@ -504,6 +487,12 @@ func (w *batcherWallet) createRBFTx(
 		// Recursively call createRBFTx with the updated parameters
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, checkValidity, depth-1)
 	}
+
+	selfUtxos, err := getSelfUtxos(tx.TxOut, tx.TxHash().String(), w.address, w.chainParams)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	// Return the created transaction and utxo used to fund the transaction
 	return tx, utxos, selfUtxos, nil
 }
@@ -591,14 +580,14 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context, strategy Strate
 
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
 // checkValidity is used to determine if the transaction should be validated while building
-func buildRBFTransaction(utxos UTXOs, sacps [][]byte, scapsFee int, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
+func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	if fee > int64(scapsFee) {
-		fee -= int64(scapsFee)
+	if fee > int64(sacpsFee) {
+		fee -= int64(sacpsFee)
 	}
 
 	// Add inputs to the transaction
@@ -665,4 +654,26 @@ func generateSequenceForCoverUtxos(sequencesMap map[string]uint32, coverUtxos UT
 		sequencesMap[utxo.TxID] = wire.MaxTxInSequenceNum - 2
 	}
 	return sequencesMap
+}
+
+// getSelfUtxos returns UTXOs that are related to the wallet address
+func getSelfUtxos(txOuts []*wire.TxOut, txHash string, walletAddr btcutil.Address, chainParams *chaincfg.Params) (UTXOs, error) {
+	var selfUtxos UTXOs
+	for i := 0; i < len(txOuts); i++ {
+		script := txOuts[i].PkScript
+		// convert script to btcutil.Address
+		class, addrs, _, err := txscript.ExtractPkScriptAddrs(script, chainParams)
+		if err != nil {
+			return nil, err
+		}
+
+		if class == txscript.WitnessV0PubKeyHashTy && len(addrs) > 0 && addrs[0] == walletAddr {
+			selfUtxos = append(selfUtxos, UTXO{
+				TxID:   txHash,
+				Vout:   uint32(i),
+				Amount: txOuts[i].Value,
+			})
+		}
+	}
+	return selfUtxos, nil
 }
