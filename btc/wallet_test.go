@@ -53,9 +53,9 @@ var _ = Describe("Wallets", Ordered, func() {
 			mockFeeEstimator := NewMockFeeEstimator(10)
 			cache := NewTestCache()
 			if mode == BATCHER_CPFP {
-				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
+				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.CPFP))
 			} else {
-				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.RBF))
 			}
 			Expect(err).To(BeNil())
 		}
@@ -282,7 +282,7 @@ var _ = Describe("Wallets", Ordered, func() {
 		}, nil, nil)
 		Expect(err).To(BeNil())
 
-		err = localnet.MineBitcoinBlocks(2, indexer)
+		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 		// spend the script
 		txId, err := wallet.Send(context.Background(), nil,
@@ -431,7 +431,7 @@ var _ = Describe("Wallets", Ordered, func() {
 		}, nil, nil)
 		Expect(err).To(BeNil())
 
-		err = localnet.MineBitcoinBlocks(2, indexer)
+		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
 		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
@@ -1397,7 +1397,7 @@ func assertSuccess(wallet btc.Wallet, tx *btc.Transaction, txid string, mode MOD
 				Expect(tx).ShouldNot(BeNil())
 				break
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 	}
 }
