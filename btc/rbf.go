@@ -375,6 +375,8 @@ func (w *batcherWallet) createRBFTx(
 			zap.Int("depth", depth),
 		)
 		return nil, nil, nil, ErrBuildRBFDepthExceeded
+	} else if depth == 0 {
+		checkValidity = true
 	}
 
 	var sacpsIn int
@@ -514,7 +516,7 @@ func (w *batcherWallet) createRBFTx(
 			zap.String("TxData", hex.EncodeToString(txBytes)),
 		)
 		// Recursively call createRBFTx with the updated parameters
-		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, true, depth-1)
+		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, checkValidity, depth-1)
 	}
 	// Return the created transaction and utxo used to fund the transaction
 	return tx, utxos, selfUtxos, nil

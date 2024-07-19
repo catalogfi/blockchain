@@ -311,16 +311,18 @@ var _ = Describe("Wallets", Ordered, func() {
 	})
 
 	It("should be able to spend funds from a simple p2tr script", func() {
-		skipFor(mode, BATCHER_CPFP, BATCHER_RBF)
 		script, scriptAddr, cb, err := additionTapscript(chainParams)
 		Expect(err).To(BeNil())
 
-		_, err = wallet.Send(context.Background(), []btc.SendRequest{
+		_, err = faucet.Send(context.Background(), []btc.SendRequest{
 			{
 				Amount: 100000,
 				To:     scriptAddr,
 			},
 		}, nil, nil)
+		Expect(err).To(BeNil())
+
+		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
 		// spend the script
@@ -343,16 +345,18 @@ var _ = Describe("Wallets", Ordered, func() {
 	})
 
 	It("should be able to spend funds from signature-check script p2tr", func() {
-		skipFor(mode, BATCHER_CPFP, BATCHER_RBF)
 		script, scriptAddr, cb, err := sigCheckTapScript(chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
 		Expect(err).To(BeNil())
 
-		_, err = wallet.Send(context.Background(), []btc.SendRequest{
+		_, err = faucet.Send(context.Background(), []btc.SendRequest{
 			{
 				Amount: 100000,
 				To:     scriptAddr,
 			},
 		}, nil, nil)
+		Expect(err).To(BeNil())
+
+		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
 		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
@@ -569,7 +573,6 @@ var _ = Describe("Wallets", Ordered, func() {
 	})
 
 	It("should not be able to spend with invalid Inputs", func() {
-		skipFor(mode, BATCHER_CPFP, BATCHER_RBF)
 		// batcher wallet should be able to simulate txs with invalid inputs
 		_, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
 			{
@@ -1120,16 +1123,18 @@ var _ = Describe("Wallets", Ordered, func() {
 	})
 
 	It("should be able to generate SACP signature", func() {
-		skipFor(mode, BATCHER_CPFP, BATCHER_RBF)
 		script, scriptAddr, cb, err := sigCheckTapScript(chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
 		Expect(err).To(BeNil())
 
-		_, err = wallet.Send(context.Background(), []btc.SendRequest{
+		_, err = faucet.Send(context.Background(), []btc.SendRequest{
 			{
 				Amount: 100000,
 				To:     scriptAddr,
 			},
 		}, nil, nil)
+		Expect(err).To(BeNil())
+
+		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
 		txBytes, err := wallet.GenerateSACP(context.Background(), btc.SpendRequest{
