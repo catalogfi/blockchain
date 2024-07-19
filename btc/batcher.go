@@ -338,13 +338,14 @@ func (w *batcherWallet) Restart(ctx context.Context) error {
 // 1. Periodic Time Interval (PTI) - Batches are created at regular intervals
 // 2. Pending Request - Batches are created when a certain number of requests are pending
 // 3. Exponential Time Interval (ETI) - Batches are created at exponential intervals but the interval is custom
-func (w *batcherWallet) run(ctx context.Context) {
+func (w *batcherWallet) run(ctx context.Context) error {
 	switch w.opts.Strategy {
 	case CPFP, RBF:
 		w.runPTIBatcher(ctx)
 	default:
-		panic("strategy not implemented")
+		return ErrStrategyNotSupported
 	}
+	return nil
 }
 
 // PTI stands for Periodic time interval
@@ -407,7 +408,7 @@ func (w *batcherWallet) updateFeeRate() error {
 	case RBF:
 		return w.updateRBF(ctx, requiredFeeRate)
 	default:
-		panic("fee update for strategy not implemented")
+		return ErrStrategyNotSupported
 	}
 }
 
@@ -423,7 +424,7 @@ func (w *batcherWallet) createBatch() error {
 	case RBF:
 		return w.createRBFBatch(ctx)
 	default:
-		panic("batch creation for strategy not implemented")
+		return ErrStrategyNotSupported
 	}
 }
 
