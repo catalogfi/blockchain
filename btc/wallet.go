@@ -88,6 +88,8 @@ var (
 	AddXOnlyPubkeyOp = []byte("add_xonly_pubkey")
 )
 
+type UTXOMap map[btcutil.Address]UTXOs
+
 type SpendRequest struct {
 	// Witness required to spend the script.
 	// If the script requires a signature or pubkey,
@@ -364,8 +366,6 @@ func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, boo
 	}
 	return tx, true, nil
 }
-
-type UTXOMap map[btcutil.Address]UTXOs
 
 // ------------------ Helper functions ------------------
 
