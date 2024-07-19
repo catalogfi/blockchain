@@ -461,7 +461,7 @@ func (w *batcherWallet) createRBFTx(
 				zap.Int("newFeeEstimate", newFeeEstimate),
 			)
 			err := withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-				utxos, _, err = w.getUtxosForFee(ctx, totalOut+int64(newFeeEstimate)-totalIn, int64(feeRate), avoidUtxos)
+				utxos, _, err = w.getUtxosWithFee(ctx, totalOut+int64(newFeeEstimate)-totalIn, int64(feeRate), avoidUtxos)
 				return err
 			})
 			if err != nil {
@@ -497,8 +497,8 @@ func (w *batcherWallet) createRBFTx(
 	return tx, utxos, selfUtxos, nil
 }
 
-// getUtxosForFee is an iterative function that returns self sufficient UTXOs to cover the required fee and the change
-func (w *batcherWallet) getUtxosForFee(ctx context.Context, amount, feeRate int64, avoidUtxos map[string]bool) (UTXOs, int64, error) {
+// getUtxosWithFee is an iterative function that returns self sufficient UTXOs to cover the required fee and change left
+func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int64, avoidUtxos map[string]bool) (UTXOs, int64, error) {
 	var prevUtxos, coverUtxos UTXOs
 	var err error
 
