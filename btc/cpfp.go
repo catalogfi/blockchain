@@ -33,6 +33,11 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		return err
 	}
 
+	// Return error if no requests found
+	if len(requests) == 0 {
+		return ErrBatchParametersNotMet
+	}
+
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := func() ([]SpendRequest, []SendRequest, [][]byte, map[string]bool) {
 		spendRequests := []SpendRequest{}
@@ -49,11 +54,6 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 		return spendRequests, sendRequests, sacps, reqIds
 	}()
-
-	// Return error if no requests found
-	if len(requests) == 0 {
-		return ErrBatchParametersNotMet
-	}
 
 	// Read pending batches from the cache
 	var batches []Batch

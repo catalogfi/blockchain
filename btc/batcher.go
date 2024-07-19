@@ -367,7 +367,6 @@ func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 				if err := w.createBatch(); err != nil {
 					if !errors.Is(err, ErrBatchParametersNotMet) {
 						w.logger.Error("failed to create batch", zap.Error(err))
-						continue
 					} else {
 						w.logger.Info("waiting for new batch")
 					}
