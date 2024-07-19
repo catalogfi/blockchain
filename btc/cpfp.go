@@ -39,21 +39,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	// Filter requests to get spend and send requests
-	spendRequests, sendRequests, sacps, reqIds := func() ([]SpendRequest, []SendRequest, [][]byte, map[string]bool) {
-		spendRequests := []SpendRequest{}
-		sendRequests := []SendRequest{}
-		sacps := [][]byte{}
-		reqIds := make(map[string]bool)
-
-		for _, req := range requests {
-			spendRequests = append(spendRequests, req.Spends...)
-			sendRequests = append(sendRequests, req.Sends...)
-			sacps = append(sacps, req.SACPs...)
-			reqIds[req.ID] = true
-		}
-
-		return spendRequests, sendRequests, sacps, reqIds
-	}()
+	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(requests)
 
 	// Read pending batches from the cache
 	var batches []Batch
@@ -353,15 +339,15 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	txb := btcutil.NewTx(tx)
 	trueSize := mempool.GetTxVirtualSize(txb)
 
-	var sacpsIn int
-	var sacpOut int
+	var sacpsInAmount int
+	var sacpOutAmount int
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+		sacpsInAmount, sacpOutAmount, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
 		return err
 	})
 
 	// Estimate the new fee
-	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee - (sacpsIn - sacpOut)
+	newFeeEstimate := (int(trueSize) * (feeRate)) + feeOverhead + bufferFee - (sacpsInAmount - sacpOutAmount)
 
 	// If the new fee estimate exceeds the current fee, rebuild the CPFP transaction
 	if newFeeEstimate > fee+feeOverhead {

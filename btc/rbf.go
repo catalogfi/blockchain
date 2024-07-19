@@ -179,21 +179,7 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
 func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []BatcherRequest, currentFeeRate, requiredFeeRate int) error {
 	// Filter requests to get spend and send requests
-	spendRequests, sendRequests, sacps, reqIds := func() ([]SpendRequest, []SendRequest, [][]byte, map[string]bool) {
-		spendRequests := []SpendRequest{}
-		sendRequests := []SendRequest{}
-		sacps := [][]byte{}
-		reqIds := make(map[string]bool)
-
-		for _, req := range pendingRequests {
-			spendRequests = append(spendRequests, req.Spends...)
-			sendRequests = append(sendRequests, req.Sends...)
-			sacps = append(sacps, req.SACPs...)
-			reqIds[req.ID] = true
-		}
-
-		return spendRequests, sendRequests, sacps, reqIds
-	}()
+	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 
 	var avoidUtxos map[string]bool
 	var err error
@@ -379,11 +365,11 @@ func (w *batcherWallet) createRBFTx(
 		checkValidity = true
 	}
 
-	var sacpsIn int
-	var sacpOut int
+	var sacpsInAmount int
+	var sacpsOutAmount int
 	var err error
 	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+		sacpsInAmount, sacpsOutAmount, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
 		return err
 	})
 
@@ -416,7 +402,7 @@ func (w *batcherWallet) createRBFTx(
 	totalUtxos := append(spendUTXOs, utxos...)
 
 	// Build the RBF transaction
-	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, sacpsIn-sacpOut, sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
+	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, sacpsInAmount-sacpsOutAmount, sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -478,7 +464,7 @@ func (w *batcherWallet) createRBFTx(
 				totalIn += int(utxo.Amount)
 			}
 
-			totalIn += sacpsIn
+			totalIn += sacpsInAmount
 
 			return totalIn, int(totalOut)
 		}()

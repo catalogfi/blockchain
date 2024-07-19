@@ -591,3 +591,20 @@ func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerC
 
 	return int(totalInputAmount), int(totalOutputAmount), nil
 }
+
+// unpackBatcherRequests unpacks the batcher requests into spend requests, send requests and SACPs
+func unpackBatcherRequests(reqs []BatcherRequest) ([]SpendRequest, []SendRequest, [][]byte, map[string]bool) {
+	spendRequests := []SpendRequest{}
+	sendRequests := []SendRequest{}
+	sacps := [][]byte{}
+	reqIds := make(map[string]bool)
+
+	for _, req := range reqs {
+		spendRequests = append(spendRequests, req.Spends...)
+		sendRequests = append(sendRequests, req.Sends...)
+		sacps = append(sacps, req.SACPs...)
+		reqIds[req.ID] = true
+	}
+
+	return spendRequests, sendRequests, sacps, reqIds
+}
