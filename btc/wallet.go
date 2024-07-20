@@ -369,11 +369,11 @@ func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, boo
 
 // ------------------ Helper functions ------------------
 
-// getFeeUsedInSACPs returns the amount of fee used in the given SACPs
-func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
+// getSACPAmounts returns the total input and output amounts for the given SACPs
+func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	// go through each input and get the amount it holds
@@ -382,7 +382,7 @@ func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClien
 	for _, in := range tx.TxIn {
 		txFromIndexer, err := indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		totalInputAmount += int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)
 	}
@@ -392,6 +392,15 @@ func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClien
 		totalOutputAmount += out.Value
 	}
 
+	return totalInputAmount, totalOutputAmount, nil
+}
+
+// getFeeUsedInSACPs returns the amount of fee used in the given SACPs
+func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
+	totalInputAmount, totalOutputAmount, err := getSACPAmounts(ctx, sacps, indexer)
+	if err != nil {
+		return 0, err
+	}
 	return int(totalInputAmount - totalOutputAmount), nil
 }
 

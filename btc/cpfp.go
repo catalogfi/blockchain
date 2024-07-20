@@ -25,7 +25,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 	// Read all pending requests added to the cache
 	// All requests are executed in a single batch
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		requests, err = w.cache.ReadPendingRequests(ctx)
 		return err
 	})
@@ -43,7 +43,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 	// Read pending batches from the cache
 	var batches []Batch
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		batches, err = w.cache.ReadPendingBatches(ctx, w.opts.Strategy)
 		return err
 	})
@@ -57,7 +57,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		return err
 	}
 
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 	// Fetch UTXOs from the indexer
 	var utxos []UTXO
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		utxos, err = w.indexer.GetUTXOs(ctx, w.address)
 		return err
 	})
@@ -105,7 +105,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	// Submit the CPFP transaction to the indexer
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.indexer.SubmitTx(ctx, tx)
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 	// Retrieve the transaction details from the indexer
 	var transaction Transaction
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		transaction, err = getTransaction(w.indexer, tx.TxHash().String())
 		return err
 	})
@@ -126,7 +126,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	batch := Batch{
 		Tx:          transaction,
 		RequestIds:  reqIds,
-		IsStable:    true,
+		isFinalized: true,
 		IsConfirmed: false,
 		Strategy:    CPFP,
 		SelfUtxos: UTXOs{
@@ -138,7 +138,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		},
 	}
 
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.cache.SaveBatch(ctx, batch)
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	var err error
 
 	// Read pending batches from the cache
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		batches, err = w.cache.ReadPendingBatches(ctx, w.opts.Strategy)
 		return err
 	})
@@ -169,7 +169,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 		return err
 	}
 
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 
 	// Fetch UTXOs from the indexer
 	var utxos []UTXO
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		utxos, err = w.indexer.GetUTXOs(ctx, w.address)
 		return err
 	})
@@ -220,7 +220,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	// Submit the CPFP transaction to the indexer
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.indexer.SubmitTx(ctx, tx)
 	})
 	if err != nil {
@@ -228,7 +228,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	// Update the fee of all batches that got bumped
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return w.cache.UpdateBatchFees(ctx, pendingTxs, int64(requiredFeeRate))
 	})
 	if err != nil {
@@ -266,7 +266,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	var err error
 
 	// Get UTXOs for spend requests
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		spendUTXOs, spendUTXOsMap, balanceOfScripts, err = getUTXOsForSpendRequest(ctx, w.indexer, spendRequests)
 		return err
 	})
@@ -322,7 +322,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	// Sign the spend inputs
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		return signSpendTx(ctx, tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
 	})
 	if err != nil {
@@ -341,8 +341,8 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 
 	var sacpsInAmount int64
 	var sacpOutAmount int64
-	err = withContextTimeout(c, DefaultContextTimeout, func(ctx context.Context) error {
-		sacpsInAmount, sacpOutAmount, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
+		sacpsInAmount, sacpOutAmount, err = getSACPAmounts(ctx, sacps, w.indexer)
 		return err
 	})
 

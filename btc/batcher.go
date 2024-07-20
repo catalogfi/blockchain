@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	SegwitSpendWeight     int = txsizes.RedeemP2WPKHInputWitnessWeight
-	DefaultContextTimeout     = 5 * time.Second
+	SegwitSpendWeight = txsizes.RedeemP2WPKHInputWitnessWeight
+	DefaultAPITimeout = 5 * time.Second
 )
 var (
 	ErrBatchNotFound              = errors.New("batch not found")
@@ -107,16 +107,20 @@ type BatcherRequest struct {
 }
 
 type BatcherOptions struct {
-	PTI       time.Duration // Periodic Time Interval for batching
+	// Periodic Time Interval for batching
+	PTI       time.Duration
 	TxOptions TxOptions
 	Strategy  Strategy
 }
 
-// Strategy defines the batching strategy to be used by the BatcherWallet
-// It can be one of RBF, CPFP, RBF_CPFP, Multi_CPFP
-// RBF - Replace By Fee
-// CPFP - Child Pays For Parent
-// Multi_CPFP - Multiple CPFP threads are maintained across multiple addresses
+// Strategy defines the batching strategy to be used by the BatcherWallet.
+// It can be one of RBF, CPFP, RBF_CPFP, Multi_CPFP.
+//
+// 1. RBF - Replace By Fee
+//
+// 2. CPFP - Child Pays For Parent
+//
+// 3. Multi_CPFP - Multiple CPFP threads are maintained across multiple addresses
 type Strategy string
 
 var (
@@ -127,14 +131,6 @@ var (
 )
 
 type TxOptions struct {
-	MaxOutputs int
-	MaxInputs  int
-
-	MaxUnconfirmedAge int
-
-	MaxBatches   int
-	MaxBatchSize int
-
 	FeeLevel    FeeLevel
 	MaxFeeRate  int
 	MinFeeDelta int
@@ -157,9 +153,10 @@ type batcherWallet struct {
 	cache        Cache
 }
 type Batch struct {
-	Tx           Transaction
-	RequestIds   map[string]bool
-	IsStable     bool
+	Tx         Transaction
+	RequestIds map[string]bool
+	// true indicates that the batch is finalized and will not be replaced by more fee.
+	isFinalized  bool
 	IsConfirmed  bool
 	Strategy     Strategy
 	SelfUtxos    UTXOs
@@ -202,14 +199,6 @@ func defaultBatcherOptions() BatcherOptions {
 	return BatcherOptions{
 		PTI: 1 * time.Minute,
 		TxOptions: TxOptions{
-			MaxOutputs: 0,
-			MaxInputs:  0,
-
-			MaxUnconfirmedAge: 0,
-
-			MaxBatches:   0,
-			MaxBatchSize: 0,
-
 			FeeLevel:    HighFee,
 			MaxFeeRate:  0,
 			MinFeeDelta: 0,
@@ -456,7 +445,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 
 	spendsAmount := int64(0)
 	spendsUtxos := UTXOs{}
-	err = withContextTimeout(ctx, DefaultContextTimeout, func(ctx context.Context) error {
+	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
 		spendsUtxos, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
 		return err
 	})
@@ -466,8 +455,8 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 
 	var sacpsIn int64
 	var sacpOut int64
-	err = withContextTimeout(ctx, DefaultContextTimeout, func(ctx context.Context) error {
-		sacpsIn, sacpOut, err = getTotalInAndOutSACPs(ctx, sacps, w.indexer)
+	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
+		sacpsIn, sacpOut, err = getSACPAmounts(ctx, sacps, w.indexer)
 		return err
 	})
 
@@ -527,7 +516,7 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 	confirmedTxs := []string{}
 	pendingTxs := []string{}
 	for _, batch := range batches {
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		defer cancel()
 		tx, err := indexer.GetTx(ctx, batch.Tx.TxID)
 		if err != nil {
@@ -548,7 +537,7 @@ func getTransaction(indexer IndexerClient, txid string) (Transaction, error) {
 		return Transaction{}, ErrTxIdEmpty
 	}
 	for i := 1; i < 5; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultContextTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		defer cancel()
 		tx, err := indexer.GetTx(ctx, txid)
 		if err != nil {
@@ -564,32 +553,6 @@ func withContextTimeout(parentContext context.Context, duration time.Duration, f
 	ctx, cancel := context.WithTimeout(parentContext, duration)
 	defer cancel()
 	return fn(ctx)
-}
-
-// getFeeUsedInSACPs returns the amount of fee used in the given SACPs
-func getTotalInAndOutSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, error) {
-	tx, _, err := buildTxFromSacps(sacps)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// go through each input and get the amount it holds
-	// add all the inputs and subtract the outputs to get the fee
-	totalInputAmount := int64(0)
-	for _, in := range tx.TxIn {
-		txFromIndexer, err := indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
-		if err != nil {
-			return 0, 0, err
-		}
-		totalInputAmount += int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)
-	}
-
-	totalOutputAmount := int64(0)
-	for _, out := range tx.TxOut {
-		totalOutputAmount += out.Value
-	}
-
-	return totalInputAmount, totalOutputAmount, nil
 }
 
 // unpackBatcherRequests unpacks the batcher requests into spend requests, send requests and SACPs
