@@ -115,7 +115,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	// Retrieve the transaction details from the indexer
 	var transaction Transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		transaction, err = getTransaction(w.indexer, tx.TxHash().String())
+		transaction, err = w.indexer.GetTx(ctx, tx.TxHash().String())
 		return err
 	})
 	if err != nil {

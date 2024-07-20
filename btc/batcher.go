@@ -532,22 +532,6 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 	return pendingBatches, confirmedTxs, pendingTxs, nil
 }
 
-func getTransaction(indexer IndexerClient, txid string) (Transaction, error) {
-	if txid == "" {
-		return Transaction{}, ErrTxIdEmpty
-	}
-	for i := 1; i < 5; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
-		defer cancel()
-		tx, err := indexer.GetTx(ctx, txid)
-		if err != nil {
-			time.Sleep(time.Duration(i) * time.Second)
-			continue
-		}
-		return tx, nil
-	}
-	return Transaction{}, ErrTxNotFound
-}
 
 func withContextTimeout(parentContext context.Context, duration time.Duration, fn func(ctx context.Context) error) error {
 	ctx, cancel := context.WithTimeout(parentContext, duration)

@@ -50,10 +50,11 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	}
 
 	// Fetch the transaction details for the latest batch.
-	tx, err := getTransaction(w.indexer, latestBatch.Tx.TxID)
-	if err != nil {
+	var tx Transaction
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
+		tx, err = w.indexer.GetTx(ctx, latestBatch.Tx.TxID)
 		return err
-	}
+	})
 
 	// If the transaction is confirmed, create a new RBF batch.
 	if tx.Status.Confirmed {
@@ -250,7 +251,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	var transaction Transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		transaction, err = getTransaction(w.indexer, tx.TxHash().String())
+		transaction, err = w.indexer.GetTx(ctx, tx.TxHash().String())
 		return err
 	})
 	if err != nil {
@@ -299,7 +300,7 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 	var tx Transaction
 	// Check if the transaction is already confirmed
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		tx, err = getTransaction(w.indexer, latestBatch.Tx.TxID)
+		tx, err = w.indexer.GetTx(ctx, latestBatch.Tx.TxID)
 		return err
 	})
 	if err != nil {
