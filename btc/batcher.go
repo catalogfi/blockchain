@@ -307,10 +307,13 @@ func (w *batcherWallet) Stop() error {
 
 	w.logger.Info("stopping batcher wallet")
 	close(w.quit)
-	w.quit = nil
 
 	w.logger.Info("waiting for batcher wallet to stop")
 	w.wg.Wait()
+
+	w.logger.Info("batcher stopped")
+	w.quit = nil
+
 	return nil
 }
 
@@ -338,10 +341,8 @@ func (w *batcherWallet) run(ctx context.Context) error {
 }
 
 // PTI stands for Periodic time interval
-//  1. It creates a batch at regular intervals
-//  2. It also updates the fee rate at regular intervals
-//     if fee rate increases more than threshold and there are
-//     no batches to create
+// runPTIBatcher is used by strategies that require
+// triggering the batching process at regular intervals
 func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 	ticker := time.NewTicker(w.opts.PTI)
 	w.wg.Add(1)
@@ -354,30 +355,39 @@ func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := w.createBatch(); err != nil {
-					if !errors.Is(err, ErrBatchParametersNotMet) {
-						w.logger.Error("failed to create batch", zap.Error(err))
-					} else {
-						w.logger.Info("waiting for new batch")
-					}
-
-					if err := w.updateFeeRate(); err != nil {
-						if !errors.Is(err, ErrFeeUpdateNotNeeded) {
-							w.logger.Error("failed to update fee rate", zap.Error(err))
-						} else {
-							w.logger.Info("fee update skipped")
-						}
-					} else {
-						w.logger.Info("batch fee updated", zap.String("strategy", string(w.opts.Strategy)))
-					}
-				} else {
-					w.logger.Info("new batch created", zap.String("strategy", string(w.opts.Strategy)))
-				}
+				w.processBatch()
 			}
 
 		}
 
 	}()
+}
+
+// processBatch contains the core logic of the batcher
+//  1. It creates a batch at regular intervals
+//  2. It also updates the fee rate at regular intervals
+//     if fee rate increases more than threshold and there are
+//     no batches to create
+func (w *batcherWallet) processBatch() {
+	if err := w.createBatch(); err != nil {
+		if !errors.Is(err, ErrBatchParametersNotMet) {
+			w.logger.Error("failed to create batch", zap.Error(err))
+		} else {
+			w.logger.Info("waiting for new batch")
+		}
+
+		if err := w.updateFeeRate(); err != nil {
+			if !errors.Is(err, ErrFeeUpdateNotNeeded) {
+				w.logger.Error("failed to update fee rate", zap.Error(err))
+			} else {
+				w.logger.Info("fee update skipped")
+			}
+		} else {
+			w.logger.Info("batch fee updated", zap.String("strategy", string(w.opts.Strategy)))
+		}
+	} else {
+		w.logger.Info("new batch created", zap.String("strategy", string(w.opts.Strategy)))
+	}
 }
 
 // updateFeeRate updates the fee rate based on the strategy
@@ -531,7 +541,6 @@ func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []st
 	}
 	return pendingBatches, confirmedTxs, pendingTxs, nil
 }
-
 
 func withContextTimeout(parentContext context.Context, duration time.Duration, fn func(ctx context.Context) error) error {
 	ctx, cancel := context.WithTimeout(parentContext, duration)
