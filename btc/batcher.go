@@ -294,9 +294,8 @@ func (w *batcherWallet) Start(ctx context.Context) error {
 	}
 	w.quit = make(chan struct{})
 
-	w.logger.Info("starting batcher wallet")
-	w.run(ctx)
-	return nil
+	w.logger.Info("--------starting batcher wallet--------")
+	return w.run(ctx)
 }
 
 // Stop gracefully stops the batcher wallet service
@@ -305,7 +304,7 @@ func (w *batcherWallet) Stop() error {
 		return ErrBatcherNotRunning
 	}
 
-	w.logger.Info("stopping batcher wallet")
+	w.logger.Info("--------stopping batcher wallet--------")
 	close(w.quit)
 
 	w.logger.Info("waiting for batcher wallet to stop")
