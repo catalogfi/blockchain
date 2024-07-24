@@ -3,7 +3,6 @@ package btc_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -25,13 +24,13 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	logger, err := zap.NewDevelopment()
 	Expect(err).To(BeNil())
 
-	indexer := btc.NewElectrsIndexerClient(logger, os.Getenv("BTC_REGNET_INDEXER"), time.Millisecond*500)
+	indexer := localnet.BTCIndexer()
 
 	privateKey, err := btcec.NewPrivateKey()
 	Expect(err).To(BeNil())
 
 	mockFeeEstimator := NewMockFeeEstimator(10)
-	cache := NewTestCache()
+	cache := NewTestCache(btc.CPFP)
 	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
 	Expect(err).To(BeNil())
 
@@ -86,7 +85,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 
 		time.Sleep(10 * time.Second)
 
-		pendingBatches, err := cache.ReadPendingBatches(context.Background(), btc.CPFP)
+		pendingBatches, err := cache.ReadPendingBatches(context.Background())
 		Expect(err).To(BeNil())
 
 		for _, batch := range pendingBatches {

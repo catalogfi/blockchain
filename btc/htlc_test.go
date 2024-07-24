@@ -45,6 +45,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 				Amount: 50000000,
 			},
 		}, nil, nil)
+		Expect(err).To(BeNil())
 	})
 
 	It("should be able to generate HTLC address", func(ctx context.Context) {
@@ -54,7 +55,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
-
+		Expect(err).To(BeNil())
 		htlcAddr, err := aliceHTLCWallet.Address(aliceHTLC)
 		Expect(err).To(BeNil())
 		Expect(htlcAddr).NotTo(BeNil())
@@ -64,6 +65,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
 		txid, err := aliceHTLCWallet.Initiate(ctx, aliceHTLC, initiateAmount)
 		Expect(err).To(BeNil())
 		Expect(txid).NotTo(BeEmpty())
@@ -213,7 +215,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		// Let's create a bobSimpleWallet with lower fees
 		feeEstimater := btc.NewFixFeeEstimator(1)
 		bobSimpleWallet, err := btc.NewSimpleWallet(bobPrivKey, &chainParams, indexer, feeEstimater, btc.LowFee)
-
+		Expect(err).To(BeNil())
 		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 

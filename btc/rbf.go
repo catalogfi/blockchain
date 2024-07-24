@@ -38,12 +38,12 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	var latestBatch Batch
 	// Read the latest RBF batch from the cache .
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		latestBatch, err = w.cache.ReadLatestBatch(ctx, RBF)
+		latestBatch, err = w.cache.ReadLatestBatch(ctx)
 		return err
 	})
 	if err != nil {
 		// If no batch is found, create a new RBF batch.
-		if err == ErrBatchNotFound {
+		if err == ErrStoreNotFound {
 			return w.createNewRBFBatch(c, pendingRequests, 0, 0)
 		}
 		return err
@@ -75,7 +75,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 
 	// Read batched requests from the cache .
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batchedRequests, err = w.cache.ReadRequests(ctx, maps.Keys(batch.RequestIds))
+		batchedRequests, err = w.cache.ReadRequests(ctx, maps.Keys(batch.RequestIds)...)
 		return err
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 
 	// Delete the pending batch from the cache.
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.DeletePendingBatches(ctx, map[string]bool{batch.Tx.TxID: true}, RBF)
+		return w.cache.DeletePendingBatches(ctx)
 	})
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (w *batcherWallet) reSubmitRBFBatch(c context.Context, batch Batch, pending
 	var missingRequests []BatcherRequest
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		missingRequestIds := getMissingRequestIds(batch.RequestIds, confirmedBatch.RequestIds)
-		missingRequests, err = w.cache.ReadRequests(ctx, missingRequestIds)
+		missingRequests, err = w.cache.ReadRequests(ctx, missingRequestIds...)
 		return err
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 
 	// Read pending batches from the cache
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batches, err = w.cache.ReadPendingBatches(ctx, RBF)
+		batches, err = w.cache.ReadPendingBatches(ctx)
 		return err
 	})
 	if err != nil {
@@ -188,7 +188,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	// Get unconfirmed UTXOs to avoid them in the new transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		avoidUtxos, err = w.getUnconfirmedUtxos(ctx, RBF)
+		avoidUtxos, err = w.getUnconfirmedUtxos(ctx)
 		return err
 	})
 	if err != nil {
@@ -216,11 +216,9 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 	}
 
 	var tx *wire.MsgTx
-	var fundingUtxos UTXOs
-	var selfUtxos UTXOs
 	// Create a new RBF transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		tx, fundingUtxos, selfUtxos, err = w.createRBFTx(
+		tx, err = w.createRBFTx(
 			c,
 			nil,
 			spendRequests,
@@ -260,13 +258,10 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	// Create a new batch with the transaction details and save it to the cache
 	batch := Batch{
-		Tx:           transaction,
-		RequestIds:   reqIds,
-		isFinalized:  false, // RBF transactions are not stable meaning they can be replaced
-		IsConfirmed:  false,
-		Strategy:     RBF,
-		SelfUtxos:    selfUtxos,
-		FundingUtxos: fundingUtxos,
+		Tx:          transaction,
+		RequestIds:  reqIds,
+		IsFinalized: false, // RBF transactions are not stable meaning they can be replaced
+		Strategy:    RBF,
 	}
 
 	// Save the new RBF batch to the cache
@@ -287,11 +282,11 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 	var err error
 	// Read the latest RBF batch from the cache
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		latestBatch, err = w.cache.ReadLatestBatch(ctx, RBF)
+		latestBatch, err = w.cache.ReadLatestBatch(ctx)
 		return err
 	})
 	if err != nil {
-		if err == ErrBatchNotFound {
+		if err == ErrStoreNotFound {
 			return ErrFeeUpdateNotNeeded
 		}
 		return err
@@ -309,10 +304,12 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 
 	if tx.Status.Confirmed && !latestBatch.Tx.Status.Confirmed {
 		err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-			if err = w.cache.ConfirmBatchStatuses(ctx, []string{tx.TxID}, true, RBF); err == nil {
+			latestBatch.Tx = tx
+			err = w.cache.UpdateAndDeletePendingBatches(ctx, latestBatch)
+			if err == nil {
 				return ErrFeeUpdateNotNeeded
 			}
-			return err
+			return nil
 		})
 		return err
 	}
@@ -353,7 +350,7 @@ func (w *batcherWallet) createRBFTx(
 	checkValidity bool,
 	// Depth to limit the recursion
 	depth int,
-) (*wire.MsgTx, UTXOs, UTXOs, error) {
+) (*wire.MsgTx, error) {
 	// Check if the recursion depth is exceeded
 	if depth < 0 {
 		w.logger.Debug(
@@ -369,7 +366,7 @@ func (w *batcherWallet) createRBFTx(
 			zap.Bool("checkValidity", checkValidity),
 			zap.Int("depth", depth),
 		)
-		return nil, nil, nil, ErrBuildRBFDepthExceeded
+		return nil, ErrBuildRBFDepthExceeded
 	} else if depth == 0 {
 		checkValidity = true
 	}
@@ -383,7 +380,7 @@ func (w *batcherWallet) createRBFTx(
 	})
 
 	var spendUTXOs UTXOs
-	var spendUTXOsMap map[btcutil.Address]UTXOs
+	var spendUTXOsMap map[string]UTXOs
 	var balanceOfSpendScripts int64
 
 	// Fetch UTXOs for spend requests
@@ -392,11 +389,11 @@ func (w *batcherWallet) createRBFTx(
 		return err
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// Add the provided UTXOs to the spend map
-	spendUTXOsMap[w.address] = append(spendUTXOsMap[w.address], utxos...)
+	spendUTXOsMap[w.address.EncodeAddress()] = append(spendUTXOsMap[w.address.EncodeAddress()], utxos...)
 	if sequencesMap == nil {
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
 	}
@@ -404,7 +401,7 @@ func (w *batcherWallet) createRBFTx(
 
 	// Check if there are funds to spend
 	if balanceOfSpendScripts == 0 && len(spendRequests) > 0 {
-		return nil, nil, nil, ErrNoFundsToSpend
+		return nil, ErrNoFundsToSpend
 	}
 
 	// Combine spend UTXOs with provided UTXOs
@@ -413,7 +410,7 @@ func (w *batcherWallet) createRBFTx(
 	// Build the RBF transaction
 	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, int(sacpsInAmount-sacpsOutAmount), sendRequests, w.address, int64(fee), sequencesMap, checkValidity)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// Sign the inputs related to spend requests
@@ -421,13 +418,13 @@ func (w *batcherWallet) createRBFTx(
 		return signSpendTx(ctx, tx, signIdx, spendRequests, spendUTXOsMap, w.indexer, w.privateKey)
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// Sign the inputs related to provided UTXOs
 	err = signSendTx(tx, utxos, signIdx+len(spendUTXOs), w.address, w.privateKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// Calculate the transaction size
@@ -473,13 +470,13 @@ func (w *batcherWallet) createRBFTx(
 				return err
 			})
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, err
 			}
 		}
 
 		var txBytes []byte
 		if txBytes, err = GetTxRawBytes(tx); err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
 		w.logger.Info(
 			"rebuilding rbf tx",
@@ -496,13 +493,38 @@ func (w *batcherWallet) createRBFTx(
 		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, checkValidity, depth-1)
 	}
 
-	selfUtxos, err := getSelfUtxos(tx.TxOut, tx.TxHash().String(), w.address, w.chainParams)
+	// Return the created transaction and utxo used to fund the transaction
+	return tx, nil
+}
+
+func getPendingFundingUTXOs(ctx context.Context, cache Cache, funderAddr btcutil.Address) (UTXOs, error) {
+	pendingFundingUtxos, err := cache.ReadPendingBatches(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	// Return the created transaction and utxo used to fund the transaction
-	return tx, utxos, selfUtxos, nil
+	script, err := txscript.PayToAddrScript(funderAddr)
+	if err != nil {
+		return nil, err
+	}
+	scriptHex := hex.EncodeToString(script)
+
+	utxos := UTXOs{}
+	for _, batch := range pendingFundingUtxos {
+		for _, vin := range batch.Tx.VINs {
+			if vin.Prevout.ScriptPubKey == scriptHex {
+				utxos = append(utxos, UTXO{
+					TxID:   vin.TxID,
+					Vout:   uint32(vin.Vout),
+					Amount: int64(vin.Prevout.Value),
+					Status: &Status{
+						Confirmed: false,
+					},
+				})
+			}
+		}
+	}
+	return utxos, nil
 }
 
 // getUtxosWithFee is an iterative function that returns self sufficient UTXOs to cover the required fee and change left
@@ -512,7 +534,7 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 
 	// Read pending funding UTXOs
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
-		prevUtxos, err = w.cache.ReadPendingFundingUtxos(ctx, RBF)
+		prevUtxos, err = getPendingFundingUTXOs(ctx, w.cache, w.address)
 		return err
 	})
 	if err != nil {
@@ -562,14 +584,35 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 	return selectedUtxos, change, nil
 }
 
+func getPendingChangeUTXOs(ctx context.Context, cache Cache) ([]UTXO, error) {
+	// Read pending change UTXOs
+	pendingChangeUtxos, err := cache.ReadPendingBatches(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	utxos := []UTXO{}
+	for _, batch := range pendingChangeUtxos {
+		//last vout is the change output
+		idx := len(batch.Tx.VOUTs) - 1
+		utxos = append(utxos, UTXO{
+			TxID:   batch.Tx.TxID,
+			Vout:   uint32(idx),
+			Amount: int64(batch.Tx.VOUTs[idx].Value),
+		})
+
+	}
+	return utxos, nil
+}
+
 // getUnconfirmedUtxos returns UTXOs that are currently being spent in unconfirmed transactions to double spend them in the new transaction
-func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context, strategy Strategy) (map[string]bool, error) {
+func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]bool, error) {
 	var pendingChangeUtxos []UTXO
 	var err error
 
 	// Read pending change UTXOs
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
-		pendingChangeUtxos, err = w.cache.ReadPendingChangeUtxos(ctx, strategy)
+		pendingChangeUtxos, err = getPendingChangeUTXOs(ctx, w.cache)
 		return err
 	})
 	if err != nil {
@@ -623,7 +666,8 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 	// Add outputs to the transaction
 	totalSendAmount := int64(0)
 	for _, r := range recipients {
-		if r.To == changeAddr {
+
+		if r.To.EncodeAddress() == changeAddr.EncodeAddress() {
 			pendingAmount += r.Amount
 			continue
 		}

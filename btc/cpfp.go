@@ -44,7 +44,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	// Read pending batches from the cache
 	var batches []Batch
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batches, err = w.cache.ReadPendingBatches(ctx, w.opts.Strategy)
+		batches, err = w.cache.ReadPendingBatches(ctx)
 		return err
 	})
 	if err != nil {
@@ -52,13 +52,13 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	}
 
 	// Filter pending batches and update the status of confirmed transactions
-	pendingBatches, confirmedTxs, _, err := filterPendingBatches(batches, w.indexer)
+	pendingBatches, confirmedTxs, err := filterPendingBatches(batches, w.indexer)
 	if err != nil {
 		return err
 	}
 
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
+		return w.cache.UpdateBatches(ctx, confirmedTxs...)
 	})
 	if err != nil {
 		return err
@@ -126,16 +126,8 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	batch := Batch{
 		Tx:          transaction,
 		RequestIds:  reqIds,
-		isFinalized: true,
-		IsConfirmed: false,
+		IsFinalized: true,
 		Strategy:    CPFP,
-		SelfUtxos: UTXOs{
-			{
-				TxID:   tx.TxHash().String(),
-				Vout:   uint32(len(tx.TxOut) - 1),
-				Amount: tx.TxOut[len(tx.TxOut)-1].Value,
-			},
-		},
 	}
 
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
@@ -156,7 +148,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 
 	// Read pending batches from the cache
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batches, err = w.cache.ReadPendingBatches(ctx, w.opts.Strategy)
+		batches, err = w.cache.ReadPendingBatches(ctx)
 		return err
 	})
 	if err != nil {
@@ -164,13 +156,13 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	// Filter pending batches and update the status of confirmed transactions
-	pendingBatches, confirmedTxs, pendingTxs, err := filterPendingBatches(batches, w.indexer)
+	pendingBatches, confirmedTxs, err := filterPendingBatches(batches, w.indexer)
 	if err != nil {
 		return err
 	}
 
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.ConfirmBatchStatuses(ctx, confirmedTxs, false, CPFP)
+		return w.cache.UpdateBatches(ctx, confirmedTxs...)
 	})
 	if err != nil {
 		return err
@@ -229,7 +221,13 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 
 	// Update the fee of all batches that got bumped
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.UpdateBatchFees(ctx, pendingTxs, int64(requiredFeeRate))
+		newBatches := []Batch{}
+		for _, batch := range pendingBatches {
+			batch.Tx.Fee = int64(requiredFeeRate) * int64(batch.Tx.Weight) / blockchain.WitnessScaleFactor
+			newBatches = append(newBatches, batch)
+		}
+
+		return w.cache.UpdateBatches(ctx, newBatches...)
 	})
 	if err != nil {
 		return err
@@ -261,7 +259,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	var spendUTXOs UTXOs
-	var spendUTXOsMap map[btcutil.Address]UTXOs
+	var spendUTXOsMap map[string]UTXOs
 	var balanceOfScripts int64
 	var err error
 
@@ -274,12 +272,12 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 		return nil, err
 	}
 
-	utxos, err = removeDoubleSpends(spendUTXOsMap[w.address], utxos)
+	utxos, err = removeDoubleSpends(spendUTXOsMap[w.address.EncodeAddress()], utxos)
 	if err != nil {
 		return nil, err
 	}
 
-	spendUTXOsMap[w.address] = append(spendUTXOsMap[w.address], utxos...)
+	spendUTXOsMap[w.address.EncodeAddress()] = append(spendUTXOsMap[w.address.EncodeAddress()], utxos...)
 	if sequencesMap == nil {
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
 	}

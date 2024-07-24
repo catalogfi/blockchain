@@ -33,7 +33,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	requiredFeeRate := int64(10)
 
 	mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
-	cache := NewTestCache()
+	cache := NewTestCache(btc.RBF)
 	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 	Expect(err).To(BeNil())
 
@@ -154,7 +154,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	It("should be able to update fee with RBF", func() {
 		mockFeeEstimator.UpdateFee(int(requiredFeeRate) + 10)
 		time.Sleep(10 * time.Second)
-		lb, err := cache.ReadLatestBatch(context.Background(), btc.RBF)
+		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())
 
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
@@ -250,7 +250,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(tx.VOUTs[3].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
 		Expect(tx.VOUTs[4].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
-		lb, err := cache.ReadLatestBatch(context.Background(), btc.RBF)
+		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
 		Expect(feeRate).Should(BeNumerically(">=", requiredFeeRate+10))
@@ -259,7 +259,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	It("should be able to update fee with RBF", func() {
 		mockFeeEstimator.UpdateFee(int(requiredFeeRate) + 10)
 		time.Sleep(10 * time.Second)
-		lb, err := cache.ReadLatestBatch(context.Background(), btc.RBF)
+		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())
 
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
@@ -271,7 +271,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	It("should do nothing if fee decreases", func() {
 		mockFeeEstimator.UpdateFee(int(requiredFeeRate) - 10)
 		time.Sleep(10 * time.Second)
-		lb, err := cache.ReadLatestBatch(context.Background(), btc.RBF)
+		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())
 
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
@@ -318,7 +318,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(tx.VOUTs[4].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
 		Expect(tx.VOUTs[5].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
-		lb, err := cache.ReadLatestBatch(context.Background(), btc.RBF)
+		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
 		Expect(feeRate).Should(BeNumerically(">=", requiredFeeRate+10))

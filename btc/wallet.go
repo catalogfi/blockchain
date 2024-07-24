@@ -88,7 +88,7 @@ var (
 	AddXOnlyPubkeyOp = []byte("add_xonly_pubkey")
 )
 
-type UTXOMap map[btcutil.Address]UTXOs
+type utxoMap map[string]UTXOs
 
 type SpendRequest struct {
 	// Witness required to spend the script.
@@ -354,7 +354,7 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	return tx, nil
 }
 
-// Returns the status of submitted transaction either via `send` or `spend`
+// Status checks the status of a transaction using its transaction ID (txid).
 func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
 	tx, err := sw.indexer.GetTx(ctx, id)
 
@@ -437,7 +437,7 @@ func getPrevoutsForSACPs(ctx context.Context, tx *wire.MsgTx, endingSACPIdx int,
 }
 
 // getUTXOsForRequests returns the UTXOs required to spend the scripts and cover the send amount.
-func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs []SpendRequest, sendReqs []SendRequest, feePayer btcutil.Address, fee, sacpFee int) (UTXOs, UTXOs, UTXOMap, error) {
+func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs []SpendRequest, sendReqs []SendRequest, feePayer btcutil.Address, fee, sacpFee int) (UTXOs, UTXOs, utxoMap, error) {
 
 	spendUTXOs, spendUTXOsMap, balanceOfScripts, err := getUTXOsForSpendRequest(ctx, indexer, spendReqs)
 	if err != nil {
@@ -457,16 +457,16 @@ func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs [
 
 	// SpendUTXOMap only contains the UTXOs of the scripts but not the cover UTXOs
 	// We need to add the cover UTXOs to the map
-	spendUTXOsMap[feePayer] = append(spendUTXOsMap[feePayer], coverUTXOs...)
+	spendUTXOsMap[feePayer.EncodeAddress()] = append(spendUTXOsMap[feePayer.EncodeAddress()], coverUTXOs...)
 
 	return spendUTXOs, coverUTXOs, spendUTXOsMap, nil
 }
 
 // generateSequenceMap returns a map of txid to sequence number for the given spend requests
-func generateSequenceMap(utxosMap UTXOMap, spendRequest []SpendRequest) map[string]uint32 {
+func generateSequenceMap(utxosMap utxoMap, spendRequest []SpendRequest) map[string]uint32 {
 	sequencesMap := make(map[string]uint32)
 	for _, req := range spendRequest {
-		utxos, ok := utxosMap[req.ScriptAddress]
+		utxos, ok := utxosMap[req.ScriptAddress.EncodeAddress()]
 		if !ok {
 			continue
 		}
@@ -555,10 +555,10 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, cha
 	return tx, idx, nil
 }
 
-func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq []SpendRequest) (UTXOs, UTXOMap, int64, error) {
+func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq []SpendRequest) (UTXOs, utxoMap, int64, error) {
 	utxos := UTXOs{}
 	totalValue := int64(0)
-	utxoMap := make(UTXOMap)
+	utxoMap := make(utxoMap)
 
 	for _, req := range spendReq {
 		utxosForAddress, err := indexer.GetUTXOs(ctx, req.ScriptAddress)
@@ -570,7 +570,7 @@ func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendRe
 		for _, utxo := range utxosForAddress {
 			totalValue += utxo.Amount
 		}
-		utxoMap[req.ScriptAddress] = utxosForAddress
+		utxoMap[req.ScriptAddress.EncodeAddress()] = utxosForAddress
 	}
 
 	// If there are any spend requests, check if the scripts have funds to spend
@@ -581,13 +581,34 @@ func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendRe
 	return utxos, utxoMap, totalValue, nil
 }
 
+func parseAddress(addr string) (btcutil.Address, error) {
+	chainParams := chaincfg.MainNetParams
+	address, err := btcutil.DecodeAddress(addr, &chainParams)
+	if err == nil {
+		return address, nil
+	}
+	address, err = btcutil.DecodeAddress(addr, &chaincfg.TestNet3Params)
+	if err == nil {
+		return address, nil
+	}
+	address, err = btcutil.DecodeAddress(addr, &chaincfg.RegressionNetParams)
+	if err == nil {
+		return address, nil
+	}
+	return nil, fmt.Errorf("error decoding address %s: %w", addr, err)
+}
+
 // Builds a prevOutFetcher for the given utxoMap, outpoints and txouts.
 //
 // outpoints should have corresponding txouts in the same order.
-func buildPrevOutFetcher(utxosByAddressMap UTXOMap, outpoints []wire.OutPoint, txouts []*wire.TxOut) (txscript.PrevOutputFetcher, error) {
+func buildPrevOutFetcher(utxosByAddressMap utxoMap, outpoints []wire.OutPoint, txouts []*wire.TxOut) (txscript.PrevOutputFetcher, error) {
 	fetcher := NewPrevOutFetcherBuilder()
-	for addr, utxos := range utxosByAddressMap {
-		err := fetcher.AddFromUTXOs(utxos, addr)
+	for addrStr, utxos := range utxosByAddressMap {
+		addr, err := parseAddress(addrStr)
+		if err != nil {
+			return nil, err
+		}
+		err = fetcher.AddFromUTXOs(utxos, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -619,7 +640,7 @@ func getScriptToSign(scriptAddr btcutil.Address, script []byte) ([]byte, error) 
 // Signs the spend transaction
 //
 // Internally signTx is called for each input to sign the transaction.
-func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap UTXOMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
+func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap utxoMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
 
 	// building the prevOutFetcherBuilder
 	// get the prevouts and txouts for the sacps to build the prevOutFetcher
@@ -646,7 +667,7 @@ func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []
 			return err
 		}
 
-		utxos, ok := utxoMap[in.ScriptAddress]
+		utxos, ok := utxoMap[in.ScriptAddress.EncodeAddress()]
 		if !ok {
 			return ErrNoUTXOsFoundForAddress(in.ScriptAddress.String())
 		}

@@ -12,16 +12,18 @@ type mockCache struct {
 	batchList   []string
 	requests    map[string]btc.BatcherRequest
 	requestList []string
+	mode        btc.Strategy
 }
 
-func NewTestCache() btc.Cache {
+func NewTestCache(mode btc.Strategy) btc.Cache {
 	return &mockCache{
 		batches:  make(map[string]btc.Batch),
 		requests: make(map[string]btc.BatcherRequest),
+		mode:     mode,
 	}
 }
 
-func (m *mockCache) ReadBatchByReqId(ctx context.Context, id string) (btc.Batch, error) {
+func (m *mockCache) ReadBatchByReqID(ctx context.Context, id string) (btc.Batch, error) {
 	for _, batchId := range m.batchList {
 		batch, ok := m.batches[batchId]
 		if !ok {
@@ -42,7 +44,7 @@ func (m *mockCache) ReadBatch(ctx context.Context, txId string) (btc.Batch, erro
 	return batch, nil
 }
 
-func (m *mockCache) ReadPendingBatches(ctx context.Context, strategy btc.Strategy) ([]btc.Batch, error) {
+func (m *mockCache) ReadPendingBatches(ctx context.Context) ([]btc.Batch, error) {
 	batches := []btc.Batch{}
 	for _, batch := range m.batches {
 		if batch.Tx.Status.Confirmed == false {
@@ -65,28 +67,6 @@ func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
 	return nil
 }
 
-func (m *mockCache) ConfirmBatchStatuses(ctx context.Context, txIds []string, deletePending bool, strategy btc.Strategy) error {
-	if len(txIds) == 0 {
-		return nil
-	}
-	confirmedBatchIds := make(map[string]bool)
-	for _, id := range txIds {
-		batch, ok := m.batches[id]
-		if !ok {
-			return fmt.Errorf("UpdateBatchStatuses, batch not found")
-		}
-		batch.Tx.Status.Confirmed = true
-		m.batches[id] = batch
-
-		confirmedBatchIds[id] = true
-
-	}
-	if deletePending {
-		return m.DeletePendingBatches(ctx, confirmedBatchIds, strategy)
-	}
-	return nil
-}
-
 func (m *mockCache) ReadRequest(ctx context.Context, id string) (btc.BatcherRequest, error) {
 	request, ok := m.requests[id]
 	if !ok {
@@ -104,12 +84,12 @@ func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]btc.BatcherReque
 	return requests, nil
 }
 
-func (m *mockCache) SaveRequest(ctx context.Context, id string, req btc.BatcherRequest) error {
-	if _, ok := m.requests[id]; ok {
+func (m *mockCache) SaveRequest(ctx context.Context, req btc.BatcherRequest) error {
+	if _, ok := m.requests[req.ID]; ok {
 		return fmt.Errorf("request already exists")
 	}
-	m.requests[id] = req
-	m.requestList = append(m.requestList, id)
+	m.requests[req.ID] = req
+	m.requestList = append(m.requestList, req.ID)
 	return nil
 }
 
@@ -126,14 +106,41 @@ func (m *mockCache) UpdateBatchFees(ctx context.Context, txId []string, feeRate 
 	return nil
 }
 
-func (m *mockCache) ReadLatestBatch(ctx context.Context, strategy btc.Strategy) (btc.Batch, error) {
+func (m *mockCache) UpdateAndDeletePendingBatches(ctx context.Context, updatedBatches ...btc.Batch) error {
+	for _, batch := range updatedBatches {
+		if _, ok := m.batches[batch.Tx.TxID]; !ok {
+			return fmt.Errorf("UpdateAndDeleteBatches, batch not found")
+		}
+		m.batches[batch.Tx.TxID] = batch
+	}
+
+	// delete pending batches
+	for _, id := range m.batchList {
+		if m.batches[id].Tx.Status.Confirmed == false {
+			delete(m.batches, id)
+		}
+	}
+	return nil
+}
+
+func (m *mockCache) UpdateBatches(ctx context.Context, updatedBatches ...btc.Batch) error {
+	for _, batch := range updatedBatches {
+		if _, ok := m.batches[batch.Tx.TxID]; !ok {
+			return fmt.Errorf("UpdateBatches, batch not found")
+		}
+		m.batches[batch.Tx.TxID] = batch
+	}
+	return nil
+}
+
+func (m *mockCache) ReadLatestBatch(ctx context.Context) (btc.Batch, error) {
 	if len(m.batchList) == 0 {
-		return btc.Batch{}, btc.ErrBatchNotFound
+		return btc.Batch{}, btc.ErrStoreNotFound
 	}
 	nbatches := len(m.batchList) - 1
 	for nbatches >= 0 {
 		batch, ok := m.batches[m.batchList[nbatches]]
-		if ok && batch.Strategy == strategy {
+		if ok && batch.Strategy == m.mode {
 			return batch, nil
 		}
 		nbatches--
@@ -141,7 +148,7 @@ func (m *mockCache) ReadLatestBatch(ctx context.Context, strategy btc.Strategy) 
 	return btc.Batch{}, fmt.Errorf("no batch found")
 }
 
-func (m *mockCache) ReadRequests(ctx context.Context, ids []string) ([]btc.BatcherRequest, error) {
+func (m *mockCache) ReadRequests(ctx context.Context, ids ...string) ([]btc.BatcherRequest, error) {
 	requests := []btc.BatcherRequest{}
 	for _, id := range ids {
 		request, ok := m.requests[id]
@@ -153,17 +160,10 @@ func (m *mockCache) ReadRequests(ctx context.Context, ids []string) ([]btc.Batch
 	return requests, nil
 }
 
-func (m *mockCache) DeletePendingBatches(ctx context.Context, confirmedBatchIds map[string]bool, strategy btc.Strategy) error {
+func (m *mockCache) DeletePendingBatches(ctx context.Context) error {
 	newList := m.batchList
 	for i, id := range m.batchList {
-		if m.batches[id].Strategy != strategy {
-			continue
-		}
-
-		if _, ok := confirmedBatchIds[id]; ok {
-			batch := m.batches[id]
-			batch.Tx.Status.Confirmed = true
-			m.batches[id] = batch
+		if m.batches[id].Strategy != m.mode {
 			continue
 		}
 
@@ -175,25 +175,6 @@ func (m *mockCache) DeletePendingBatches(ctx context.Context, confirmedBatchIds 
 
 	m.batchList = newList
 	return nil
-}
-
-func (m *mockCache) ReadPendingChangeUtxos(ctx context.Context, strategy btc.Strategy) ([]btc.UTXO, error) {
-	utxos := []btc.UTXO{}
-	for _, id := range m.batchList {
-		if m.batches[id].Strategy == strategy && m.batches[id].Tx.Status.Confirmed == false {
-			utxos = append(utxos, m.batches[id].SelfUtxos...)
-		}
-	}
-	return utxos, nil
-}
-func (m *mockCache) ReadPendingFundingUtxos(ctx context.Context, strategy btc.Strategy) ([]btc.UTXO, error) {
-	utxos := []btc.UTXO{}
-	for _, id := range m.batchList {
-		if m.batches[id].Strategy == strategy && (m.batches[id].Tx.Status.Confirmed == false) {
-			utxos = append(utxos, m.batches[id].FundingUtxos...)
-		}
-	}
-	return utxos, nil
 }
 
 type mockFeeEstimator struct {

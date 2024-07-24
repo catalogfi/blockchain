@@ -23,7 +23,6 @@ var (
 	DefaultAPITimeout = 5 * time.Second
 )
 var (
-	ErrBatchNotFound              = errors.New("batch not found")
 	ErrBatcherStillRunning        = errors.New("batcher is still running")
 	ErrBatcherNotRunning          = errors.New("batcher is not running")
 	ErrBatchParametersNotMet      = errors.New("batch parameters not met")
@@ -37,7 +36,7 @@ var (
 	ErrStrategyNotSupported       = errors.New("strategy not supported")
 	ErrBuildCPFPDepthExceeded     = errors.New("build CPFP depth exceeded")
 	ErrBuildRBFDepthExceeded      = errors.New("build RBF depth exceeded")
-	ErrTxIdEmpty                  = errors.New("txid is empty")
+	ErrTxIDEmpty                  = errors.New("txid is empty")
 	ErrInsufficientFundsInRequest = func(have, need int64) error {
 		return fmt.Errorf("%v , have :%v, need at least : %v", ErrBatchParametersNotMet, have, need)
 	}
@@ -67,33 +66,40 @@ type Lifecycle interface {
 // should implement example implementations include in-memory cache and
 // rdbs cache
 type Cache interface {
-	// ReadBatchByReqId reads a batch based on the request ID.
-	ReadBatchByReqId(ctx context.Context, reqId string) (Batch, error)
+	// ReadBatchByReqID reads a batch based on the request ID.
+	ReadBatchByReqID(ctx context.Context, reqID string) (Batch, error)
 	// ReadPendingBatches reads all pending batches for a given strategy.
-	ReadPendingBatches(ctx context.Context, strategy Strategy) ([]Batch, error)
+	ReadPendingBatches(ctx context.Context) ([]Batch, error)
 	// ReadLatestBatch reads the latest batch for a given strategy.
-	ReadLatestBatch(ctx context.Context, strategy Strategy) (Batch, error)
-	// ReadPendingChangeUtxos reads all pending change UTXOs for a given strategy.
-	ReadPendingChangeUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
-	// ReadPendingFundingUtxos reads all pending funding UTXOs for a given strategy.
-	ReadPendingFundingUtxos(ctx context.Context, strategy Strategy) ([]UTXO, error)
-	// ConfirmBatchStatuses updates the status of multiple batches and delete pending batches based on confirmed transaction IDs.
-	ConfirmBatchStatuses(ctx context.Context, txIds []string, deletePending bool, strategy Strategy) error
-	// UpdateBatchFees updates the fees for multiple batches.
-	UpdateBatchFees(ctx context.Context, txId []string, fee int64) error
+	ReadLatestBatch(ctx context.Context) (Batch, error)
+
+	ReadBatch(ctx context.Context, id string) (Batch, error)
+
+	// UpdateBatches updates multiple batches.
+	// It completely overwrites the existing batches with the newer ones.
+	// If no batch exists, it will create a new one.
+	//
+	// Note: All the requests which are a part of this batch will be removed from pending requests.
+	UpdateBatches(ctx context.Context, updatedBatches ...Batch) error
+
+	// UpdateAndDeletePendingBatches overwrites the existing batches with newer ones and also deletes pending batches.
+	// If no batch exists, it will create a new one and delete pending batches.
+	//
+	// Even if updating batch is a pending batch, it will not be deleted.
+	UpdateAndDeletePendingBatches(ctx context.Context, updatedBatches ...Batch) error
+
+	// DeletePendingBatches deletes pending batches based on confirmed transaction IDs and strategy.
+	DeletePendingBatches(ctx context.Context) error
+
 	// SaveBatch saves a batch.
 	SaveBatch(ctx context.Context, batch Batch) error
-	// DeletePendingBatches deletes pending batches based on confirmed transaction IDs and strategy.
-	DeletePendingBatches(ctx context.Context, confirmedTxIds map[string]bool, strategy Strategy) error
 
-	// ReadRequest reads a request based on its ID.
-	ReadRequest(ctx context.Context, id string) (BatcherRequest, error)
-	// ReadRequests reads multiple requests based on their IDs.
-	ReadRequests(ctx context.Context, id []string) ([]BatcherRequest, error)
+	// ReadRequest reads a request based on its ID.	// ReadRequests reads multiple requests based on their IDs.
+	ReadRequests(ctx context.Context, id ...string) ([]BatcherRequest, error)
 	// ReadPendingRequests reads all pending requests.
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
 	// SaveRequest saves a request.
-	SaveRequest(ctx context.Context, id string, req BatcherRequest) error
+	SaveRequest(ctx context.Context, req BatcherRequest) error
 }
 
 // Batcher store spend and send requests in a batched request
@@ -152,15 +158,13 @@ type batcherWallet struct {
 	feeEstimator FeeEstimator
 	cache        Cache
 }
+
 type Batch struct {
 	Tx         Transaction
 	RequestIds map[string]bool
 	// true indicates that the batch is finalized and will not be replaced by more fee.
-	isFinalized  bool
-	IsConfirmed  bool
-	Strategy     Strategy
-	SelfUtxos    UTXOs
-	FundingUtxos UTXOs
+	IsFinalized bool
+	Strategy    Strategy
 }
 
 func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
@@ -263,19 +267,19 @@ func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []
 		SACPs:  sacps,
 		Status: false,
 	}
-	return id, w.cache.SaveRequest(ctx, id, req)
+	return id, w.cache.SaveRequest(ctx, req)
 }
 
 // Status returns the status of a transaction based on the tracking id
 func (w *batcherWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
-	request, err := w.cache.ReadRequest(ctx, id)
+	request, err := w.cache.ReadRequests(ctx, id)
 	if err != nil {
 		return Transaction{}, false, err
 	}
-	if !request.Status {
+	if !request[0].Status {
 		return Transaction{}, false, nil
 	}
-	batch, err := w.cache.ReadBatchByReqId(ctx, id)
+	batch, err := w.cache.ReadBatchByReqID(ctx, id)
 	if err != nil {
 		return Transaction{}, false, err
 	}
@@ -332,17 +336,16 @@ func (w *batcherWallet) Restart(ctx context.Context) error {
 func (w *batcherWallet) run(ctx context.Context) error {
 	switch w.opts.Strategy {
 	case CPFP, RBF:
-		w.runPTIBatcher(ctx)
+		w.runPeriodicBatcher(ctx)
 	default:
 		return ErrStrategyNotSupported
 	}
 	return nil
 }
 
-// PTI stands for Periodic time interval
-// runPTIBatcher is used by strategies that require
+// runPeriodicBatcher is used by strategies that require
 // triggering the batching process at regular intervals
-func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
+func (w *batcherWallet) runPeriodicBatcher(ctx context.Context) {
 	ticker := time.NewTicker(w.opts.PTI)
 	w.wg.Add(1)
 	go func() {
@@ -356,9 +359,7 @@ func (w *batcherWallet) runPTIBatcher(ctx context.Context) {
 			case <-ticker.C:
 				w.processBatch()
 			}
-
 		}
-
 	}()
 }
 
@@ -375,7 +376,7 @@ func (w *batcherWallet) processBatch() {
 			w.logger.Info("waiting for new batch")
 		}
 
-		if err := w.updateFeeRate(); err != nil {
+		if err := w.updateBatchFeeRate(); err != nil {
 			if !errors.Is(err, ErrFeeUpdateNotNeeded) {
 				w.logger.Error("failed to update fee rate", zap.Error(err))
 			} else {
@@ -389,8 +390,8 @@ func (w *batcherWallet) processBatch() {
 	}
 }
 
-// updateFeeRate updates the fee rate based on the strategy
-func (w *batcherWallet) updateFeeRate() error {
+// updateBatchFeeRate updates the fee rate based on the strategy
+func (w *batcherWallet) updateBatchFeeRate() error {
 	feeRates, err := w.feeEstimator.FeeSuggestion()
 	if err != nil {
 		return err
@@ -520,25 +521,21 @@ func selectFee(feeRate FeeSuggestion, feeLevel FeeLevel) int {
 	}
 }
 
-func filterPendingBatches(batches []Batch, indexer IndexerClient) ([]Batch, []string, []string, error) {
-	pendingBatches := []Batch{}
-	confirmedTxs := []string{}
-	pendingTxs := []string{}
+func filterPendingBatches(batches []Batch, indexer IndexerClient) (pendingBatches []Batch, confirmedBatches []Batch, err error) {
 	for _, batch := range batches {
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		defer cancel()
 		tx, err := indexer.GetTx(ctx, batch.Tx.TxID)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		if tx.Status.Confirmed {
-			confirmedTxs = append(confirmedTxs, tx.TxID)
+			confirmedBatches = append(confirmedBatches, batch)
 			continue
 		}
 		pendingBatches = append(pendingBatches, batch)
-		pendingTxs = append(pendingTxs, tx.TxID)
 	}
-	return pendingBatches, confirmedTxs, pendingTxs, nil
+	return pendingBatches, confirmedBatches, nil
 }
 
 func withContextTimeout(parentContext context.Context, duration time.Duration, fn func(ctx context.Context) error) error {

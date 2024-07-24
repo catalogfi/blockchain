@@ -168,7 +168,7 @@ func (client *client) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
 			}
 		}
 		return err
-	case _ = <-results:
+	case <-results:
 		return nil
 	}
 }

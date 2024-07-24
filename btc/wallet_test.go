@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -22,22 +23,23 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
 )
 
 var _ = Describe("Wallets", Ordered, func() {
 
 	var (
-		chainParams       chaincfg.Params = chaincfg.RegressionNetParams
+		chainParams       = chaincfg.RegressionNetParams
+		indexer           = localnet.BTCIndexer()
+		fixedFeeEstimator = btc.NewFixFeeEstimator(10)
+		feeLevel          = btc.HighFee
+		tempDBDir         = "./testWallet"
+		privateKey        *btcec.PrivateKey
 		logger            *zap.Logger
-		indexer           btc.IndexerClient = localnet.BTCIndexer()
-		fixedFeeEstimator btc.FeeEstimator  = btc.NewFixFeeEstimator(10)
-		feeLevel          btc.FeeLevel      = btc.HighFee
-
-		privateKey *btcec.PrivateKey
-		wallet     btc.Wallet
-		faucet     btc.Wallet
-		err        error
+		wallet            btc.Wallet
+		faucet            btc.Wallet
+		err               error
 	)
 
 	BeforeAll(func() {
@@ -51,10 +53,13 @@ var _ = Describe("Wallets", Ordered, func() {
 			Expect(err).To(BeNil())
 		case BATCHER_CPFP, BATCHER_RBF:
 			mockFeeEstimator := NewMockFeeEstimator(10)
-			cache := NewTestCache()
+			db, err := leveldb.OpenFile(tempDBDir, nil)
+			Expect(err).To(BeNil())
 			if mode == BATCHER_CPFP {
+				cache := btc.NewBatcherCache(db, btc.CPFP)
 				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.CPFP))
 			} else {
+				cache := btc.NewBatcherCache(db, btc.RBF)
 				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.RBF))
 			}
 			Expect(err).To(BeNil())
@@ -78,6 +83,11 @@ var _ = Describe("Wallets", Ordered, func() {
 	})
 
 	AfterAll(func() {
+
+		// remove db path
+		err := os.RemoveAll(tempDBDir)
+		Expect(err).To(BeNil())
+
 		switch w := wallet.(type) {
 		case btc.BatcherWallet:
 			err := w.Stop()
@@ -103,9 +113,10 @@ var _ = Describe("Wallets", Ordered, func() {
 		switch mode {
 		case SIMPLE, BATCHER_CPFP:
 			Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+		case BATCHER_RBF:
+			Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 		}
-		// to address
-		// change address
+
 	})
 
 	It("should be able to send funds to multiple addresses", func() {
@@ -147,7 +158,6 @@ var _ = Describe("Wallets", Ordered, func() {
 			Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(bobAddr.EncodeAddress()))
 			// change address
 			Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
-
 		}
 
 	})
@@ -1305,7 +1315,9 @@ func sigCheckTapScript(params chaincfg.Params, pubkey []byte) ([]byte, *btcutil.
 	)
 
 	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), &params)
-
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	cbBytes, err := ctrlBlock.ToBytes()
 	if err != nil {
 		return nil, nil, nil, err
@@ -1337,7 +1349,9 @@ func additionTapscript(params chaincfg.Params) ([]byte, *btcutil.AddressTaproot,
 	)
 
 	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), &params)
-
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	cbBytes, err := ctrlBlock.ToBytes()
 	if err != nil {
 		return nil, nil, nil, err
