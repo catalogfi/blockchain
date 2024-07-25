@@ -91,7 +91,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			By("Sign and submit the redeem tx")
 			outpoints := map[wire.OutPoint]*wire.TxOut{
-				redeemTx.TxIn[0].PreviousOutPoint: &wire.TxOut{
+				redeemTx.TxIn[0].PreviousOutPoint: {
 					Value: amount,
 				},
 			}
@@ -186,7 +186,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			By("Sign the tx with sighash single")
 			outpoints := map[wire.OutPoint]*wire.TxOut{
-				transferTx.TxIn[0].PreviousOutPoint: &wire.TxOut{
+				transferTx.TxIn[0].PreviousOutPoint: {
 					Value: amount,
 				},
 			}
@@ -314,7 +314,7 @@ var _ = Describe("Bitcoin scripts", func() {
 
 			By("Sign the tx with sighash single")
 			outpoints := map[wire.OutPoint]*wire.TxOut{
-				transferTx.TxIn[0].PreviousOutPoint: &wire.TxOut{
+				transferTx.TxIn[0].PreviousOutPoint: {
 					Value: amount,
 				},
 			}

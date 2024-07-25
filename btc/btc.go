@@ -1,6 +1,7 @@
 package btc
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -265,4 +266,13 @@ func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, p
 	default:
 		return nil, fmt.Errorf("unsupported address type")
 	}
+}
+
+// GetTxRawBytes returns the raw bytes of a transaction.
+func GetTxRawBytes(tx *wire.MsgTx) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+	if err := tx.Serialize(buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

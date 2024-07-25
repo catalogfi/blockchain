@@ -244,13 +244,13 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		tx.TxIn[i].Witness[1] = witnessWithSig[0]
 	}
 
-	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-	err = tx.Serialize(buf)
-	if err != nil {
+	var txBytes []byte
+	if txBytes, err = GetTxRawBytes(tx); err != nil {
 		return "", err
 	}
+
 	// submit an SACP tx
-	return hw.wallet.Send(ctx, nil, nil, [][]byte{buf.Bytes()})
+	return hw.wallet.Send(ctx, nil, nil, [][]byte{txBytes})
 
 }
 
@@ -279,7 +279,9 @@ func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (str
 		return "", ErrHTLCNeedMoreBlocks(needMoreBlocks)
 	}
 	tapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRefund)
-
+	if err != nil {
+		return "", err
+	}
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
 		tapLeaf.Script,
@@ -394,7 +396,7 @@ func htlcLeaves(htlc *HTLC) (*htlcTapLeaves, error) {
 	if err != nil {
 		return &htlcTapLeaves{}, err
 	}
-	return NewLeaves(redeemLeaf, refundLeaf, instantRefundLeaf)
+	return newLeaves(redeemLeaf, refundLeaf, instantRefundLeaf)
 }
 
 // Helper struct to manage HTLC leaves
@@ -412,7 +414,7 @@ const (
 	LeafInstantRefund Leaf = "instantRefund"
 )
 
-func NewLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, error) {
+func newLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, error) {
 
 	return &htlcTapLeaves{
 		redeem:        redeem,
@@ -438,7 +440,9 @@ func getControlBlock(internalKey *btcec.PublicKey, htlc *HTLC, leaf Leaf) (txscr
 	)
 
 	cbBytes, err := controlBlock.ToBytes()
-
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
 	tapLeaf, err := leaves.GetTapLeaf(leaf)
 	if err != nil {
 		return txscript.TapLeaf{}, nil, err

@@ -165,7 +165,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})
 
-		It("should return an error when the utxo has been spent", func(ctx context.Context) {
+		It("should return an error when the utxo has been spent", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
