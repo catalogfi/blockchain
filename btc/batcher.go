@@ -212,6 +212,7 @@ func defaultBatcherOptions() BatcherOptions {
 	}
 }
 
+// WithStrategy sets the batching strategy for the BatcherWallet.
 func WithStrategy(strategy Strategy) func(*batcherWallet) error {
 	return func(w *batcherWallet) error {
 		err := parseStrategy(strategy)
@@ -223,6 +224,7 @@ func WithStrategy(strategy Strategy) func(*batcherWallet) error {
 	}
 }
 
+// WithPTI sets the Periodic Time Interval for batching.
 func WithPTI(pti time.Duration) func(*batcherWallet) error {
 	return func(w *batcherWallet) error {
 		w.opts.PTI = pti
@@ -297,8 +299,8 @@ func (w *batcherWallet) Start(ctx context.Context) error {
 		return ErrBatcherStillRunning
 	}
 	w.quit = make(chan struct{})
-
 	w.logger.Info("--------starting batcher wallet--------")
+
 	return w.run(ctx)
 }
 

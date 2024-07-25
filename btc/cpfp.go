@@ -20,16 +20,12 @@ type FeeStats struct {
 // createCPFPBatch creates a CPFP (Child Pays For Parent) batch using the pending requests
 // and stores the batch in the cache
 func (w *batcherWallet) createCPFPBatch(c context.Context) error {
-	var requests []BatcherRequest
-	var err error
 
 	// Read all pending requests added to the cache
 	// All requests are executed in a single batch
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		requests, err = w.cache.ReadPendingRequests(ctx)
-		return err
-	})
+	requests, err := w.cache.ReadPendingRequests(c)
 	if err != nil {
+		w.logger.Error("failed to read pending requests", zap.Error(err))
 		return err
 	}
 
@@ -42,12 +38,9 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(requests)
 
 	// Read pending batches from the cache
-	var batches []Batch
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batches, err = w.cache.ReadPendingBatches(ctx)
-		return err
-	})
+	batches, err := w.cache.ReadPendingBatches(c)
 	if err != nil {
+		w.logger.Error("failed to read pending batches", zap.Error(err))
 		return err
 	}
 
@@ -57,16 +50,16 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		return err
 	}
 
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.UpdateBatches(ctx, confirmedTxs...)
-	})
+	err = w.cache.UpdateBatches(c, confirmedTxs...)
 	if err != nil {
+		w.logger.Error("failed to update confirmed batches", zap.Error(err))
 		return err
 	}
 
 	// Fetch fee rates and select the appropriate fee rate based on the wallet's options
 	feeRates, err := w.feeEstimator.FeeSuggestion()
 	if err != nil {
+
 		return err
 	}
 	requiredFeeRate := selectFee(feeRates, w.opts.TxOptions.FeeLevel)
@@ -130,10 +123,9 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 		Strategy:    CPFP,
 	}
 
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.SaveBatch(ctx, batch)
-	})
+	err = w.cache.SaveBatch(c, batch)
 	if err != nil {
+		w.logger.Error("failed to save CPFP batch", zap.Error(err))
 		return ErrSavingBatch
 	}
 
@@ -143,15 +135,11 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 
 // updateCPFP updates the fee rate of the pending batches to the required fee rate
 func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error {
-	var batches []Batch
-	var err error
 
 	// Read pending batches from the cache
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		batches, err = w.cache.ReadPendingBatches(ctx)
-		return err
-	})
+	batches, err := w.cache.ReadPendingBatches(c)
 	if err != nil {
+		w.logger.Error("failed to read pending batches", zap.Error(err))
 		return err
 	}
 
@@ -161,10 +149,9 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 		return err
 	}
 
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		return w.cache.UpdateBatches(ctx, confirmedTxs...)
-	})
+	err = w.cache.UpdateBatches(c, confirmedTxs...)
 	if err != nil {
+		w.logger.Error("failed to update confirmed batches", zap.Error(err))
 		return err
 	}
 
@@ -220,16 +207,15 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	}
 
 	// Update the fee of all batches that got bumped
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		newBatches := []Batch{}
-		for _, batch := range pendingBatches {
-			batch.Tx.Fee = int64(requiredFeeRate) * int64(batch.Tx.Weight) / blockchain.WitnessScaleFactor
-			newBatches = append(newBatches, batch)
-		}
 
-		return w.cache.UpdateBatches(ctx, newBatches...)
-	})
+	newBatches := []Batch{}
+	for _, batch := range pendingBatches {
+		batch.Tx.Fee = int64(requiredFeeRate) * int64(batch.Tx.Weight) / blockchain.WitnessScaleFactor
+		newBatches = append(newBatches, batch)
+	}
+	err = w.cache.UpdateBatches(c, newBatches...)
 	if err != nil {
+		w.logger.Error("failed to update CPFP batches", zap.Error(err))
 		return err
 	}
 
