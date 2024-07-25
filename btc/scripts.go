@@ -130,6 +130,59 @@ func isWaitTimeOpCode(opCode byte) bool {
 		(opCode >= txscript.OP_DATA_1 && opCode <= txscript.OP_DATA_3)
 }
 
+func IsRedeemLeaf(script []byte) bool {
+	validRedeem := []byte{
+		txscript.OP_SHA256,
+		txscript.OP_DATA_32,
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	for _, opCode := range validRedeem {
+		if !tokenizer.Next() {
+			return false
+		}
+		if tokenizer.Opcode() != opCode {
+			return false
+		}
+	}
+	return tokenizer.Done()
+}
+
+func IsRefundLeaf(script []byte) bool {
+	validRefund := []byte{
+		0xff,
+		txscript.OP_CHECKSEQUENCEVERIFY,
+		txscript.OP_DROP,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	for _, opCode := range validRefund {
+		if !tokenizer.Next() {
+			return false
+		}
+		if opCode == 0xff {
+			if !isWaitTimeOpCode(tokenizer.Opcode()) {
+				return false
+			}
+			lockTime := decodeLocktime(tokenizer.Data())
+			if lockTime > math.MaxUint16 || lockTime < 0 {
+				return false
+			}
+			continue
+		}
+
+		if tokenizer.Opcode() != opCode {
+			return false
+		}
+	}
+	return tokenizer.Done()
+}
+
 // IsHtlc returns if the given script is a HTLC script.
 func IsHtlc(script []byte) bool {
 	// 0xff is used to represent a data of variable length
