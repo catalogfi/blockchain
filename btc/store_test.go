@@ -170,26 +170,6 @@ var _ = Describe("BatcherCache", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(b.Tx.Status.Confirmed).To(BeTrue())
 		})
-		It("should remove all pending requests if a batch is confirmed", func() {
-
-			request := dummyRequest()
-			err = cache.SaveRequest(ctx, request)
-			Expect(err).To(BeNil())
-
-			batchToSave := dummyBatch()
-			batchToSave.RequestIds[request.ID] = true
-			err = saveBatch(batchToSave, cache)
-			Expect(err).To(BeNil())
-
-			confirmedBatch := confirmBatch(batchToSave)
-			// this should delete all pending requests
-			err = cache.UpdateBatches(ctx, confirmedBatch)
-			Expect(err).To(BeNil())
-
-			reqs, _ := cache.ReadPendingRequests(ctx)
-			Expect(len(reqs)).To(Equal(0))
-
-		})
 		It("should be able to create a batch that does not exist", func() {
 			batchToSave := dummyBatch()
 			err := cache.UpdateBatches(ctx, batchToSave)

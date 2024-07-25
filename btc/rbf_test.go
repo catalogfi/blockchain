@@ -16,6 +16,7 @@ import (
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
 )
 
@@ -25,7 +26,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	logger, err := zap.NewDevelopment()
 	Expect(err).To(BeNil())
 
-	indexer := btc.NewElectrsIndexerClient(logger, os.Getenv("BTC_REGNET_INDEXER"), time.Millisecond*500)
+	indexer := localnet.BTCIndexer()
 
 	privateKey, err := btcec.NewPrivateKey()
 	Expect(err).To(BeNil())
@@ -33,9 +34,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	requiredFeeRate := int64(10)
 
 	mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
-	cache := NewTestCache(btc.RBF)
-	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
-	Expect(err).To(BeNil())
+
+	var wallet btc.BatcherWallet
+	var cache btc.Cache
 
 	faucet, err := btc.NewSimpleWallet(privateKey, chainParams, indexer, mockFeeEstimator, btc.HighFee)
 	Expect(err).To(BeNil())
@@ -72,8 +73,17 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
 	Expect(err).To(BeNil())
 
+	dbPath := "./testrbf"
+
 	BeforeAll(func() {
-		_, err := localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
+
+		db, err := leveldb.OpenFile(dbPath, nil)
+		Expect(err).To(BeNil())
+
+		cache = btc.NewBatcherCache(db, btc.RBF)
+		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+
+		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
 		_, err = localnet.FundBitcoin(faucet.Address().EncodeAddress(), indexer)
@@ -116,6 +126,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	})
 
 	AfterAll(func() {
+
+		// remove db path
+		os.RemoveAll(dbPath)
+
 		err := wallet.Stop()
 		Expect(err).To(BeNil())
 	})

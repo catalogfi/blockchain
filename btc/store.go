@@ -255,6 +255,7 @@ func (l *BatcherCache) UpdateBatches(_ context.Context, updatedBatches ...Batch)
 		} else {
 			batch.Put(l.batchKey(b.Tx.TxID), data)
 			batch.Delete(l.pendingBatchKey(b.Tx.TxID))
+
 		}
 	}
 	return l.db.Write(batch, nil)
@@ -287,9 +288,14 @@ func (l *BatcherCache) UpdateAndDeletePendingBatches(_ context.Context, updatedB
 			batch.Put(l.pendingBatchKey(b.Tx.TxID), data)
 		} else {
 			batch.Put(l.batchKey(b.Tx.TxID), data)
+
 		}
 	}
 	return l.db.Write(batch, nil)
+}
+
+func (l *BatcherCache) getPendingRequestBytes(id string) ([]byte, error) {
+	return l.get(l.pendingRequestKey(id))
 }
 
 func (l *BatcherCache) DeletePendingBatches(_ context.Context) error {
@@ -324,7 +330,7 @@ func (l *BatcherCache) getBatch(id string, isPending bool) (Batch, error) {
 	return batch, nil
 }
 
-func (l *BatcherCache) SaveBatch(_ context.Context, batch Batch) error {
+func (l *BatcherCache) SaveBatch(ctx context.Context, batch Batch) error {
 	isPending := isPending(batch)
 	existinBatch, err := l.getBatch(batch.Tx.TxID, isPending)
 	if err == nil && existinBatch.Tx.TxID == batch.Tx.TxID {
@@ -333,7 +339,6 @@ func (l *BatcherCache) SaveBatch(_ context.Context, batch Batch) error {
 	if !errors.Is(err, ErrStoreNotFound) {
 		return err
 	}
-
 	data, err := serializeBatch(batch)
 	if err != nil {
 		return err
@@ -341,40 +346,48 @@ func (l *BatcherCache) SaveBatch(_ context.Context, batch Batch) error {
 
 	levelDBBatch := new(leveldb.Batch)
 
+	// Save the batch
 	if isPending {
 		levelDBBatch.Put(l.pendingBatchKey(batch.Tx.TxID), data)
-
 	} else {
 		levelDBBatch.Put(l.batchKey(batch.Tx.TxID), data)
 	}
 
+	// Once a batch is created, we need to move all the pending
+	// requests of the batch to finalized requests
 	for id := range batch.RequestIds {
-		req, err := l.getPendingRequest(id)
+		reqs, err := l.ReadRequests(ctx, id)
 		if err != nil {
 			return fmt.Errorf("error getting request %s: %w", id, err)
+		}
+		req := reqs[0]
+		if req.Status {
+			continue
 		}
 		req.Status = true
 		data, err := serializeBatcherRequest(req)
 		if err != nil {
 			return err
 		}
-		levelDBBatch.Put(l.requestKey(id), data)
 		levelDBBatch.Delete(l.pendingRequestKey(id))
+		levelDBBatch.Put(l.requestKey(id), data)
 	}
-
+	// save the latest batch
 	levelDBBatch.Put(l.latestBatchKey(), data)
+
+	// Index the requests to the batch
 	for id := range batch.RequestIds {
 		levelDBBatch.Put(l.requestIndexKey(id), []byte(batch.Tx.TxID))
 	}
+
 	return l.db.Write(levelDBBatch, nil)
 }
 
 func (l *BatcherCache) getPendingRequest(id string) (BatcherRequest, error) {
-	data, err := l.get(l.pendingRequestKey(id))
+	data, err := l.getPendingRequestBytes(id)
 	if err != nil {
 		return BatcherRequest{}, err
 	}
-
 	return deserializeBatcherRequest(data)
 }
 

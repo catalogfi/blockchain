@@ -64,7 +64,6 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 
 	// Read requests from the cache .
 	batchedRequests, err := w.cache.ReadRequests(c, maps.Keys(batch.RequestIds)...)
-
 	if err != nil {
 		w.logger.Error("failed to read requests", zap.Error(err), zap.Strings("request_ids", maps.Keys(batch.RequestIds)))
 		return fmt.Errorf("failed to read requests: %w", err)
