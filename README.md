@@ -10,6 +10,7 @@ For any Catalog-related blockchain interactions, in Golang.
 ## Install
 
 To import the `blockchain` package:
+
 ```shell
 $ go get github.com/catalogfi/blockchain
 ```
@@ -93,22 +94,26 @@ Example:
 
 We use the `BuildTransaction` function with these parameters:
 
-1. General 
+1. General
+ 
 - `network`: The network for the transaction.
 - `feeRate`: Minimum fee rate; actual fee may be higher.
   
 2. Inputs
+
 - `inputs`: UTXOs to spend. Use NewRawInputs() if unspecified.
 - `utxos`: Additional UTXOs if needed. Use `nil` if none.
 - `sizeUpdater`: Describes UTXO size impact. It assumes all UTXOs come from the same address. Use predefined updaters like `P2pkhUpdater` and `P2wpkhUpdater`, or `nil` if `utxos` is empty.
   
 3. Outputs
+
 - `recipients`: Fund recipients with specified amounts.
 - `changeAddr`: Address for the change, usually the sender's address.
 
 **Examples:**
 
 1. Transfer 0.1 btc
+   
 ```go
     // Fetch available utxos of the address 
     utxos, err := indexer.GetUTXOs(ctx, sender)
