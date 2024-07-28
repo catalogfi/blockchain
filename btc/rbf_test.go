@@ -16,7 +16,6 @@ import (
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
 )
 
@@ -77,10 +76,11 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	BeforeAll(func() {
 
-		db, err := leveldb.OpenFile(dbPath, nil)
-		Expect(err).To(BeNil())
+		// db, err := leveldb.OpenFile(dbPath, nil)
+		// Expect(err).To(BeNil())
 
-		cache = btc.NewBatcherCache(db, btc.RBF)
+		// cache = btc.NewBatcherCache(db, btc.RBF)
+		cache = NewTestCache(btc.RBF)
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
@@ -201,16 +201,6 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		}, []btc.SpendRequest{
 			{
 				Witness: [][]byte{
-					{0x1},
-					{0x1},
-					p2wshAdditionScript,
-				},
-				Script:        p2wshAdditionScript,
-				ScriptAddress: p2wshScriptAddr,
-				HashType:      txscript.SigHashAll,
-			},
-			{
-				Witness: [][]byte{
 					btc.AddSignatureSegwitOp,
 					p2wshSigCheckScript,
 				},
@@ -263,6 +253,33 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(address1.EncodeAddress()))
 		Expect(tx.VOUTs[3].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
 		Expect(tx.VOUTs[4].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+
+		By("Add new request with a spend")
+		id, err = wallet.Send(context.Background(), []btc.SendRequest{}, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshAdditionScript,
+				},
+				Script:        p2wshAdditionScript,
+				ScriptAddress: p2wshScriptAddr,
+				HashType:      txscript.SigHashAll,
+			},
+		}, nil)
+		Expect(err).To(BeNil())
+		Expect(id).ShouldNot(BeEmpty())
+
+		for {
+			fmt.Println("waiting for tx", id)
+			tx, ok, err = wallet.Status(context.Background(), id)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
 
 		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())

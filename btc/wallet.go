@@ -110,8 +110,11 @@ type SpendRequest struct {
 	// Hash type for the signature. Default is SigHashDefault (tapscript only)
 	HashType txscript.SigHashType
 
-	//Sequence number for the input
+	// Sequence number for the input
 	Sequence uint32
+
+	// UTXO to spend
+	utxos UTXOs
 }
 
 type SendRequest struct {

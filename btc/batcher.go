@@ -255,7 +255,7 @@ func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 
 // Send creates a batch request , saves it in the cache and returns a tracking id
 func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
-	if err := w.validateBatchRequest(ctx, w.opts.Strategy, spends, sends, sacps); err != nil {
+	if err := w.validateBatchRequest(ctx, w.opts.Strategy, &spends, sends, sacps); err != nil {
 		return "", err
 	}
 
@@ -429,17 +429,17 @@ func (w *batcherWallet) createBatch() error {
 	}
 }
 
-func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strategy, spends []SpendRequest, sends []SendRequest, sacps [][]byte) error {
-	if len(spends) == 0 && len(sends) == 0 && len(sacps) == 0 {
+func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strategy, spends *[]SpendRequest, sends []SendRequest, sacps [][]byte) error {
+	if len(*spends) == 0 && len(sends) == 0 && len(sacps) == 0 {
 		return ErrBatchParametersNotMet
 	}
 
-	err := validateRequests(spends, sends, sacps)
+	err := validateRequests(*spends, sends, sacps)
 	if err != nil {
 		return err
 	}
 
-	for _, spend := range spends {
+	for _, spend := range *spends {
 		if spend.ScriptAddress == w.address {
 			return ErrBatchParametersNotMet
 		}
@@ -458,7 +458,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	spendsAmount := int64(0)
 	spendsUtxos := UTXOs{}
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
-		spendsUtxos, _, spendsAmount, err = getUTXOsForSpendRequest(ctx, w.indexer, spends)
+		spendsUtxos, _, spendsAmount, err = populateUTXOsForSpendRequest(ctx, w.indexer, spends)
 		return err
 	})
 	if err != nil {
@@ -561,4 +561,33 @@ func unpackBatcherRequests(reqs []BatcherRequest) ([]SpendRequest, []SendRequest
 	}
 
 	return spendRequests, sendRequests, sacps, reqIds
+}
+
+func populateUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq *[]SpendRequest) (UTXOs, utxoMap, int64, error) {
+	utxos := UTXOs{}
+	totalValue := int64(0)
+	utxoMap := make(utxoMap)
+
+	for i := range *spendReq {
+		req := &(*spendReq)[i]
+		utxosForAddress, err := indexer.GetUTXOs(ctx, req.ScriptAddress)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+
+		req.utxos = utxosForAddress
+
+		utxos = append(utxos, utxosForAddress...)
+		for _, utxo := range utxosForAddress {
+			totalValue += utxo.Amount
+		}
+		utxoMap[req.ScriptAddress.EncodeAddress()] = utxosForAddress
+	}
+
+	// If there are any spend requests, check if the scripts have funds to spend
+	if totalValue == 0 && len(*spendReq) > 0 {
+		return nil, nil, 0, ErrNoFundsToSpend
+	}
+
+	return utxos, utxoMap, totalValue, nil
 }
