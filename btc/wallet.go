@@ -114,7 +114,7 @@ type SpendRequest struct {
 	Sequence uint32
 
 	// UTXO to spend
-	utxos UTXOs
+	Utxos UTXOs
 }
 
 type SendRequest struct {

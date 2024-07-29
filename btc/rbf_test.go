@@ -16,6 +16,7 @@ import (
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
 )
 
@@ -76,11 +77,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	BeforeAll(func() {
 
-		// db, err := leveldb.OpenFile(dbPath, nil)
-		// Expect(err).To(BeNil())
+		db, err := leveldb.OpenFile(dbPath, nil)
+		Expect(err).To(BeNil())
 
-		// cache = btc.NewBatcherCache(db, btc.RBF)
-		cache = NewTestCache(btc.RBF)
+		cache = btc.NewBatcherCache(db, btc.RBF)
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)

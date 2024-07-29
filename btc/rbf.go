@@ -673,11 +673,11 @@ func getUTXOsFromSpendRequest(spendReq []SpendRequest) (UTXOs, utxoMap, int64, e
 	utxoMap := make(utxoMap)
 
 	for _, req := range spendReq {
-		utxos = append(utxos, req.utxos...)
-		for _, utxo := range req.utxos {
+		utxos = append(utxos, req.Utxos...)
+		for _, utxo := range req.Utxos {
 			totalValue += utxo.Amount
 		}
-		utxoMap[req.ScriptAddress.EncodeAddress()] = req.utxos
+		utxoMap[req.ScriptAddress.EncodeAddress()] = req.Utxos
 	}
 
 	// If there are any spend requests, check if the scripts have funds to spend

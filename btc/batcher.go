@@ -575,7 +575,7 @@ func populateUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, sp
 			return nil, nil, 0, err
 		}
 
-		req.utxos = utxosForAddress
+		req.Utxos = utxosForAddress
 
 		utxos = append(utxos, utxosForAddress...)
 		for _, utxo := range utxosForAddress {
