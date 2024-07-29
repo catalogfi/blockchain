@@ -25,6 +25,7 @@ type serializableSpendRequest struct {
 	ScriptAddress string
 	HashType      txscript.SigHashType
 	Sequence      uint32
+	Utxos         UTXOs
 }
 
 // serializableSendRequest is a serializable version of SendRequest
@@ -60,6 +61,7 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 			ScriptAddress: spend.ScriptAddress.EncodeAddress(),
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
+			Utxos:         spend.Utxos,
 		}
 	}
 
@@ -100,6 +102,7 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 			ScriptAddress: addr,
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
+			Utxos:         spend.Utxos,
 		}
 	}
 

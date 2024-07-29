@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/syndtr/goleveldb/leveldb"
 	"golang.org/x/exp/maps"
@@ -293,6 +294,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(len(reqs)).To(Equal(1))
 			Expect(reqs[0].ID).To(Equal(request.ID))
+			Expect(reqs[0].Spends[0].Utxos[0].TxID).To(Equal(request.Spends[0].Utxos[0].TxID))
 
 		})
 		It("should return an error if request not found", func() {
@@ -355,5 +357,17 @@ func dummyRequest() btc.BatcherRequest {
 	return btc.BatcherRequest{
 		ID:     fmt.Sprintf("%d", time.Now().UnixNano()),
 		Status: false,
+		Spends: []btc.SpendRequest{
+			{
+				Utxos: []btc.UTXO{
+					{
+						TxID:   "txid",
+						Vout:   0,
+						Amount: 1000,
+					},
+				},
+				ScriptAddress: &btcutil.AddressPubKeyHash{},
+			},
+		},
 	}
 }

@@ -79,7 +79,9 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 
 	// Attempt to create a new RBF batch with combined requests.
 	if err = w.createNewRBFBatch(c, append(batchedRequests, pendingRequests...), currentFeeRate, 0); err != ErrTxInputsMissingOrSpent {
-		w.logger.Error("failed to create new rbf batch", zap.Error(err), zap.String("txid", batch.Tx.TxID))
+		if err != nil {
+			w.logger.Error("failed to create new rbf batch", zap.Error(err), zap.String("txid", batch.Tx.TxID))
+		}
 		return err
 	}
 
@@ -189,28 +191,23 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	// Ensure the required fee rate is higher than the current fee rate
 	// RBF cannot be performed with reduced or same fee rate
-	if currentFeeRate >= requiredFeeRate {
+	if currentFeeRate+10 >= requiredFeeRate {
 		requiredFeeRate = currentFeeRate + 10
 	}
 
-	var tx *wire.MsgTx
-	// Create a new RBF transaction
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		tx, err = w.createRBFTx(
-			c,
-			nil,
-			spendRequests,
-			sendRequests,
-			sacps,
-			nil,
-			avoidUtxos,
-			0, // will be calculated in the function
-			requiredFeeRate,
-			false,
-			2,
-		)
-		return err
-	})
+	tx, err := w.createRBFTx(
+		c,
+		nil,
+		spendRequests,
+		sendRequests,
+		sacps,
+		nil,
+		avoidUtxos,
+		0, // will be calculated in the function
+		requiredFeeRate,
+		false,
+		2,
+	)
 	if err != nil {
 		return err
 	}
@@ -352,11 +349,10 @@ func (w *batcherWallet) createRBFTx(
 
 	var spendUTXOs UTXOs
 	var spendUTXOsMap map[string]UTXOs
-	var balanceOfSpendScripts int64
 
 	// Fetch UTXOs for spend requests
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		spendUTXOs, spendUTXOsMap, balanceOfSpendScripts, err = getUTXOsForSpendRequest(ctx, w.indexer, spendRequests)
+		spendUTXOs, spendUTXOsMap, _, err = getUTXOsFromSpendRequest(spendRequests)
 		return err
 	})
 	if err != nil {
@@ -369,11 +365,6 @@ func (w *batcherWallet) createRBFTx(
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
 	}
 	sequencesMap = getRbfSequenceMap(sequencesMap, utxos)
-
-	// Check if there are funds to spend
-	if balanceOfSpendScripts == 0 && len(spendRequests) > 0 {
-		return nil, ErrNoFundsToSpend
-	}
 
 	// Combine spend UTXOs with provided UTXOs
 	totalUtxos := append(spendUTXOs, utxos...)
@@ -673,4 +664,26 @@ func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[str
 		sequencesMap[utxo.TxID] = wire.MaxTxInSequenceNum - 2
 	}
 	return sequencesMap
+}
+
+// getUTXOsFromSpendRequest returns UTXOs from spend requests and the total value of the UTXOs
+func getUTXOsFromSpendRequest(spendReq []SpendRequest) (UTXOs, utxoMap, int64, error) {
+	utxos := UTXOs{}
+	totalValue := int64(0)
+	utxoMap := make(utxoMap)
+
+	for _, req := range spendReq {
+		utxos = append(utxos, req.Utxos...)
+		for _, utxo := range req.Utxos {
+			totalValue += utxo.Amount
+		}
+		utxoMap[req.ScriptAddress.EncodeAddress()] = req.Utxos
+	}
+
+	// If there are any spend requests, check if the scripts have funds to spend
+	if totalValue == 0 && len(spendReq) > 0 {
+		return nil, nil, 0, ErrNoFundsToSpend
+	}
+
+	return utxos, utxoMap, totalValue, nil
 }
