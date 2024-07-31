@@ -14,6 +14,27 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+type HTLCAction string
+
+const (
+	InitiateHTLCAction      HTLCAction = "initiate"
+	RedeemHTLCAction        HTLCAction = "redeem"
+	RefundHTLCAction        HTLCAction = "refund"
+	InstantRefundHTLCAction HTLCAction = "instantRefund"
+)
+
+type RawHTLCAction struct {
+	Action HTLCAction
+	HTLC   HTLC
+	// Amount to initiate the HTLC.
+	// Only used in the case of InitiateHTLCAction
+	Amount int64
+	// Only used in the case of RedeemHTLCAction.
+	Secret []byte
+	// Only used in the case of RefundHTLCAction.
+	InsantRefundSACPTxBytes []byte
+}
+
 var (
 	// ErrSACPInvalidInputsLen is returned when the signed inputs are less than the available inputs
 	// Occurs in the case of instant refunds
@@ -68,6 +89,9 @@ type HTLCWallet interface {
 	// Status returns the transaction if submitted and bool indicating whether the transaction
 	// is submitted or not
 	Status(ctx context.Context, id string) (Transaction, bool, error)
+
+	// Execute executes passed HTLC actions
+	Execute(ctx context.Context, htlcActions []RawHTLCAction) (string, error)
 }
 
 type htlcWallet struct {
@@ -165,15 +189,14 @@ func (hw *htlcWallet) Initiate(ctx context.Context, htlc *HTLC, amount int64) (s
 	}, nil, nil)
 }
 
-// Redeem redeems the HTLC with the secret
-func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error) {
+func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte) (SpendRequest, error) {
 	if !isSecretValid(secret, htlc) {
-		return "", ErrInvalidSecret
+		return SpendRequest{}, ErrInvalidSecret
 	}
 
 	redeemTapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRedeem)
 	if err != nil {
-		return "", err
+		return SpendRequest{}, err
 	}
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
@@ -184,30 +207,42 @@ func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (st
 
 	scriptAddr, err := hw.Address(htlc)
 	if err != nil {
+		return SpendRequest{}, err
+	}
+
+	return SpendRequest{
+		Witness:       witness,
+		Leaf:          redeemTapLeaf,
+		ScriptAddress: scriptAddr,
+		HashType:      txscript.SigHashAll,
+	}, nil
+}
+
+// Redeem redeems the HTLC with the secret
+func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error) {
+	redeemSpendRequest, err := hw.redeem(htlc, secret)
+	if err != nil {
 		return "", err
 	}
 
 	return hw.wallet.Send(ctx, nil, []SpendRequest{
-		{
-			Witness:       witness,
-			Leaf:          redeemTapLeaf,
-			ScriptAddress: scriptAddr,
-			HashType:      txscript.SigHashAll,
-		},
+		redeemSpendRequest,
 	}, nil)
 }
 
 // instantRefund refunds given the counterparty signed SACP tx
-func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP []byte) (string, error) {
-
+func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte) ([]byte, error) {
+	if instantRefundSACPTx == nil {
+		return nil, fmt.Errorf("instantRefundSACPTx is nil")
+	}
 	scriptAddr, err := hw.Address(htlc)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	utxos, err := hw.indexer.GetUTXOs(ctx, scriptAddr)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	utxoValue := int64(0)
 	for _, utxo := range utxos {
@@ -215,11 +250,11 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 	}
 	instandRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	tx, err := validateInstantRefundSACP(refundSACP, utxos, hw.wallet.Address(), cbBytes, instandRefundLeaf)
+	tx, err := validateInstantRefundSACP(instantRefundSACPTx, utxos, hw.wallet.Address(), cbBytes, instandRefundLeaf)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	instantRefundWitness := [][]byte{
@@ -235,7 +270,7 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		// 0th index is the signature of this wallet
 		witnessWithSig, err := hw.wallet.SignSACPTx(tx, i, utxoValue, instandRefundLeaf, scriptAddr, instantRefundWitness)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		// Format the witness to include the signature of the initiator at the 1st index of the witness
@@ -244,43 +279,81 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, refundSACP 
 		tx.TxIn[i].Witness[1] = witnessWithSig[0]
 	}
 
-	var txBytes []byte
-	if txBytes, err = GetTxRawBytes(tx); err != nil {
-		return "", err
-	}
-
-	// submit an SACP tx
-	return hw.wallet.Send(ctx, nil, nil, [][]byte{txBytes})
-
+	return GetTxRawBytes(tx)
 }
 
-func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (string, error) {
-	if sigTx != nil {
-		return hw.instantRefund(ctx, htlc, sigTx)
+func (hw *htlcWallet) send(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
+	return hw.wallet.Send(ctx, sends, spends, sacps)
+}
+
+func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) (string, error) {
+
+	// aggregate all sends
+	var sends []SendRequest
+	var spends []SpendRequest
+	var sacps [][]byte
+
+	for _, htlcAction := range htlcActions {
+		switch htlcAction.Action {
+		case InitiateHTLCAction:
+			addr, err := hw.Address(&htlcAction.HTLC)
+			if err != nil {
+				return "", err
+			}
+			sends = append(sends, SendRequest{
+				To:     addr,
+				Amount: htlcAction.Amount,
+			})
+		case RedeemHTLCAction:
+			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret)
+			if err != nil {
+				return "", err
+			}
+			spends = append(spends, redeemSpendRequest)
+		case RefundHTLCAction:
+			refundSpendRequest, err := hw.refund(&htlcAction.HTLC)
+			if err != nil {
+				return "", err
+			}
+			spends = append(spends, refundSpendRequest)
+		case InstantRefundHTLCAction:
+			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.InsantRefundSACPTxBytes)
+			if err != nil {
+				fmt.Println("dcfgjvhbkjnkmjhkgjfdxfcgvhbjnkm")
+				return "", err
+			}
+			sacps = append(sacps, refundSACP)
+		}
+
 	}
+	fmt.Println("sacps", len(sacps))
+	return hw.send(ctx, sends, spends, sacps)
+}
+
+func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
 
 	scriptAddr, err := hw.Address(htlc)
 	if err != nil {
-		return "", err
+		return SpendRequest{}, err
 	}
 
 	currentTip, err := hw.indexer.GetTipBlockHeight(context.Background())
 	if err != nil {
-		return "", err
+		return SpendRequest{}, err
 	}
 
 	utxos, err := hw.indexer.GetUTXOs(context.Background(), scriptAddr)
 	if err != nil {
-		return "", err
+		return SpendRequest{}, err
 	}
 
 	canRefund, needMoreBlocks := canRefund(utxos, htlc, currentTip)
 	if !canRefund {
-		return "", ErrHTLCNeedMoreBlocks(needMoreBlocks)
+		return SpendRequest{}, ErrHTLCNeedMoreBlocks(needMoreBlocks)
 	}
 	tapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRefund)
 	if err != nil {
-		return "", err
+		return SpendRequest{}, err
 	}
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
@@ -288,14 +361,31 @@ func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (str
 		cbBytes,
 	}
 
+	return SpendRequest{
+		Witness:       witness,
+		Leaf:          tapLeaf,
+		ScriptAddress: scriptAddr,
+		HashType:      txscript.SigHashAll,
+		Sequence:      htlc.LockTime,
+	}, nil
+}
+
+func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (string, error) {
+	if sigTx != nil {
+		sacp, err := hw.instantRefund(ctx, htlc, sigTx)
+		if err != nil {
+			return "", err
+		}
+		return hw.send(ctx, nil, nil, [][]byte{sacp})
+	}
+
+	refundSpendRequest, err := hw.refund(htlc)
+	if err != nil {
+		return "", err
+	}
+
 	return hw.wallet.Send(ctx, nil, []SpendRequest{
-		{
-			Witness:       witness,
-			Leaf:          tapLeaf,
-			ScriptAddress: scriptAddr,
-			HashType:      txscript.SigHashAll,
-			Sequence:      htlc.LockTime,
-		},
+		refundSpendRequest,
 	}, nil)
 }
 
