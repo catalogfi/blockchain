@@ -69,7 +69,7 @@ type HTLC struct {
 	RedeemerPubkey []byte
 	SecretHash     []byte
 	// Locktime in blocks
-	LockTime uint32
+	Timelock uint32
 }
 
 type HTLCWallet interface {
@@ -326,7 +326,6 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 		}
 
 	}
-	fmt.Println("sacps", len(sacps))
 	return hw.send(ctx, sends, spends, sacps)
 }
 
@@ -366,7 +365,7 @@ func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
 		Leaf:          tapLeaf,
 		ScriptAddress: scriptAddr,
 		HashType:      txscript.SigHashAll,
-		Sequence:      htlc.LockTime,
+		Sequence:      htlc.Timelock,
 	}, nil
 }
 
@@ -451,7 +450,7 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcuti
 func canRefund(utxos []UTXO, htlc *HTLC, currentTip uint64) (bool, uint64) {
 	for _, utxo := range utxos {
 		needMoreBlocks := uint64(0)
-		timelock := uint64(htlc.LockTime)
+		timelock := uint64(htlc.Timelock)
 
 		// check if utxo has been expired
 		if utxo.Status.Confirmed && *utxo.Status.BlockHeight+timelock-1 > currentTip {
@@ -477,7 +476,7 @@ func htlcLeaves(htlc *HTLC) (*htlcTapLeaves, error) {
 	if err != nil {
 		return &htlcTapLeaves{}, err
 	}
-	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.LockTime)
+	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.Timelock)
 	if err != nil {
 		return &htlcTapLeaves{}, err
 	}

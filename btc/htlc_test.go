@@ -126,7 +126,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(txid).NotTo(BeEmpty())
 
 		By("Mine expiry no of blocks")
-		err = localnet.MineBitcoinBlocks(int(aliceHTLC.LockTime), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		By("Refund Alice HTLC")
@@ -267,7 +267,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		_, err = aliceHTLCWallet.Initiate(ctx, aliceHTLC, initiateAmount)
 		Expect(err).To(BeNil())
 
-		err = localnet.MineBitcoinBlocks(int(aliceHTLC.LockTime), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, nil)
@@ -405,7 +405,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		By("Refund HTLCs")
 
 		// Mine expiry no of blocks
-		err = localnet.MineBitcoinBlocks(int(aliceHTLC1.LockTime), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC1.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		aliceHTLC3, _, err := generateHTLC(alicePrivKey, bobPrivKey)
@@ -520,7 +520,7 @@ func turnRolesInHTLC(htlc *btc.HTLC) *btc.HTLC {
 		InitiatorPubkey: htlc.RedeemerPubkey,
 		RedeemerPubkey:  htlc.InitiatorPubkey,
 		SecretHash:      htlc.SecretHash,
-		LockTime:        htlc.LockTime,
+		Timelock:        htlc.Timelock,
 	}
 }
 
@@ -535,7 +535,7 @@ func generateHTLC(alicePrivKey, bobPrivKey *btcec.PrivateKey) (*btc.HTLC, []byte
 		InitiatorPubkey: getPubkey(alicePrivKey),
 		RedeemerPubkey:  getPubkey(bobPrivKey),
 		SecretHash:      secretHash[:],
-		LockTime:        10,
+		Timelock:        10,
 	}
 	return aliceHTLC, secret, nil
 }
