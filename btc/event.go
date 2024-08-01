@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/catalogfi/blockchain"
 )
 
@@ -110,23 +109,6 @@ func (client *htlcClient) HTLCEvents(ctx context.Context, asset blockchain.Asset
 	}
 
 	return events, nil
-}
-
-func parseAddress(addr string) (btcutil.Address, error) {
-	chainParams := chaincfg.MainNetParams
-	address, err := btcutil.DecodeAddress(addr, &chainParams)
-	if err == nil {
-		return address, nil
-	}
-	address, err = btcutil.DecodeAddress(addr, &chaincfg.TestNet3Params)
-	if err == nil {
-		return address, nil
-	}
-	address, err = btcutil.DecodeAddress(addr, &chaincfg.RegressionNetParams)
-	if err == nil {
-		return address, nil
-	}
-	return nil, fmt.Errorf("error decoding address %s: %w", addr, err)
 }
 
 func handleWitnessScriptHashEvents(events *[]HTLCEvent, asset blockchain.Asset, assestAddr btcutil.Address, blockHeight uint64, txID string, witness []string, script []byte) {

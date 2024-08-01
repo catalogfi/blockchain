@@ -144,7 +144,7 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(err).To(BeNil())
 			aliceHTLCAsset := btc.NewBTCAsset(aliceHTLCAddress, blockchain.UtxoChain{})
 
-			err = localnet.MineBitcoinBlocks(int(aliceHTLC.LockTime), indexer)
+			err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 			Expect(err).To(BeNil())
 
 			txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, nil)
