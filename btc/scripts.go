@@ -183,6 +183,28 @@ func IsRefundLeaf(script []byte) bool {
 	return tokenizer.Done()
 }
 
+func IsMultiSigLeaf(script []byte) bool {
+	validMultiSig := []byte{
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIGADD,
+		txscript.OP_2,
+		txscript.OP_NUMEQUAL,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	for _, opCode := range validMultiSig {
+		if !tokenizer.Next() {
+			return false
+		}
+		if tokenizer.Opcode() != opCode {
+			return false
+		}
+	}
+	return tokenizer.Done()
+}
+
 // IsHtlc returns if the given script is a HTLC script.
 func IsHtlc(script []byte) bool {
 	// 0xff is used to represent a data of variable length

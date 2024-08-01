@@ -11,6 +11,23 @@ import (
 	"github.com/catalogfi/blockchain"
 )
 
+type BTCAsset struct {
+	address btcutil.Address
+	chain   blockchain.Chain
+}
+
+func NewBTCAsset(address btcutil.Address, chain blockchain.Chain) BTCAsset {
+	return BTCAsset{address: address, chain: chain}
+}
+
+func (a BTCAsset) String() string {
+	return a.address.EncodeAddress()
+}
+
+func (a BTCAsset) Chain() blockchain.Chain {
+	return a.chain
+}
+
 type HTLCClient interface {
 	HTLCEvents(ctx context.Context, asset blockchain.Asset, fromBlock, toBlock uint64) ([]HTLCEvent, error)
 }
@@ -46,6 +63,10 @@ func (client *htlcClient) HTLCEvents(ctx context.Context, asset blockchain.Asset
 	events := make([]HTLCEvent, 0)
 
 	for _, tx := range txs {
+		if !tx.Status.Confirmed {
+			continue
+		}
+
 		blockHeight := *tx.Status.BlockHeight
 		if blockHeight < fromBlock || blockHeight > toBlock {
 			continue
@@ -144,7 +165,7 @@ func handleTaprootEvents(events *[]HTLCEvent, asset blockchain.Asset, assestAddr
 			Secret:              []byte(witness[1]),
 			RedeemerPubkey:      string(script),
 		})
-	} else if IsRefundLeaf(script) {
+	} else if IsRefundLeaf(script) || IsMultiSigLeaf(script) {
 		*events = append(*events, HTLCRefunded{
 			ID:                  addressStr,
 			RefundTxBlockNumber: blockHeight,
