@@ -29,7 +29,7 @@ type HTLCWallet interface {
 type HTLCClient interface {
 	Client
 
-	HTLCEvents(ctx context.Context, asset blockchain.Asset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error)
+	HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error)
 }
 
 func NewHTLCClient(config Config) (HTLCClient, error) {
@@ -144,10 +144,10 @@ type HTLCEvent interface {
 	Equal(e HTLCEvent) bool
 	BlockNumber() uint64
 	TxHash() common.Hash
-	BlockchainAsset() blockchain.Asset
+	BlockchainAsset() blockchain.EVMAsset
 }
 
-func (client *client) HTLCEvents(ctx context.Context, asset blockchain.Asset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error) {
+func (client *client) HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error) {
 	parsed, err := gardenhtlc.GardenHTLCMetaData.GetAbi()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get abi: %v", err)
@@ -161,14 +161,14 @@ func (client *client) HTLCEvents(ctx context.Context, asset blockchain.Asset, fr
 	logs, err := ethClient.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: fromBlock,
 		ToBlock:   toBlock,
-		Addresses: []common.Address{common.HexToAddress(asset.String())},
+		Addresses: []common.Address{asset.Swapper()},
 		Topics:    [][]common.Hash{{parsed.Events["Initiated"].ID, parsed.Events["Redeemed"].ID, parsed.Events["Refunded"].ID}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter logs: %v", err)
 	}
 
-	htlc, err := gardenhtlc.NewGardenHTLCFilterer(common.HexToAddress(asset.String()), ethClient)
+	htlc, err := gardenhtlc.NewGardenHTLCFilterer(asset.Swapper(), ethClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build filterer: %v", err)
 	}
@@ -219,7 +219,7 @@ func (client *client) HTLCEvents(ctx context.Context, asset blockchain.Asset, fr
 }
 
 type HTLCInitiated struct {
-	Asset                 blockchain.Asset
+	Asset                 blockchain.EVMAsset
 	ID                    [32]byte
 	SecretHash            [32]byte
 	InitiateTxHash        common.Hash
@@ -235,7 +235,7 @@ func (e HTLCInitiated) BlockNumber() uint64 {
 	return e.InitiateTxBlockNumber
 }
 
-func (e HTLCInitiated) BlockchainAsset() blockchain.Asset {
+func (e HTLCInitiated) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
@@ -256,7 +256,7 @@ func (e HTLCInitiated) Equal(o HTLCEvent) bool {
 }
 
 type HTLCRedeemed struct {
-	Asset               blockchain.Asset
+	Asset               blockchain.EVMAsset
 	ID                  [32]byte
 	SecretHash          [32]byte
 	Secret              []byte
@@ -272,7 +272,7 @@ func (e HTLCRedeemed) BlockNumber() uint64 {
 	return e.RedeemTxBlockNumber
 }
 
-func (e HTLCRedeemed) BlockchainAsset() blockchain.Asset {
+func (e HTLCRedeemed) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
@@ -292,7 +292,7 @@ func (event HTLCRedeemed) Equal(o HTLCEvent) bool {
 }
 
 type HTLCRefunded struct {
-	Asset               blockchain.Asset
+	Asset               blockchain.EVMAsset
 	ID                  [32]byte
 	RefundTxHash        common.Hash
 	RefundTxBlockNumber uint64
@@ -306,7 +306,7 @@ func (e HTLCRefunded) BlockNumber() uint64 {
 	return e.RefundTxBlockNumber
 }
 
-func (e HTLCRefunded) BlockchainAsset() blockchain.Asset {
+func (e HTLCRefunded) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
