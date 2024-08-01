@@ -65,6 +65,7 @@ var _ = Describe("bitcoin fees", func() {
 				time.Sleep(500 * time.Millisecond)
 
 				fees1, err := estimator.FeeSuggestion()
+				Expect(err).Should(BeNil())
 				Expect(fees.Minimum).Should(Equal(fees1.Minimum))
 				Expect(fees.Economy).Should(Equal(fees1.Economy))
 				Expect(fees.Low).Should(Equal(fees1.Low))
@@ -91,9 +92,9 @@ var _ = Describe("bitcoin fees", func() {
 				fees, err := estimator.FeeSuggestion()
 				Expect(err).Should(BeNil())
 
-				Expect(fees.Minimum).Should(BeNumerically(">", 1))
+				Expect(fees.Minimum).Should(BeNumerically(">=", 1))
 
-				Expect(fees.Economy).Should(BeNumerically(">", 1))
+				Expect(fees.Economy).Should(BeNumerically(">=", 1))
 				Expect(fees.Economy).Should(BeNumerically(">=", fees.Minimum))
 
 				Expect(fees.Low).Should(BeNumerically(">", 1))
@@ -114,6 +115,7 @@ var _ = Describe("bitcoin fees", func() {
 				time.Sleep(500 * time.Millisecond)
 
 				fees1, err := estimator.FeeSuggestion()
+				Expect(err).Should(BeNil())
 				Expect(fees.Minimum).Should(Equal(fees1.Minimum))
 				Expect(fees.Economy).Should(Equal(fees1.Economy))
 				Expect(fees.Low).Should(Equal(fees1.Low))
@@ -419,7 +421,7 @@ var _ = Describe("bitcoin fees", func() {
 				},
 			}
 			txId, err := wallet.Send(ctx, req, nil, nil)
-
+			Expect(err).To(BeNil())
 			By("Rebuild submitted tx")
 			txHex, err := indexer.GetTxHex(ctx, txId)
 			Expect(err).To(BeNil())

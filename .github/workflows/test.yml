@@ -1,22 +1,24 @@
 name: tests
 on: [push]
 jobs:
-    testing:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Check out code
-              uses: actions/checkout@v4
-            - name: Setup golang
-              uses : actions/setup-go@v4
-              with :
-                  go-version : '>=1.19.0'
-            - name: Install merry
-              run: curl https://get.merry.dev | bash
-            - name : Start merry
-              run: merry go --bare --headless
-            - name: generate test generate coverage
-              run: go test $(go list ./... | grep -v /localnet | grep -v /evm/bindings) -coverprofile=./cover.out
-              env:
-                  BTC_REGNET_USERNAME: "admin1"
-                  BTC_REGNET_PASSWORD: "123"
-                  BTC_REGNET_INDEXER: "http://0.0.0.0:30000"
+  testing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Setup golang
+        uses: actions/setup-go@v4
+        with:
+          go-version: ">=1.19.0"
+      - name: Install merry
+        run: curl https://get.merry.dev | bash
+      - name: Start merry
+        run: merry go --bare --headless
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@v2.19.0
+      - name: generate test generate coverage
+        run: go test $(go list ./... | grep -v /localnet | grep -v /evm/bindings) -coverprofile=./cover.out && cd btc && ginkgo --focus Wallets  -- -mode=batcher_rbf && ginkgo --focus Wallets  -- -mode=batcher_cpfp
+        env:
+          BTC_REGNET_USERNAME: "admin1"
+          BTC_REGNET_PASSWORD: "123"
+          BTC_REGNET_INDEXER: "http://0.0.0.0:30000"

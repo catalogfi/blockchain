@@ -45,6 +45,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 				Amount: 50000000,
 			},
 		}, nil, nil)
+		Expect(err).To(BeNil())
 	})
 
 	It("should be able to generate HTLC address", func(ctx context.Context) {
@@ -54,7 +55,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
-
+		Expect(err).To(BeNil())
 		htlcAddr, err := aliceHTLCWallet.Address(aliceHTLC)
 		Expect(err).To(BeNil())
 		Expect(htlcAddr).NotTo(BeNil())
@@ -64,6 +65,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
 		txid, err := aliceHTLCWallet.Initiate(ctx, aliceHTLC, initiateAmount)
 		Expect(err).To(BeNil())
 		Expect(txid).NotTo(BeEmpty())
@@ -124,7 +126,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(txid).NotTo(BeEmpty())
 
 		By("Mine expiry no of blocks")
-		err = localnet.MineBitcoinBlocks(int(aliceHTLC.LockTime), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		By("Refund Alice HTLC")
@@ -213,7 +215,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		// Let's create a bobSimpleWallet with lower fees
 		feeEstimater := btc.NewFixFeeEstimator(1)
 		bobSimpleWallet, err := btc.NewSimpleWallet(bobPrivKey, &chainParams, indexer, feeEstimater, btc.LowFee)
-
+		Expect(err).To(BeNil())
 		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 
@@ -265,7 +267,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		_, err = aliceHTLCWallet.Initiate(ctx, aliceHTLC, initiateAmount)
 		Expect(err).To(BeNil())
 
-		err = localnet.MineBitcoinBlocks(int(aliceHTLC.LockTime), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, nil)
@@ -277,6 +279,233 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
 
+	It("should be able to initiate and redeem multiple HTLCs", func(ctx context.Context) {
+
+		aliceHTLC1, secret1, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLC2, secret2, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		By("Initiate HTLCs")
+
+		txID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC2,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		bobHTLC1 := turnRolesInHTLC(aliceHTLC1)
+		bobHTLC2 := turnRolesInHTLC(aliceHTLC2)
+
+		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		txID, err = bobHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *bobHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *bobHTLC2,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		By("Redeem HTLCs")
+
+		aliceRedeemTxID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.RedeemHTLCAction,
+				HTLC:   *bobHTLC1,
+				Secret: secret1,
+			},
+			{
+				Action: btc.RedeemHTLCAction,
+				HTLC:   *bobHTLC2,
+				Secret: secret2,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(aliceRedeemTxID).NotTo(BeEmpty())
+
+		bobRedeemTxID, err := bobHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.RedeemHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Secret: secret1,
+			},
+			{
+				Action: btc.RedeemHTLCAction,
+				HTLC:   *aliceHTLC2,
+				Secret: secret2,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(bobRedeemTxID).NotTo(BeEmpty())
+
+		By("Verify the status")
+
+		tx, _, err := aliceHTLCWallet.Status(ctx, aliceRedeemTxID)
+		Expect(err).To(BeNil())
+		Expect(tx.VOUTs).Should(HaveLen(1))
+		Expect(tx.VOUTs[0].Value).To(Equal(2*int(initiateAmount) - int(tx.Fee)))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
+
+		tx, _, err = bobHTLCWallet.Status(ctx, bobRedeemTxID)
+		Expect(err).To(BeNil())
+		Expect(tx.VOUTs).Should(HaveLen(1))
+		Expect(tx.VOUTs[0].Value).To(Equal(2*int(initiateAmount) - int(tx.Fee)))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(bobSimpleWallet.Address().EncodeAddress()))
+	})
+
+	It("should be able to initiate and refund multiple HTLCs", func(ctx context.Context) {
+		aliceHTLC1, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLC2, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		By("Initiate HTLCs")
+
+		txID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC2,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		By("Refund HTLCs")
+
+		// Mine expiry no of blocks
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC1.Timelock), indexer)
+		Expect(err).To(BeNil())
+
+		aliceHTLC3, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		// Refund and also initiate another HTLC
+		aliceRefundTxID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.RefundHTLCAction,
+				HTLC:   *aliceHTLC1,
+			},
+			{
+				Action: btc.RefundHTLCAction,
+				HTLC:   *aliceHTLC2,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC3,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(aliceRefundTxID).NotTo(BeEmpty())
+
+		By("Verify the status")
+		tx, _, err := aliceHTLCWallet.Status(ctx, aliceRefundTxID)
+		Expect(err).To(BeNil())
+
+		htlc3Address, err := aliceHTLCWallet.Address(aliceHTLC3)
+		Expect(err).To(BeNil())
+
+		Expect(tx.VOUTs).Should(HaveLen(2))
+		Expect(tx.VOUTs[0].Value).To(Equal(int(initiateAmount)))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(htlc3Address.EncodeAddress()))
+		Expect(tx.VOUTs[1].Value).To(Equal(int(initiateAmount - tx.Fee)))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
+	})
+	It("should be able to initiate and refund multiple HTLCs instantly", func(ctx context.Context) {
+		aliceHTLC1, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLC2, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		By("Initiate HTLCs")
+
+		txID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC2,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		sacpTx1, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC1, aliceSimpleWallet.Address())
+		Expect(err).To(BeNil())
+
+		sacpTx2, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC2, aliceSimpleWallet.Address())
+		Expect(err).To(BeNil())
+
+		By("Instant refund HTLCs")
+
+		txID, err = aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action:                  btc.InstantRefundHTLCAction,
+				HTLC:                    *aliceHTLC1,
+				InsantRefundSACPTxBytes: sacpTx1,
+			},
+			{
+				Action:                  btc.InstantRefundHTLCAction,
+				HTLC:                    *aliceHTLC2,
+				InsantRefundSACPTxBytes: sacpTx2,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		By("Verify the status")
+		tx, _, err := aliceHTLCWallet.Status(ctx, txID)
+		Expect(err).To(BeNil())
+
+		Expect(tx.VOUTs).Should(HaveLen(2))
+		Expect(tx.VOUTs[0].Value).To(Equal(int(initiateAmount) - int(tx.Fee)/2))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[1].Value).To(Equal(int(initiateAmount) - int(tx.Fee)/2))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
+	})
 })
 
 // ------------------------------Helper functions--------------------------------
@@ -291,7 +520,7 @@ func turnRolesInHTLC(htlc *btc.HTLC) *btc.HTLC {
 		InitiatorPubkey: htlc.RedeemerPubkey,
 		RedeemerPubkey:  htlc.InitiatorPubkey,
 		SecretHash:      htlc.SecretHash,
-		LockTime:        htlc.LockTime,
+		Timelock:        htlc.Timelock,
 	}
 }
 
@@ -306,7 +535,7 @@ func generateHTLC(alicePrivKey, bobPrivKey *btcec.PrivateKey) (*btc.HTLC, []byte
 		InitiatorPubkey: getPubkey(alicePrivKey),
 		RedeemerPubkey:  getPubkey(bobPrivKey),
 		SecretHash:      secretHash[:],
-		LockTime:        10,
+		Timelock:        10,
 	}
 	return aliceHTLC, secret, nil
 }
