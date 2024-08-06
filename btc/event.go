@@ -53,7 +53,10 @@ func (client *htlcClient) HTLCEvents(ctx context.Context, asset blockchain.Asset
 		return nil, err
 	}
 
-	txs, err := client.indexer.GetAddressTxs(ctx, assestAddr, "")
+	childCtx, cancel := context.WithTimeout(ctx, 5)
+	defer cancel()
+
+	txs, err := client.indexer.GetAddressTxs(childCtx, assestAddr, "")
 	if err != nil {
 		return nil, err
 	}
@@ -74,11 +77,11 @@ func (client *htlcClient) HTLCEvents(ctx context.Context, asset blockchain.Asset
 		for _, VOUT := range tx.VOUTs {
 			if VOUT.ScriptPubKeyAddress == addressStr {
 				events = append(events, HTLCInitiated{
-					ID:                    addressStr,
-					InitiateTxBlockNumber: blockHeight,
-					InitiateTxHash:        tx.TxID,
-					Asset:                 asset,
-					Amount:                uint64(VOUT.Value),
+					id:                    addressStr,
+					initiateTxBlockNumber: blockHeight,
+					initiateTxHash:        tx.TxID,
+					asset:                 asset,
+					amount:                uint64(VOUT.Value),
 				})
 			}
 		}
@@ -117,20 +120,20 @@ func handleWitnessScriptHashEvents(events *[]HTLCEvent, asset blockchain.Asset, 
 	if IsHtlc(script) {
 		if branch == "01" && len(witness) == 5 {
 			*events = append(*events, HTLCRedeemed{
-				ID:                  addressStr,
-				RedeemTxBlockNumber: blockHeight,
-				RedeemTxHash:        txID,
-				Asset:               asset,
-				Secret:              []byte(witness[2]),
-				RedeemerPubkey:      witness[1],
+				id:                  addressStr,
+				redeemTxBlockNumber: blockHeight,
+				redeemTxHash:        txID,
+				asset:               asset,
+				secret:              []byte(witness[2]),
+				redeemerPubkey:      witness[1],
 			})
 		} else if branch == "" && len(witness) == 4 {
 			*events = append(*events, HTLCRefunded{
-				ID:                  addressStr,
-				RefundTxBlockNumber: blockHeight,
-				RefundTxHash:        txID,
-				Asset:               asset,
-				RefunderPubkey:      witness[1],
+				id:                  addressStr,
+				refundTxBlockNumber: blockHeight,
+				refundTxHash:        txID,
+				asset:               asset,
+				refunderPubkey:      witness[1],
 			})
 		}
 	}
@@ -138,23 +141,42 @@ func handleWitnessScriptHashEvents(events *[]HTLCEvent, asset blockchain.Asset, 
 
 func handleTaprootEvents(events *[]HTLCEvent, asset blockchain.Asset, assestAddr btcutil.Address, blockHeight uint64, txID string, witness []string, script []byte) {
 	addressStr := assestAddr.EncodeAddress()
-	if IsRedeemLeaf(script) {
+
+	ok, redeemerPubKey := IsRedeemLeaf(script)
+	if ok {
 		*events = append(*events, HTLCRedeemed{
-			ID:                  addressStr,
-			RedeemTxBlockNumber: blockHeight,
-			RedeemTxHash:        txID,
-			Asset:               asset,
-			Secret:              []byte(witness[1]),
-			RedeemerPubkey:      string(script),
+			id:                  addressStr,
+			redeemTxBlockNumber: blockHeight,
+			redeemTxHash:        txID,
+			asset:               asset,
+			secret:              []byte(witness[1]),
+			redeemerPubkey:      redeemerPubKey,
 		})
-	} else if IsRefundLeaf(script) || IsMultiSigLeaf(script) {
+		return
+	}
+
+	ok, refunderPubKey := IsRefundLeaf(script)
+	if ok {
 		*events = append(*events, HTLCRefunded{
-			ID:                  addressStr,
-			RefundTxBlockNumber: blockHeight,
-			RefundTxHash:        txID,
-			Asset:               asset,
-			RefunderPubkey:      string(script),
+			id:                  addressStr,
+			refundTxBlockNumber: blockHeight,
+			refundTxHash:        txID,
+			asset:               asset,
+			refunderPubkey:      refunderPubKey,
 		})
+		return
+	}
+
+	ok, refunderPubKey = IsMultiSigLeaf(script)
+	if ok {
+		*events = append(*events, HTLCRefunded{
+			id:                  addressStr,
+			refundTxBlockNumber: blockHeight,
+			refundTxHash:        txID,
+			asset:               asset,
+			refunderPubkey:      refunderPubKey,
+		})
+		return
 	}
 }
 
@@ -167,27 +189,27 @@ type HTLCEvent interface {
 }
 
 type HTLCInitiated struct {
-	ID                    string
-	InitiateTxBlockNumber uint64
-	InitiateTxHash        string
-	Asset                 blockchain.Asset
-	Amount                uint64
+	id                    string
+	initiateTxBlockNumber uint64
+	initiateTxHash        string
+	asset                 blockchain.Asset
+	amount                uint64
 }
 
 func (e HTLCInitiated) OrderID() string {
-	return e.ID
+	return e.id
 }
 
 func (e HTLCInitiated) BlockNumber() uint64 {
-	return e.InitiateTxBlockNumber
+	return e.initiateTxBlockNumber
 }
 
 func (e HTLCInitiated) TxHash() string {
-	return e.InitiateTxHash
+	return e.initiateTxHash
 }
 
 func (e HTLCInitiated) BlockchainAsset() blockchain.Asset {
-	return e.Asset
+	return e.asset
 }
 
 func (e HTLCInitiated) Equal(o HTLCEvent) bool {
@@ -196,35 +218,39 @@ func (e HTLCInitiated) Equal(o HTLCEvent) bool {
 		return ok
 	}
 
-	return e.ID == other.ID &&
-		e.Amount == other.Amount &&
-		e.InitiateTxHash == other.InitiateTxHash &&
-		e.InitiateTxBlockNumber == other.InitiateTxBlockNumber
+	return e.id == other.id &&
+		e.amount == other.amount &&
+		e.initiateTxHash == other.initiateTxHash &&
+		e.initiateTxBlockNumber == other.initiateTxBlockNumber
+}
+
+func (e HTLCInitiated) Amount() uint64 {
+	return e.amount
 }
 
 type HTLCRedeemed struct {
-	ID                  string
-	RedeemTxBlockNumber uint64
-	RedeemTxHash        string
-	Asset               blockchain.Asset
-	Secret              []byte
-	RedeemerPubkey      string
+	id                  string
+	redeemTxBlockNumber uint64
+	redeemTxHash        string
+	asset               blockchain.Asset
+	secret              []byte
+	redeemerPubkey      string
 }
 
 func (e HTLCRedeemed) OrderID() string {
-	return e.ID
+	return e.id
 }
 
 func (e HTLCRedeemed) BlockNumber() uint64 {
-	return e.RedeemTxBlockNumber
+	return e.redeemTxBlockNumber
 }
 
 func (e HTLCRedeemed) TxHash() string {
-	return e.RedeemTxHash
+	return e.redeemTxHash
 }
 
 func (e HTLCRedeemed) BlockchainAsset() blockchain.Asset {
-	return e.Asset
+	return e.asset
 }
 
 func (e HTLCRedeemed) Equal(o HTLCEvent) bool {
@@ -233,34 +259,42 @@ func (e HTLCRedeemed) Equal(o HTLCEvent) bool {
 		return ok
 	}
 
-	return e.ID == other.ID &&
-		bytes.Equal(e.Secret[:], other.Secret[:]) &&
-		e.RedeemTxHash == other.RedeemTxHash &&
-		e.RedeemTxBlockNumber == other.RedeemTxBlockNumber
+	return e.id == other.id &&
+		bytes.Equal(e.secret[:], other.secret[:]) &&
+		e.redeemTxHash == other.redeemTxHash &&
+		e.redeemTxBlockNumber == other.redeemTxBlockNumber
+}
+
+func (e HTLCRedeemed) Secret() []byte {
+	return e.secret
+}
+
+func (e HTLCRedeemed) RedeemerPubkey() string {
+	return e.redeemerPubkey
 }
 
 type HTLCRefunded struct {
-	ID                  string
-	RefundTxBlockNumber uint64
-	RefundTxHash        string
-	Asset               blockchain.Asset
-	RefunderPubkey      string
+	id                  string
+	refundTxBlockNumber uint64
+	refundTxHash        string
+	asset               blockchain.Asset
+	refunderPubkey      string
 }
 
 func (e HTLCRefunded) OrderID() string {
-	return e.ID
+	return e.id
 }
 
 func (e HTLCRefunded) BlockNumber() uint64 {
-	return e.RefundTxBlockNumber
+	return e.refundTxBlockNumber
 }
 
 func (e HTLCRefunded) TxHash() string {
-	return e.RefundTxHash
+	return e.refundTxHash
 }
 
 func (e HTLCRefunded) BlockchainAsset() blockchain.Asset {
-	return e.Asset
+	return e.asset
 }
 
 func (e HTLCRefunded) Equal(o HTLCEvent) bool {
@@ -269,7 +303,11 @@ func (e HTLCRefunded) Equal(o HTLCEvent) bool {
 		return ok
 	}
 
-	return e.ID == other.ID &&
-		e.RefundTxHash == other.RefundTxHash &&
-		e.RefundTxBlockNumber == other.RefundTxBlockNumber
+	return e.id == other.id &&
+		e.refundTxHash == other.refundTxHash &&
+		e.refundTxBlockNumber == other.refundTxBlockNumber
+}
+
+func (e HTLCRefunded) RefunderPubkey() string {
+	return e.refunderPubkey
 }

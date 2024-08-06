@@ -2,6 +2,7 @@ package btc_test
 
 import (
 	"context"
+	"encoding/hex"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -73,6 +74,11 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(aliceHTLCEvent).To(HaveLen(1))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txID))
 			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
+
+			switch e := aliceHTLCEvent[0].(type) {
+			case btc.HTLCInitiated:
+				Expect(e.Amount()).To(Equal(uint64(1000000)))
+			}
 		})
 	})
 
@@ -127,6 +133,12 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(bobHTLCEvent[0].TxHash()).To(Equal(txid))
 			Expect(bobHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 
+			switch e := bobHTLCEvent[0].(type) {
+			case btc.HTLCRedeemed:
+				Expect(string(e.Secret())).To(Equal(hex.EncodeToString(secret)))
+				Expect(e.RedeemerPubkey()).To(Equal(hex.EncodeToString(alicePrivKey.PubKey().SerializeCompressed())[2:]))
+			}
+
 			txid, err = bobHTLCWallet.Redeem(ctx, aliceHTLC, secret)
 			Expect(err).To(BeNil())
 			Expect(txid).ToNot(BeEmpty())
@@ -145,6 +157,12 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
 			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
+
+			switch e := aliceHTLCEvent[0].(type) {
+			case btc.HTLCRedeemed:
+				Expect(string(e.Secret())).To(Equal(hex.EncodeToString(secret)))
+				Expect(e.RedeemerPubkey()).To(Equal(hex.EncodeToString(bobPrivKey.PubKey().SerializeCompressed())[2:]))
+			}
 		})
 	})
 
@@ -187,6 +205,11 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
 			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
+
+			switch e := aliceHTLCEvent[0].(type) {
+			case btc.HTLCRefunded:
+				Expect(e.RefunderPubkey()).To(Equal(hex.EncodeToString(alicePrivKey.PubKey().SerializeCompressed())[2:]))
+			}
 		})
 
 		It("should able to get the instant refund event", func(ctx context.Context) {
@@ -229,6 +252,11 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
 			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
+
+			switch e := aliceHTLCEvent[0].(type) {
+			case btc.HTLCRefunded:
+				Expect(e.RefunderPubkey()).To(Equal(hex.EncodeToString(alicePrivKey.PubKey().SerializeCompressed())[2:]))
+			}
 		})
 	})
 })

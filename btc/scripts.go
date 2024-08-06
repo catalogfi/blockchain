@@ -2,6 +2,7 @@ package btc
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
@@ -130,7 +131,7 @@ func isWaitTimeOpCode(opCode byte) bool {
 		(opCode >= txscript.OP_DATA_1 && opCode <= txscript.OP_DATA_3)
 }
 
-func IsRedeemLeaf(script []byte) bool {
+func IsRedeemLeaf(script []byte) (bool, string) {
 	validRedeem := []byte{
 		txscript.OP_SHA256,
 		txscript.OP_DATA_32,
@@ -140,18 +141,28 @@ func IsRedeemLeaf(script []byte) bool {
 	}
 	tokenizer := txscript.MakeScriptTokenizer(0, script)
 
+	var redeemerPubkey string
+	isSecond := false
+
 	for _, opCode := range validRedeem {
 		if !tokenizer.Next() {
-			return false
+			return false, ""
 		}
 		if tokenizer.Opcode() != opCode {
-			return false
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			if isSecond {
+				redeemerPubkey = hex.EncodeToString(tokenizer.Data())
+			}
+			isSecond = !isSecond
 		}
 	}
-	return tokenizer.Done()
+	return tokenizer.Done(), redeemerPubkey
 }
 
-func IsRefundLeaf(script []byte) bool {
+func IsRefundLeaf(script []byte) (bool, string) {
 	validRefund := []byte{
 		0xff,
 		txscript.OP_CHECKSEQUENCEVERIFY,
@@ -161,29 +172,36 @@ func IsRefundLeaf(script []byte) bool {
 	}
 	tokenizer := txscript.MakeScriptTokenizer(0, script)
 
+	var refunderPubkey string
+
 	for _, opCode := range validRefund {
 		if !tokenizer.Next() {
-			return false
+			return false, ""
 		}
 		if opCode == 0xff {
 			if !isWaitTimeOpCode(tokenizer.Opcode()) {
-				return false
+				return false, ""
 			}
 			lockTime := decodeLocktime(tokenizer.Data())
 			if lockTime > math.MaxUint16 || lockTime < 0 {
-				return false
+				return false, ""
 			}
 			continue
 		}
 
 		if tokenizer.Opcode() != opCode {
-			return false
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			refunderPubkey = hex.EncodeToString(tokenizer.Data())
 		}
 	}
-	return tokenizer.Done()
+
+	return tokenizer.Done(), refunderPubkey
 }
 
-func IsMultiSigLeaf(script []byte) bool {
+func IsMultiSigLeaf(script []byte) (bool, string) {
 	validMultiSig := []byte{
 		txscript.OP_DATA_32,
 		txscript.OP_CHECKSIG,
@@ -194,15 +212,25 @@ func IsMultiSigLeaf(script []byte) bool {
 	}
 	tokenizer := txscript.MakeScriptTokenizer(0, script)
 
+	var refunderPubkey string
+	isFirst := true
+
 	for _, opCode := range validMultiSig {
 		if !tokenizer.Next() {
-			return false
+			return false, ""
 		}
 		if tokenizer.Opcode() != opCode {
-			return false
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			if isFirst {
+				refunderPubkey = hex.EncodeToString(tokenizer.Data())
+			}
+			isFirst = !isFirst
 		}
 	}
-	return tokenizer.Done()
+	return tokenizer.Done(), refunderPubkey
 }
 
 // IsHtlc returns if the given script is a HTLC script.
