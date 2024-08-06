@@ -57,14 +57,22 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			txID, err := aliceHTLCWallet.Initiate(ctx, aliceHTLC, 1000000)
 			Expect(err).To(BeNil())
 
-			err = localnet.MineBitcoinBlocks(1, indexer)
-			Expect(err).To(BeNil())
-
 			aliceHTLCEvent, err := htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
 			Expect(err).To(BeNil())
 
 			Expect(aliceHTLCEvent).To(HaveLen(1))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txID))
+			Expect(aliceHTLCEvent[0].BlockNumber()).To(Equal(uint64(0)))
+
+			err = localnet.MineBitcoinBlocks(1, indexer)
+			Expect(err).To(BeNil())
+
+			aliceHTLCEvent, err = htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
+			Expect(err).To(BeNil())
+
+			Expect(aliceHTLCEvent).To(HaveLen(1))
+			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txID))
+			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 		})
 	})
 
@@ -104,25 +112,39 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(txid).ToNot(BeEmpty())
 
-			err = localnet.MineBitcoinBlocks(1, indexer)
-			Expect(err).To(BeNil())
-
 			bobHTLCEvent, err := htlcClient.HTLCEvents(ctx, bobHTLCAsset, 0, 0)
 			Expect(err).To(BeNil())
 			Expect(bobHTLCEvent).To(HaveLen(2))
 			Expect(bobHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(bobHTLCEvent[0].BlockNumber()).To(Equal(uint64(0)))
+
+			err = localnet.MineBitcoinBlocks(1, indexer)
+			Expect(err).To(BeNil())
+
+			bobHTLCEvent, err = htlcClient.HTLCEvents(ctx, bobHTLCAsset, 0, 0)
+			Expect(err).To(BeNil())
+			Expect(bobHTLCEvent).To(HaveLen(2))
+			Expect(bobHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(bobHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 
 			txid, err = bobHTLCWallet.Redeem(ctx, aliceHTLC, secret)
 			Expect(err).To(BeNil())
 			Expect(txid).ToNot(BeEmpty())
 
-			err = localnet.MineBitcoinBlocks(1, indexer)
-			Expect(err).To(BeNil())
-
 			aliceHTLCEvent, err := htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
 			Expect(err).To(BeNil())
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).To(Equal(uint64(0)))
+
+			err = localnet.MineBitcoinBlocks(1, indexer)
+			Expect(err).To(BeNil())
+
+			aliceHTLCEvent, err = htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
+			Expect(err).To(BeNil())
+			Expect(aliceHTLCEvent).To(HaveLen(2))
+			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 		})
 	})
 
@@ -151,13 +173,20 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(txid).ToNot(BeEmpty())
 
-			err = localnet.MineBitcoinBlocks(1, indexer)
-			Expect(err).To(BeNil())
-
 			aliceHTLCEvent, err := htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
 			Expect(err).To(BeNil())
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).To(Equal(uint64(0)))
+
+			err = localnet.MineBitcoinBlocks(1, indexer)
+			Expect(err).To(BeNil())
+
+			aliceHTLCEvent, err = htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
+			Expect(err).To(BeNil())
+			Expect(aliceHTLCEvent).To(HaveLen(2))
+			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 		})
 
 		It("should able to get the instant refund event", func(ctx context.Context) {
@@ -186,13 +215,20 @@ var _ = Describe("--- Event ---", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(txid).ToNot(BeEmpty())
 
-			err = localnet.MineBitcoinBlocks(1, indexer)
-			Expect(err).To(BeNil())
-
 			aliceHTLCEvent, err := htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
 			Expect(err).To(BeNil())
 			Expect(aliceHTLCEvent).To(HaveLen(2))
 			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).To(Equal(uint64(0)))
+
+			err = localnet.MineBitcoinBlocks(1, indexer)
+			Expect(err).To(BeNil())
+
+			aliceHTLCEvent, err = htlcClient.HTLCEvents(ctx, aliceHTLCAsset, 0, 0)
+			Expect(err).To(BeNil())
+			Expect(aliceHTLCEvent).To(HaveLen(2))
+			Expect(aliceHTLCEvent[0].TxHash()).To(Equal(txid))
+			Expect(aliceHTLCEvent[0].BlockNumber()).ToNot(Equal(uint64(0)))
 		})
 	})
 })

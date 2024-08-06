@@ -62,13 +62,13 @@ func (client *htlcClient) HTLCEvents(ctx context.Context, asset blockchain.Asset
 	events := make([]HTLCEvent, 0)
 
 	for _, tx := range txs {
-		if !tx.Status.Confirmed {
-			continue
-		}
+		var blockHeight uint64
 
-		blockHeight := *tx.Status.BlockHeight
-		if blockHeight < fromBlock || blockHeight > toBlock {
-			continue
+		if tx.Status.Confirmed {
+			blockHeight = *tx.Status.BlockHeight
+			if blockHeight < fromBlock || blockHeight > toBlock {
+				continue
+			}
 		}
 
 		for _, VOUT := range tx.VOUTs {
