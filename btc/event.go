@@ -144,12 +144,17 @@ func handleTaprootEvents(events *[]HTLCEvent, asset blockchain.Asset, assestAddr
 
 	ok, redeemerPubKey := IsRedeemLeaf(script)
 	if ok {
+		s, err := hex.DecodeString(witness[1])
+		if err != nil {
+			return
+		}
+
 		*events = append(*events, HTLCRedeemed{
 			id:                  addressStr,
 			redeemTxBlockNumber: blockHeight,
 			redeemTxHash:        txID,
 			asset:               asset,
-			secret:              []byte(witness[1]),
+			secret:              s,
 			redeemerPubkey:      redeemerPubKey,
 		})
 		return

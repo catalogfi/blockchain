@@ -135,7 +135,7 @@ var _ = Describe("--- Event ---", Ordered, func() {
 
 			switch e := bobHTLCEvent[0].(type) {
 			case btc.HTLCRedeemed:
-				Expect(string(e.Secret())).To(Equal(hex.EncodeToString(secret)))
+				Expect(hex.EncodeToString(e.Secret())).To(Equal(hex.EncodeToString(secret)))
 				Expect(e.RedeemerPubkey()).To(Equal(hex.EncodeToString(alicePrivKey.PubKey().SerializeCompressed())[2:]))
 			}
 
@@ -160,7 +160,7 @@ var _ = Describe("--- Event ---", Ordered, func() {
 
 			switch e := aliceHTLCEvent[0].(type) {
 			case btc.HTLCRedeemed:
-				Expect(string(e.Secret())).To(Equal(hex.EncodeToString(secret)))
+				Expect(hex.EncodeToString(e.Secret())).To(Equal(hex.EncodeToString(secret)))
 				Expect(e.RedeemerPubkey()).To(Equal(hex.EncodeToString(bobPrivKey.PubKey().SerializeCompressed())[2:]))
 			}
 		})
