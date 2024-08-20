@@ -62,7 +62,7 @@ type OrderbookWallet interface {
 	// FillOrder(ctx context.Context, chain blockchain.Chain, orderbookAddr common.Address, order *FillOrder) (string, error)
 }
 
-func NewOrderbookWallet(client HTLCClient, key *ecdsa.PrivateKey) HTLCWallet {
+func NewOrderbookWallet(client Client, key *ecdsa.PrivateKey) OrderbookWallet {
 	return &wallet{Client: client, privateKey: key}
 }
 
