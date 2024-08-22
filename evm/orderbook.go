@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"time"
@@ -34,7 +35,7 @@ type CreateOrder struct {
 	Nonce                       uint64
 	MinDestinationConfirmations uint64
 	Timelock                    uint64
-	SecretHash                  []byte
+	SecretHash                  [32]byte
 }
 
 type FillOrder struct {
@@ -76,7 +77,7 @@ func (c *wallet) CreateOrder(ctx context.Context, chain blockchain.Chain, orderb
 		return "", err
 	}
 
-	data, err := getCreateOrderTypedData(order)
+	data, err := GetCreateOrderTypedData(order)
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +91,7 @@ func (c *wallet) CreateOrder(ctx context.Context, chain blockchain.Chain, orderb
 	return tx.Hash().Hex(), nil
 }
 
-func getCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
+func GetCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
 	createOrderAbi := abi.Arguments{
 		{
 			Name: "sourceChain",
@@ -156,22 +157,29 @@ func getCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
 		return nil, err
 	}
 
-	return createOrderAbi.Pack(
-		order.SourceChain.Name(),
-		order.DestinationChain.Name(),
+	data, err := createOrderAbi.Pack(
+		string(order.SourceChain.Name()),
+		string(order.DestinationChain.Name()),
 		sourceAssetId,
 		destinationAssetId,
 		order.InitiatorSourceAddress,
 		order.InitiatorDestinationAddress,
 		order.SecretHash,
-		order.MinDestinationConfirmations,
-		order.Timelock,
+		big.NewInt(int64(order.MinDestinationConfirmations)),
+		big.NewInt(int64(order.Timelock)),
 		order.SourceAmount,
 		order.DestinationAmount,
 		order.Fee,
-		order.Nonce,
+		big.NewInt(int64(order.Nonce)),
 	)
+	if err != nil {
+		return nil, err
+	}
 
+	data = append(make([]byte, 32), data...)
+	binary.BigEndian.PutUint16(data[24:32], uint16(32))
+
+	return data, nil
 }
 
 func ParseAssetId(asset blockchain.Asset) (string, error) {
