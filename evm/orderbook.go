@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
-	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/catalogfi/blockchain"
 	"github.com/catalogfi/blockchain/evm/bindings/contracts/orderbook"
@@ -75,38 +73,34 @@ var (
 )
 
 type CreateOrder struct {
-	ID                          string
-	CreatedAt                   time.Time
-	SourceChain                 blockchain.Chain
-	DestinationChain            blockchain.Chain
-	SourceAsset                 blockchain.Asset
-	DestinationAsset            blockchain.Asset
+	SourceChain                 string
+	DestinationChain            string
+	SourceAsset                 string
+	DestinationAsset            string
 	InitiatorSourceAddress      string
 	InitiatorDestinationAddress string
 	SourceAmount                *big.Int
 	DestinationAmount           *big.Int
 	Fee                         *big.Int
-	Nonce                       uint64
-	MinDestinationConfirmations uint64
-	Timelock                    uint64
+	Nonce                       *big.Int
+	MinDestinationConfirmations *big.Int
+	TimeLock                    *big.Int
 	SecretHash                  [32]byte
 }
 
 type FillOrder struct {
-	ID                         string
-	CreatedAt                  time.Time
-	SourceChain                blockchain.Chain
-	DestinationChain           blockchain.Chain
-	SourceAsset                blockchain.Asset
-	DestinationAsset           blockchain.Asset
+	SourceChain                string
+	DestinationChain           string
+	SourceAsset                string
+	DestinationAsset           string
 	RedeemerSourceAddress      string
 	RedeemerDestinationAddress string
 	SourceAmount               *big.Int
 	DestinationAmount          *big.Int
-	Fee                        string
+	Fee                        *big.Int
 	Nonce                      string
-	MinSourceConfirmations     uint64
-	Timelock                   uint64
+	MinSourceConfirmations     *big.Int
+	TimeLock                   *big.Int
 }
 
 type OrderbookWallet interface {
@@ -131,7 +125,7 @@ func (c *wallet) CreateOrder(ctx context.Context, chain blockchain.Chain, orderb
 		return "", err
 	}
 
-	data, err := GetCreateOrderTypedData(order)
+	data, err := PackCreateOrder(order)
 	if err != nil {
 		return "", err
 	}
@@ -145,32 +139,21 @@ func (c *wallet) CreateOrder(ctx context.Context, chain blockchain.Chain, orderb
 	return tx.Hash().Hex(), nil
 }
 
-func GetCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
-
-	sourceAssetId, err := ParseAssetId(order.SourceAsset)
-	if err != nil {
-		return nil, err
-	}
-
-	destinationAssetId, err := ParseAssetId(order.DestinationAsset)
-	if err != nil {
-		return nil, err
-	}
-
+func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 	data, err := CreateOrderAbi.Pack(
-		string(order.SourceChain.Name()),
-		string(order.DestinationChain.Name()),
-		sourceAssetId,
-		destinationAssetId,
+		order.SourceChain,
+		order.DestinationChain,
+		order.SourceAsset,
+		order.DestinationAsset,
 		order.InitiatorSourceAddress,
 		order.InitiatorDestinationAddress,
 		order.SecretHash,
-		big.NewInt(int64(order.MinDestinationConfirmations)),
-		big.NewInt(int64(order.Timelock)),
+		order.MinDestinationConfirmations,
+		order.TimeLock,
 		order.SourceAmount,
 		order.DestinationAmount,
 		order.Fee,
-		big.NewInt(int64(order.Nonce)),
+		order.Nonce,
 	)
 	if err != nil {
 		return nil, err
@@ -182,13 +165,25 @@ func GetCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
 	return data, nil
 }
 
-func ParseAssetId(asset blockchain.Asset) (string, error) {
-	switch a := asset.(type) {
-	case blockchain.EVMAsset:
-		return a.Swapper().Hex(), nil
-	case blockchain.UtxoAsset:
-		return a.String(), nil
-	default:
-		return "", fmt.Errorf("unsupported asset type: %T", asset)
+func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
+	args, err := CreateOrderAbi.Unpack(data)
+	if err != nil {
+		return nil, err
 	}
+
+	return &CreateOrder{
+		SourceChain:                 string(args[0].(string)),
+		DestinationChain:            string(args[1].(string)),
+		SourceAsset:                 string(args[2].(string)),
+		DestinationAsset:            string(args[3].(string)),
+		InitiatorSourceAddress:      args[4].(string),
+		InitiatorDestinationAddress: args[5].(string),
+		SecretHash:                  args[6].([32]byte),
+		MinDestinationConfirmations: args[7].(*big.Int),
+		TimeLock:                    args[8].(*big.Int),
+		SourceAmount:                args[9].(*big.Int),
+		DestinationAmount:           args[10].(*big.Int),
+		Fee:                         args[11].(*big.Int),
+		Nonce:                       args[12].(*big.Int),
+	}, nil
 }
