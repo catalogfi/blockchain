@@ -15,9 +15,63 @@ import (
 )
 
 var (
-	uint256Ty, _ = abi.NewType("uint256", "uint256", nil)
-	bytes32Ty, _ = abi.NewType("bytes32", "bytes32", nil)
-	stringTy, _  = abi.NewType("string", "string", nil)
+	uint256Ty, _   = abi.NewType("uint256", "uint256", nil)
+	bytes32Ty, _   = abi.NewType("bytes32", "bytes32", nil)
+	stringTy, _    = abi.NewType("string", "string", nil)
+	CreateOrderAbi = abi.Arguments{
+		{
+			Name: "sourceChain",
+			Type: stringTy,
+		},
+		{
+			Name: "destinationChain",
+			Type: stringTy,
+		},
+		{
+			Name: "sourceAsset",
+			Type: stringTy,
+		},
+		{
+			Name: "destinationAsset",
+			Type: stringTy,
+		},
+		{
+			Name: "initiatorSourceAddress",
+			Type: stringTy,
+		},
+		{
+			Name: "initiatorDestinationAddress",
+			Type: stringTy,
+		},
+		{
+			Name: "secretHash",
+			Type: bytes32Ty,
+		},
+		{
+			Name: "minConfirmations",
+			Type: uint256Ty,
+		},
+		{
+			Name: "timelock",
+			Type: uint256Ty,
+		},
+		{
+			Name: "sourceAmount",
+			Type: uint256Ty,
+		},
+		{
+			Name: "destinationAmount",
+			Type: uint256Ty,
+		},
+		{
+			Name: "fee",
+			Type: uint256Ty,
+		},
+		{
+			Name: "nonce",
+			Type: uint256Ty,
+		},
+	}
 )
 
 type CreateOrder struct {
@@ -92,60 +146,6 @@ func (c *wallet) CreateOrder(ctx context.Context, chain blockchain.Chain, orderb
 }
 
 func GetCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
-	createOrderAbi := abi.Arguments{
-		{
-			Name: "sourceChain",
-			Type: stringTy,
-		},
-		{
-			Name: "destinationChain",
-			Type: stringTy,
-		},
-		{
-			Name: "sourceAsset",
-			Type: stringTy,
-		},
-		{
-			Name: "destinationAsset",
-			Type: stringTy,
-		},
-		{
-			Name: "initiatorSourceAddress",
-			Type: stringTy,
-		},
-		{
-			Name: "initiatorDestinationAddress",
-			Type: stringTy,
-		},
-		{
-			Name: "secretHash",
-			Type: bytes32Ty,
-		},
-		{
-			Name: "minConfirmations",
-			Type: uint256Ty,
-		},
-		{
-			Name: "timelock",
-			Type: uint256Ty,
-		},
-		{
-			Name: "sourceAmount",
-			Type: uint256Ty,
-		},
-		{
-			Name: "destinationAmount",
-			Type: uint256Ty,
-		},
-		{
-			Name: "fee",
-			Type: uint256Ty,
-		},
-		{
-			Name: "nonce",
-			Type: uint256Ty,
-		},
-	}
 
 	sourceAssetId, err := ParseAssetId(order.SourceAsset)
 	if err != nil {
@@ -157,7 +157,7 @@ func GetCreateOrderTypedData(order *CreateOrder) ([]byte, error) {
 		return nil, err
 	}
 
-	data, err := createOrderAbi.Pack(
+	data, err := CreateOrderAbi.Pack(
 		string(order.SourceChain.Name()),
 		string(order.DestinationChain.Name()),
 		sourceAssetId,
