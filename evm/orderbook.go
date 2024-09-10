@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"errors"
 	"math/big"
 
 	"github.com/catalogfi/blockchain"
@@ -16,6 +17,7 @@ var (
 	uint256Ty, _   = abi.NewType("uint256", "uint256", nil)
 	bytes32Ty, _   = abi.NewType("bytes32", "bytes32", nil)
 	stringTy, _    = abi.NewType("string", "string", nil)
+	bytesTy, _     = abi.NewType("bytes", "bytes", nil)
 	CreateOrderAbi = abi.Arguments{
 		{
 			Name: "sourceChain",
@@ -69,6 +71,10 @@ var (
 			Name: "nonce",
 			Type: uint256Ty,
 		},
+		{
+			Name: "additionalData",
+			Type: bytesTy,
+		},
 	}
 )
 
@@ -84,8 +90,9 @@ type CreateOrder struct {
 	Fee                         *big.Int
 	Nonce                       *big.Int
 	MinDestinationConfirmations *big.Int
-	TimeLock                    *big.Int
+	Timelock                    *big.Int
 	SecretHash                  [32]byte
+	AdditionalData              []byte
 }
 
 type FillOrder struct {
@@ -149,11 +156,12 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 		order.InitiatorDestinationAddress,
 		order.SecretHash,
 		order.MinDestinationConfirmations,
-		order.TimeLock,
+		order.Timelock,
 		order.SourceAmount,
 		order.DestinationAmount,
 		order.Fee,
 		order.Nonce,
+		order.AdditionalData,
 	)
 	if err != nil {
 		return nil, err
@@ -166,24 +174,29 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 }
 
 func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
-	args, err := CreateOrderAbi.Unpack(data)
+	values, err := CreateOrderAbi.Unpack(data)
 	if err != nil {
 		return nil, err
 	}
 
+	if len(values) != 14 {
+		return nil, errors.New("invalid number of values unpacked")
+	}
+
 	return &CreateOrder{
-		SourceChain:                 string(args[0].(string)),
-		DestinationChain:            string(args[1].(string)),
-		SourceAsset:                 string(args[2].(string)),
-		DestinationAsset:            string(args[3].(string)),
-		InitiatorSourceAddress:      args[4].(string),
-		InitiatorDestinationAddress: args[5].(string),
-		SecretHash:                  args[6].([32]byte),
-		MinDestinationConfirmations: args[7].(*big.Int),
-		TimeLock:                    args[8].(*big.Int),
-		SourceAmount:                args[9].(*big.Int),
-		DestinationAmount:           args[10].(*big.Int),
-		Fee:                         args[11].(*big.Int),
-		Nonce:                       args[12].(*big.Int),
+		SourceChain:                 string(values[0].(string)),
+		DestinationChain:            string(values[1].(string)),
+		SourceAsset:                 string(values[2].(string)),
+		DestinationAsset:            string(values[3].(string)),
+		InitiatorSourceAddress:      values[4].(string),
+		InitiatorDestinationAddress: values[5].(string),
+		SecretHash:                  values[6].([32]byte),
+		MinDestinationConfirmations: values[7].(*big.Int),
+		Timelock:                    values[8].(*big.Int),
+		SourceAmount:                values[9].(*big.Int),
+		DestinationAmount:           values[10].(*big.Int),
+		Fee:                         values[11].(*big.Int),
+		Nonce:                       values[12].(*big.Int),
+		AdditionalData:              values[13].([]byte),
 	}, nil
 }
