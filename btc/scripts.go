@@ -123,7 +123,7 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
-func Address(internalKey *btcec.PublicKey, P htlc *HTLC) (btcutil.Address, error) {
+func HtlcScriptV2(internalKey *btcec.PublicKey, htlc *HTLC) (btcutil.Address, error) {
 
 	leaves, err := htlcLeaves(htlc)
 	if err != nil {
