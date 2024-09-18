@@ -2,6 +2,7 @@ package btc
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
@@ -149,6 +150,108 @@ func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params,  htlc *H
 func isWaitTimeOpCode(opCode byte) bool {
 	return (opCode >= txscript.OP_1 && opCode <= txscript.OP_16) ||
 		(opCode >= txscript.OP_DATA_1 && opCode <= txscript.OP_DATA_3)
+}
+
+func IsRedeemLeaf(script []byte) (bool, string) {
+	validRedeem := []byte{
+		txscript.OP_SHA256,
+		txscript.OP_DATA_32,
+		txscript.OP_EQUALVERIFY,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	var redeemerPubkey string
+	isSecond := false
+
+	for _, opCode := range validRedeem {
+		if !tokenizer.Next() {
+			return false, ""
+		}
+		if tokenizer.Opcode() != opCode {
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			if isSecond {
+				redeemerPubkey = hex.EncodeToString(tokenizer.Data())
+			}
+			isSecond = !isSecond
+		}
+	}
+	return tokenizer.Done(), redeemerPubkey
+}
+
+func IsRefundLeaf(script []byte) (bool, string) {
+	validRefund := []byte{
+		0xff,
+		txscript.OP_CHECKSEQUENCEVERIFY,
+		txscript.OP_DROP,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	var refunderPubkey string
+
+	for _, opCode := range validRefund {
+		if !tokenizer.Next() {
+			return false, ""
+		}
+		if opCode == 0xff {
+			if !isWaitTimeOpCode(tokenizer.Opcode()) {
+				return false, ""
+			}
+			lockTime := decodeLocktime(tokenizer.Data())
+			if lockTime > math.MaxUint16 || lockTime < 0 {
+				return false, ""
+			}
+			continue
+		}
+
+		if tokenizer.Opcode() != opCode {
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			refunderPubkey = hex.EncodeToString(tokenizer.Data())
+		}
+	}
+
+	return tokenizer.Done(), refunderPubkey
+}
+
+func IsMultiSigLeaf(script []byte) (bool, string) {
+	validMultiSig := []byte{
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIG,
+		txscript.OP_DATA_32,
+		txscript.OP_CHECKSIGADD,
+		txscript.OP_2,
+		txscript.OP_NUMEQUAL,
+	}
+	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	var refunderPubkey string
+	isFirst := true
+
+	for _, opCode := range validMultiSig {
+		if !tokenizer.Next() {
+			return false, ""
+		}
+		if tokenizer.Opcode() != opCode {
+			return false, ""
+		}
+
+		if opCode == txscript.OP_DATA_32 {
+			if isFirst {
+				refunderPubkey = hex.EncodeToString(tokenizer.Data())
+			}
+			isFirst = !isFirst
+		}
+	}
+	return tokenizer.Done(), refunderPubkey
 }
 
 // IsHtlc returns if the given script is a HTLC script.

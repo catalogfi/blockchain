@@ -144,7 +144,7 @@ type HTLCEvent interface {
 	Equal(e HTLCEvent) bool
 	BlockNumber() uint64
 	TxHash() common.Hash
-	EVMAsset() blockchain.EVMAsset
+	BlockchainAsset() blockchain.EVMAsset
 }
 
 func (client *client) HTLCEvents(ctx context.Context, asset blockchain.EVMAsset, fromBlock, toBlock *big.Int) ([]HTLCEvent, error) {
@@ -235,7 +235,7 @@ func (e HTLCInitiated) BlockNumber() uint64 {
 	return e.InitiateTxBlockNumber
 }
 
-func (e HTLCInitiated) EVMAsset() blockchain.EVMAsset {
+func (e HTLCInitiated) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
@@ -272,7 +272,7 @@ func (e HTLCRedeemed) BlockNumber() uint64 {
 	return e.RedeemTxBlockNumber
 }
 
-func (e HTLCRedeemed) EVMAsset() blockchain.EVMAsset {
+func (e HTLCRedeemed) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
@@ -306,7 +306,7 @@ func (e HTLCRefunded) BlockNumber() uint64 {
 	return e.RefundTxBlockNumber
 }
 
-func (e HTLCRefunded) EVMAsset() blockchain.EVMAsset {
+func (e HTLCRefunded) BlockchainAsset() blockchain.EVMAsset {
 	return e.Asset
 }
 
