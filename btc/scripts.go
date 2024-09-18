@@ -123,6 +123,27 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
+func Address(internalKey *btcec.PublicKey, P htlc *HTLC) (btcutil.Address, error) {
+
+	leaves, err := htlcLeaves(htlc)
+	if err != nil {
+		return nil, err
+	}
+
+	tapScriptTree := txscript.AssembleTaprootScriptTree(leaves.ToArray()...)
+
+	tapScriptRootHash := tapScriptTree.RootNode.TapHash()
+	outputKey := txscript.ComputeTaprootOutputKey(
+		internalKey, tapScriptRootHash[:],
+	)
+
+	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), hw.chain)
+	if err != nil {
+		return nil, err
+	}
+	return addr, nil
+}
+
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.
 // Since we require the timelock to be an integer (max_uint16), so we interpret maximum 3 bytes.
 func isWaitTimeOpCode(opCode byte) bool {
