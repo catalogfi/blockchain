@@ -123,7 +123,7 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
-func HtlcScriptV2(internalKey *btcec.PublicKey, htlc *HTLC) (btcutil.Address, error) {
+func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params,  htlc *HTLC) (btcutil.Address, error) {
 
 	leaves, err := htlcLeaves(htlc)
 	if err != nil {
@@ -137,7 +137,7 @@ func HtlcScriptV2(internalKey *btcec.PublicKey, htlc *HTLC) (btcutil.Address, er
 		internalKey, tapScriptRootHash[:],
 	)
 
-	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), hw.chain)
+	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), chain)
 	if err != nil {
 		return nil, err
 	}
