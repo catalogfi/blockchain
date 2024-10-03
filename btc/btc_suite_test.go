@@ -35,9 +35,10 @@ type MODE string
 
 const (
 	// MODES
-	SIMPLE       MODE = "simple"
-	BATCHER_RBF  MODE = "batcher_rbf"
-	BATCHER_CPFP MODE = "batcher_cpfp"
+	SIMPLE           MODE = "simple"
+	BATCHER_RBF      MODE = "batcher_rbf"
+	BATCHER_CPFP     MODE = "batcher_cpfp"
+	BATCHER_GUARDIAN MODE = "batcher_guardian"
 )
 
 func parseMode(mode string) (MODE, error) {
@@ -48,6 +49,8 @@ func parseMode(mode string) (MODE, error) {
 		return BATCHER_RBF, nil
 	case string(BATCHER_CPFP):
 		return BATCHER_CPFP, nil
+	case string(BATCHER_GUARDIAN):
+		return BATCHER_GUARDIAN, nil
 	default:
 		return "", fmt.Errorf("unknown mode %s", mode)
 	}

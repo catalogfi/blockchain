@@ -172,11 +172,11 @@ type BatcherCache struct {
 	*batcherCacheKeyManager
 }
 
-func NewBatcherCache(db *leveldb.DB, strategy Strategy) Cache {
+func NewBatcherCache(db *leveldb.DB, id string, strategy Strategy) Cache {
 	return &BatcherCache{
 		db:                     db,
 		strategy:               strategy,
-		batcherCacheKeyManager: &batcherCacheKeyManager{strategy: strategy},
+		batcherCacheKeyManager: &batcherCacheKeyManager{id: id, strategy: strategy},
 	}
 }
 
@@ -399,7 +399,7 @@ func (l *BatcherCache) saveLatestBatch(batch Batch) error {
 	if err != nil {
 		return err
 	}
-	return l.db.Put([]byte(fmt.Sprintf(latestBatchPrefix, l.strategy)), data, nil)
+	return l.db.Put([]byte(l.batcherCacheKeyManager.latestBatchKey()), data, nil)
 }
 
 func (l *BatcherCache) searchRequest(id string) (BatcherRequest, error) {
@@ -473,23 +473,24 @@ func isPending(batch Batch) bool {
 
 // All levelDB keys are managed by this struct
 type batcherCacheKeyManager struct {
+	id       string
 	strategy Strategy
 }
 
 func (b *batcherCacheKeyManager) requestIndexKey(reqID string) []byte {
-	return []byte(fmt.Sprintf(reqIndexPrefix, b.strategy, reqID))
+	return []byte(fmt.Sprintf(reqIndexPrefix, b.id+string(b.strategy), reqID))
 }
 
 func (b *batcherCacheKeyManager) pendingBatchKey(batchID string) []byte {
-	return []byte(fmt.Sprintf(pendingBatchPrefix, b.strategy, batchID))
+	return []byte(fmt.Sprintf(pendingBatchPrefix, b.id+string(b.strategy), batchID))
 }
 
 func (b *batcherCacheKeyManager) batchKey(batchID string) []byte {
-	return []byte(fmt.Sprintf(batchPrefix, b.strategy, batchID))
+	return []byte(fmt.Sprintf(batchPrefix, b.id+string(b.strategy), batchID))
 }
 
 func (b *batcherCacheKeyManager) latestBatchKey() []byte {
-	return []byte(fmt.Sprintf(latestBatchPrefix, b.strategy))
+	return []byte(fmt.Sprintf(latestBatchPrefix, b.id+string(b.strategy)))
 }
 
 func (b *batcherCacheKeyManager) requestKey(reqID string) []byte {
@@ -497,5 +498,5 @@ func (b *batcherCacheKeyManager) requestKey(reqID string) []byte {
 }
 
 func (b *batcherCacheKeyManager) pendingRequestKey(reqID string) []byte {
-	return []byte(fmt.Sprintf(pendingRequestKey, b.strategy, reqID))
+	return []byte(fmt.Sprintf(pendingRequestKey, b.id+string(b.strategy), reqID))
 }

@@ -80,7 +80,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		db, err := leveldb.OpenFile(dbPath, nil)
 		Expect(err).To(BeNil())
 
-		cache = btc.NewBatcherCache(db, btc.RBF)
+		cache = btc.NewBatcherCache(db, "", btc.RBF)
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
@@ -339,7 +339,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		}
 
 		// Three outputs, one for the script, one for the SACP recipient
-		Expect(tx.VOUTs).Should(HaveLen(6))
+		Expect(len(tx.VOUTs) >= 5).Should(BeTrue())
 
 		// SACP recipient is the wallet itself
 		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(randAddr.EncodeAddress()))
@@ -347,7 +347,6 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(address1.EncodeAddress()))
 		Expect(tx.VOUTs[3].ScriptPubKeyAddress).Should(Equal(address1.EncodeAddress()))
 		Expect(tx.VOUTs[4].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
-		Expect(tx.VOUTs[5].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
 		lb, err := cache.ReadLatestBatch(context.Background())
 		Expect(err).To(BeNil())

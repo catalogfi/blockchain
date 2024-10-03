@@ -167,6 +167,12 @@ type Wallet interface {
 	// Status checks the status of a transaction using its transaction ID (txid).
 	// Returns the transaction and a boolean indicating whether the transaction is submitted or not and an error
 	Status(ctx context.Context, id string) (Transaction, bool, error)
+
+	// Signs cover utxos
+	SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error
+
+	// Weight of the covering UTXO
+	CoverUTXOSpendWeight() int
 }
 
 // SimpleWallet is a Wallet implementation that can send and spend funds.
@@ -335,7 +341,7 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 
 	// Sign the cover inputs
 	// This is a no op if there are no cover utxos
-	err = signSendTx(tx, coverUTXOs, signingIdx+len(spendRequests), sw.signerAddr, sw.privateKey)
+	err = sw.SignCoverUTXOs(tx, coverUTXOs, signingIdx+len(spendRequests))
 	if err != nil {
 		return nil, err
 	}
@@ -368,6 +374,36 @@ func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, boo
 		return Transaction{}, false, err
 	}
 	return tx, true, nil
+}
+
+// Signs the send transaction (p2wpkh spend).
+// Use startingIdx to start signing from a specific index
+func (w *SimpleWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error {
+	// get the send signing script
+	script, err := txscript.PayToAddrScript(w.signerAddr)
+	if err != nil {
+		return err
+	}
+
+	// for p2wpkh, we only need to add the signature and pubkey
+	witness := [][]byte{
+		AddSignatureSegwitOp,
+		AddPubkeyCompressedOp,
+	}
+	idx := startingIdx
+	for i := range utxos {
+		fetcher := txscript.NewCannedPrevOutputFetcher(script, utxos[i].Amount)
+		err := signTx(tx, fetcher, utxos[i].Amount, idx, witness, script, nil, txscript.SigHashAll, w.privateKey)
+		if err != nil {
+			return err
+		}
+		idx++
+	}
+	return nil
+}
+
+func (w *SimpleWallet) CoverUTXOSpendWeight() int {
+	return SegwitSpendWeight
 }
 
 // ------------------ Helper functions ------------------
@@ -725,32 +761,6 @@ func signTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount in
 		}
 	}
 	tx.TxIn[index].Witness = newWitness
-	return nil
-}
-
-// Signs the send transaction (p2wpkh spend).
-// Use startingIdx to start signing from a specific index
-func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, scriptAddr btcutil.Address, privateKey *secp256k1.PrivateKey) error {
-	// get the send signing script
-	script, err := txscript.PayToAddrScript(scriptAddr)
-	if err != nil {
-		return err
-	}
-
-	// for p2wpkh, we only need to add the signature and pubkey
-	witness := [][]byte{
-		AddSignatureSegwitOp,
-		AddPubkeyCompressedOp,
-	}
-	idx := startingIdx
-	for i := range utxos {
-		fetcher := txscript.NewCannedPrevOutputFetcher(script, utxos[i].Amount)
-		err := signTx(tx, fetcher, utxos[i].Amount, idx, witness, script, nil, txscript.SigHashAll, privateKey)
-		if err != nil {
-			return err
-		}
-		idx++
-	}
 	return nil
 }
 
