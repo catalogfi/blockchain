@@ -476,6 +476,7 @@ func htlcLeaves(htlc *HTLC) (*htlcTapLeaves, error) {
 	if err != nil {
 		return &htlcTapLeaves{}, err
 	}
+
 	refundLeaf, err := RefundLeaf(htlc.InitiatorPubkey, htlc.Timelock)
 	if err != nil {
 		return &htlcTapLeaves{}, err
@@ -513,7 +514,7 @@ func newLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, 
 }
 
 func (l *htlcTapLeaves) ToArray() []txscript.TapLeaf {
-	return []txscript.TapLeaf{l.redeem, l.refund, l.instantRefund}
+	return []txscript.TapLeaf{l.instantRefund, l.refund, l.redeem}
 }
 
 func getControlBlock(internalKey *btcec.PublicKey, htlc *HTLC, leaf Leaf) (txscript.TapLeaf, []byte, error) {
