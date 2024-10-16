@@ -184,7 +184,7 @@ func NewBlockstreamFeeEstimator(params *chaincfg.Params, url string, ttl time.Du
 }
 
 func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
-	if f.params.Name == "mainnet" && f.url != "" {
+	if f.url != "" {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 
