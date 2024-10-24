@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -71,7 +72,6 @@ func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, erro
 //
 // pubkeys must be x-only pubkeys of the initiator and the redeemer.
 func MultiSigLeaf(initiatorPubkey, redeemerPubkey []byte) (txscript.TapLeaf, error) {
-
 	script, err := txscript.NewScriptBuilder().
 		AddData(initiatorPubkey).
 		AddOp(txscript.OP_CHECKSIG).
@@ -124,8 +124,7 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		Script()
 }
 
-func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params,  htlc *HTLC) (btcutil.Address, error) {
-
+func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params, htlc *HTLC) (btcutil.Address, error) {
 	leaves, err := htlcLeaves(htlc)
 	if err != nil {
 		return nil, err
@@ -138,7 +137,7 @@ func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params,  htlc *H
 		internalKey, tapScriptRootHash[:],
 	)
 
-	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), chain)
+	addr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), chain)
 	if err != nil {
 		return nil, err
 	}
