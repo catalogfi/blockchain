@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -122,7 +123,6 @@ func (hw *htlcWallet) Status(ctx context.Context, id string) (Transaction, bool,
 
 // Address returns the tapscript address of the HTLC
 func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
-
 	leaves, err := htlcLeaves(htlc)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 		hw.internalKey, tapScriptRootHash[:],
 	)
 
-	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), hw.chain)
+	addr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), hw.chain)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,6 @@ func (hw *htlcWallet) send(ctx context.Context, sends []SendRequest, spends []Sp
 }
 
 func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) (string, error) {
-
 	// aggregate all sends
 	var sends []SendRequest
 	var spends []SpendRequest
@@ -324,13 +323,11 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 			}
 			sacps = append(sacps, refundSACP)
 		}
-
 	}
 	return hw.send(ctx, sends, spends, sacps)
 }
 
 func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
-
 	scriptAddr, err := hw.Address(htlc)
 	if err != nil {
 		return SpendRequest{}, err
@@ -428,7 +425,7 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcuti
 		return nil, ErrInvalidInstantRefundSACPWitnessLen
 	}
 
-	//TODO: check if the signature is valid
+	// TODO: check if the signature is valid
 
 	// first two should be signature lens
 	if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
@@ -505,7 +502,6 @@ const (
 )
 
 func newLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, error) {
-
 	return &htlcTapLeaves{
 		redeem:        redeem,
 		refund:        refund,
