@@ -318,7 +318,6 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 		case InstantRefundHTLCAction:
 			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.InsantRefundSACPTxBytes)
 			if err != nil {
-				fmt.Println("dcfgjvhbkjnkmjhkgjfdxfcgvhbjnkm")
 				return "", err
 			}
 			sacps = append(sacps, refundSACP)
