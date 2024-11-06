@@ -34,6 +34,10 @@ type RawHTLCAction struct {
 	Secret []byte
 	// Only used in the case of RefundHTLCAction.
 	InsantRefundSACPTxBytes []byte
+
+	// Index at which the signature should be added in the witness of the SACP tx
+	// could be 0 or 1
+	InstantRefundSigAddAtIdx int
 }
 
 var (
@@ -236,7 +240,7 @@ func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (st
 }
 
 // instantRefund refunds given the counterparty signed SACP tx
-func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte) ([]byte, error) {
+func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte, sigAddAtIdx int) ([]byte, error) {
 	if instantRefundSACPTx == nil {
 		return nil, fmt.Errorf("instantRefundSACPTx is nil")
 	}
@@ -281,7 +285,7 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefu
 		// Format the witness to include the signature of the initiator at the 1st index of the witness
 		// 0th index should be the signature of the redeemer
 		// 1st index should be the signature of the initiator
-		tx.TxIn[i].Witness[1] = witnessWithSig[0]
+		tx.TxIn[i].Witness[sigAddAtIdx] = witnessWithSig[0]
 	}
 
 	return GetTxRawBytes(tx)
@@ -321,7 +325,10 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 			}
 			spends = append(spends, refundSpendRequest)
 		case InstantRefundHTLCAction:
-			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.InsantRefundSACPTxBytes)
+			if htlcAction.InstantRefundSigAddAtIdx != 0 && htlcAction.InstantRefundSigAddAtIdx != 1 {
+				return "", fmt.Errorf("invalid instantRefundSigAddAtIdx. expected 0 or 1")
+			}
+			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.InsantRefundSACPTxBytes, htlcAction.InstantRefundSigAddAtIdx)
 			if err != nil {
 				return "", err
 			}
@@ -372,7 +379,7 @@ func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
 
 func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (string, error) {
 	if sigTx != nil {
-		sacp, err := hw.instantRefund(ctx, htlc, sigTx)
+		sacp, err := hw.instantRefund(ctx, htlc, sigTx, 1)
 		if err != nil {
 			return "", err
 		}

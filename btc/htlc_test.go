@@ -483,14 +483,16 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 
 		txID, err = aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
 			{
-				Action:                  btc.InstantRefundHTLCAction,
-				HTLC:                    *aliceHTLC1,
-				InsantRefundSACPTxBytes: sacpTx1,
+				Action:                   btc.InstantRefundHTLCAction,
+				HTLC:                     *aliceHTLC1,
+				InsantRefundSACPTxBytes:  sacpTx1,
+				InstantRefundSigAddAtIdx: 1,
 			},
 			{
-				Action:                  btc.InstantRefundHTLCAction,
-				HTLC:                    *aliceHTLC2,
-				InsantRefundSACPTxBytes: sacpTx2,
+				Action:                   btc.InstantRefundHTLCAction,
+				HTLC:                     *aliceHTLC2,
+				InsantRefundSACPTxBytes:  sacpTx2,
+				InstantRefundSigAddAtIdx: 1,
 			},
 		})
 		Expect(err).To(BeNil())
