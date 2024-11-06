@@ -231,7 +231,7 @@ var _ = Describe("--- Event ---", Ordered, func() {
 
 			bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, chainParams)
 			Expect(err).To(BeNil())
-			instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address())
+			instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address(), nil)
 			Expect(err).To(BeNil())
 
 			txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)

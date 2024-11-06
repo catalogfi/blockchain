@@ -81,10 +81,11 @@ type HTLCWallet interface {
 	// Refund refunds the HTLC if the htlc is expired.
 	// For instant refunds, the SACP tx signed by counterparty should be passed
 	Refund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte) (string, error)
+
 	// GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds.
 	//
 	// Signature is added at the first index of the witness of the transaction inputs.
-	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error)
+	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address, initiatorSig []byte) ([]byte, error)
 	// Address returns the tapscript address of the HTLC
 	Address(htlc *HTLC) (btcutil.Address, error)
 	// Status returns the transaction if submitted and bool indicating whether the transaction
@@ -143,7 +144,7 @@ func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 }
 
 // GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds
-func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error) {
+func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address, initiatorSig []byte) ([]byte, error) {
 	instantRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
 	if err != nil {
 		return nil, err
@@ -155,6 +156,10 @@ func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC,
 		randomSig(),
 		instantRefundLeaf.Script,
 		cbBytes,
+	}
+
+	if initiatorSig != nil {
+		witness[1] = initiatorSig
 	}
 
 	scriptAddr, err := hw.Address(htlc)
