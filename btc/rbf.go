@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -45,6 +46,39 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 		tx, err = w.indexer.GetTx(ctx, latestBatch.Tx.TxID)
 		return err
 	})
+	if err != nil {
+		// which means the tx is not in the mempool
+		// and one of the previous batch got mined
+		if strings.Contains(err.Error(), "not found") {
+
+			// Get the confirmed batch.
+			confirmedBatch, err := w.getConfirmedBatch(c)
+			if err != nil {
+				w.logger.Error("failed to get confirmed batch", zap.Error(err))
+				return err
+			}
+
+			// Delete the pending batch from the cache.
+			err = w.cache.DeletePendingBatches(c)
+			if err != nil {
+				w.logger.Error("failed to delete pending batches", zap.Error(err))
+				return err
+			}
+
+			// Read the missing requests from the cache.
+			missingRequestIds := getMissingRequestIds(latestBatch.RequestIds, confirmedBatch.RequestIds)
+			missingRequests, err := w.cache.ReadRequests(c, missingRequestIds...)
+			if err != nil {
+				w.logger.Error("failed to read missing requests", zap.Error(err), zap.Strings("request_ids", missingRequestIds))
+				return err
+			}
+
+			// Create a new RBF batch with missing and pending requests.
+			return w.createNewRBFBatch(c, append(missingRequests, pendingRequests...), 0, 0)
+		}
+
+		return fmt.Errorf("failed to get tx: %w", err)
+	}
 
 	// If the transaction is confirmed, create a new RBF batch.
 	if tx.Status.Confirmed {
@@ -131,6 +165,9 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 			return err
 		})
 		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				continue
+			}
 			return Batch{}, err
 		}
 
