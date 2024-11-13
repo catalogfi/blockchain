@@ -152,7 +152,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 
-		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address(), nil)
+		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
 		txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)
@@ -182,7 +182,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 
-		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, bobSimpleWallet.Address(), nil)
+		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, bobSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
 		_, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)
@@ -193,7 +193,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		_, err = bobHTLCWallet.Initiate(ctx, bobHTLC, initiateAmount)
 		Expect(err).To(BeNil())
 
-		instantRefundTxBytes, err = bobHTLCWallet.GenerateInstantRefundSACP(ctx, bobHTLC, aliceSimpleWallet.Address(), nil)
+		instantRefundTxBytes, err = bobHTLCWallet.GenerateInstantRefundSACP(ctx, bobHTLC, aliceSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
 		By("Instant refund Alice HTLC should fail as the inputs are not correct")
@@ -220,7 +220,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		//generate SACP
-		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address(), nil)
+		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, aliceSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
 		txId, err := aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)
@@ -473,10 +473,10 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 
-		sacpTx1, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC1, aliceSimpleWallet.Address(), nil)
+		sacpTx1, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC1, aliceSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
-		sacpTx2, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC2, aliceSimpleWallet.Address(), nil)
+		sacpTx2, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC2, aliceSimpleWallet.Address())
 		Expect(err).To(BeNil())
 
 		By("Instant refund HTLCs")

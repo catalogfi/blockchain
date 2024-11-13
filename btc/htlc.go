@@ -89,7 +89,7 @@ type HTLCWallet interface {
 	// GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds.
 	//
 	// Signature is added at the first index of the witness of the transaction inputs.
-	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address, initiatorSig []byte) ([]byte, error)
+	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error)
 	// Address returns the tapscript address of the HTLC
 	Address(htlc *HTLC) (btcutil.Address, error)
 	// Status returns the transaction if submitted and bool indicating whether the transaction
@@ -148,22 +148,19 @@ func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 }
 
 // GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds
-func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address, initiatorSig []byte) ([]byte, error) {
+func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error) {
 	instantRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
 	if err != nil {
 		return nil, err
 	}
+
+	// Signature is added at both 0th and 1st index of the witness
+	// Callers can replace any of the signatures according to their needs
 	witness := [][]byte{
 		AddSignatureSchnorrOp,
-		// insert random sig placeholder for other parties to insert their signature
-		// this is for proper fee calculation
-		randomSig(),
+		AddSignatureSchnorrOp,
 		instantRefundLeaf.Script,
 		cbBytes,
-	}
-
-	if initiatorSig != nil {
-		witness[1] = initiatorSig
 	}
 
 	scriptAddr, err := hw.Address(htlc)
