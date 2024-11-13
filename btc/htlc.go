@@ -261,7 +261,7 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefu
 	if err != nil {
 		return nil, err
 	}
-	tx, err := validateInstantRefundSACP(instantRefundSACPTx, utxos, hw.wallet.Address(), cbBytes, instandRefundLeaf)
+	tx, err := validateInstantRefundSACP(instantRefundSACPTx, utxos, cbBytes, instandRefundLeaf)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +403,7 @@ func isSecretValid(secret []byte, htlc *HTLC) bool {
 	return bytes.Equal(hash[:], htlc.SecretHash)
 }
 
-func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcutil.Address, cb []byte, instantRefundLeaf txscript.TapLeaf) (*wire.MsgTx, error) {
+func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, cb []byte, instantRefundLeaf txscript.TapLeaf) (*wire.MsgTx, error) {
 	btcTx, err := btcutil.NewTxFromBytes(refundSACP)
 	if err != nil {
 		return nil, err
@@ -416,19 +416,12 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, recipient btcuti
 		return nil, ErrSACPInvalidInputsLen
 	}
 
-	pkScript, err := txscript.PayToAddrScript(recipient)
-	if err != nil {
-		return nil, err
-	}
-
 	// Check if txHashs match with the utxos
 	for i, txIn := range tx.TxIn {
 		if txIn.PreviousOutPoint.Hash.String() != utxos[i].TxID {
 			return nil, ErrSACPInvalidInput
 		}
-		if !bytes.Equal(tx.TxOut[i].PkScript, pkScript) {
-			return nil, ErrSACPInvalidOutput
-		}
+
 	}
 
 	// witness should have 4 elements
