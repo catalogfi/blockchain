@@ -73,7 +73,7 @@ func (w *batcherWallet) createCPFPBatch(c context.Context) error {
 	// Fetch UTXOs from the indexer
 	var utxos []UTXO
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		utxos, err = w.indexer.GetUTXOs(ctx, w.address)
+		utxos, err = w.indexer.GetUTXOs(ctx, w.Address())
 		return err
 	})
 	if err != nil {
@@ -163,7 +163,7 @@ func (w *batcherWallet) updateCPFP(c context.Context, requiredFeeRate int) error
 	// Fetch UTXOs from the indexer
 	var utxos []UTXO
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		utxos, err = w.indexer.GetUTXOs(ctx, w.address)
+		utxos, err = w.indexer.GetUTXOs(ctx, w.Address())
 		return err
 	})
 	if err != nil {
@@ -258,12 +258,12 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 		return nil, err
 	}
 
-	utxos, err = removeDoubleSpends(spendUTXOsMap[w.address.EncodeAddress()], utxos)
+	utxos, err = removeDoubleSpends(spendUTXOsMap[w.Address().EncodeAddress()], utxos)
 	if err != nil {
 		return nil, err
 	}
 
-	spendUTXOsMap[w.address.EncodeAddress()] = append(spendUTXOsMap[w.address.EncodeAddress()], utxos...)
+	spendUTXOsMap[w.Address().EncodeAddress()] = append(spendUTXOsMap[w.Address().EncodeAddress()], utxos...)
 	if sequencesMap == nil {
 		sequencesMap = generateSequenceMap(spendUTXOsMap, spendRequests)
 	}
@@ -284,12 +284,12 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 		}
 		tempSendRequests = append(sendRequests, SendRequest{
 			Amount: amount - int64(fee+feeOverhead),
-			To:     w.address,
+			To:     w.Address(),
 		})
 	}
 
 	// Build the transaction with the available UTXOs and requests
-	tx, signIdx, err := buildTransaction(append(spendUTXOs, utxos...), sacps, tempSendRequests, w.address, int64(fee+feeOverhead), sequencesMap)
+	tx, signIdx, err := buildTransaction(append(spendUTXOs, utxos...), sacps, tempSendRequests, w.Address(), int64(fee+feeOverhead), sequencesMap)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	// Sign the fee providing inputs, if any
-	err = signSendTx(tx, utxos, signIdx+len(spendUTXOs), w.address, w.privateKey)
+	err = w.SignCoverUTXOs(tx, utxos, signIdx+len(spendUTXOs))
 	if err != nil {
 		return tx, err
 	}
