@@ -160,9 +160,9 @@ var _ = Describe("Wallets", Ordered, func() {
 			// change address
 			Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 		case BATCHER_RBF:
-			Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(bobAddr.EncodeAddress()))
+			Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(bobAddr.EncodeAddress()))
 			// change address
-			Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+			Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 		}
 
 	})
@@ -512,6 +512,9 @@ var _ = Describe("Wallets", Ordered, func() {
 		err = localnet.MineBitcoinBlocks(1, indexer)
 		Expect(err).To(BeNil())
 
+		randomAddr, err := randomP2wpkhAddress(chainParams)
+		Expect(err).To(BeNil())
+
 		By("Spend p2wsh and p2tr scripts")
 		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
 			{
@@ -533,6 +536,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				},
 				Leaf:          txscript.NewTapLeaf(0xc0, p2trAdditionScript),
 				ScriptAddress: p2trAddr,
+				Recipient:     randomAddr,
 			},
 			{
 				Witness: [][]byte{
@@ -543,6 +547,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				Leaf:          txscript.NewTapLeaf(0xc0, p2trSigCheckScript),
 				ScriptAddress: p2trSigCheckScriptAddr,
 				HashType:      txscript.SigHashAll,
+				Recipient:     randomAddr,
 			},
 		}, nil)
 
@@ -554,9 +559,10 @@ var _ = Describe("Wallets", Ordered, func() {
 
 		By("Validate the tx")
 		Expect(tx).ShouldNot(BeNil())
-		Expect(tx.VOUTs).Should(HaveLen(1))
-		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
-
+		Expect(tx.VOUTs).Should(HaveLen(3))
+		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(randomAddr.EncodeAddress()))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(randomAddr.EncodeAddress()))
 		By("Balances of both scripts should be zero")
 		balance, err := getBalance(indexer, p2wshAddr)
 		Expect(err).To(BeNil())

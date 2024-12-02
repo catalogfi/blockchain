@@ -289,7 +289,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	}
 
 	// Build the transaction with the available UTXOs and requests
-	tx, signIdx, err := buildTransaction(append(spendUTXOs, utxos...), sacps, tempSendRequests, w.Address(), int64(fee+feeOverhead), sequencesMap)
+	tx, signIdx, err := buildTransaction(append(spendUTXOs, utxos...), sacps, tempSendRequests, []RedirectedSendRequest{}, w.Address(), int64(fee+feeOverhead), sequencesMap)
 	if err != nil {
 		return nil, err
 	}

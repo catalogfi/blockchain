@@ -115,6 +115,9 @@ type SpendRequest struct {
 
 	// UTXO to spend
 	Utxos UTXOs
+
+	// Optional Recipient address
+	Recipient btcutil.Address
 }
 
 type SendRequest struct {
@@ -122,6 +125,11 @@ type SendRequest struct {
 	Amount int64
 	// Recipient address
 	To btcutil.Address
+}
+
+// RedirectedSendRequest is a send request that is redirected from a spend request
+type RedirectedSendRequest struct {
+	SendRequest
 }
 
 type Wallet interface {
@@ -279,7 +287,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 	sequenceMap := generateSequenceMap(utxoMap, []SpendRequest{spendRequest})
 
 	// build the transaction with no recipients or sacps
-	tx, _, err := buildTransaction(utxos, nil, nil, to, fee, sequenceMap)
+	tx, _, err := buildTransaction(utxos, nil, nil, nil, to, fee, sequenceMap)
 	if err != nil {
 		return nil, err
 	}
@@ -326,9 +334,15 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	// generate sequence map (used to set sequence number for each input)
 	sequenceMap := generateSequenceMap(utxoMap, spendRequests)
 
+	// generate the recipients for the spend requests
+	extraSendRequests, err := generateSendRequests(spendRequests, utxoMap, sw.Address())
+	if err != nil {
+		return nil, err
+	}
+
 	// build the transaction
 	// Signing index indicates from which index we need to start signing the transaction
-	tx, signingIdx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sacps, sendRequests, sw.signerAddr, int64(fee), sequenceMap)
+	tx, signingIdx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sacps, sendRequests, extraSendRequests, sw.signerAddr, int64(fee), sequenceMap)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +375,24 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	}
 
 	return tx, nil
+}
+
+func generateSendRequests(spendRequests []SpendRequest, utxoMap utxoMap, currentWallet btcutil.Address) ([]RedirectedSendRequest, error) {
+	sendRequests := []RedirectedSendRequest{}
+	for _, req := range spendRequests {
+		if req.Recipient != nil && req.Recipient.EncodeAddress() != currentWallet.EncodeAddress() {
+			utxos, ok := utxoMap[req.ScriptAddress.EncodeAddress()]
+			if !ok {
+				return nil, ErrNoUTXOsForRequests
+			}
+			var totalAmount int64
+			for _, utxo := range utxos {
+				totalAmount += utxo.Amount
+			}
+			sendRequests = append(sendRequests, RedirectedSendRequest{SendRequest: SendRequest{Amount: totalAmount, To: req.Recipient}})
+		}
+	}
+	return sendRequests, nil
 }
 
 // Status checks the status of a transaction using its transaction ID (txid).
@@ -540,7 +572,7 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 }
 
 // Builds an unsigned transaction with the given utxos, recipients, change address and fee.
-func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
+func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
 
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
@@ -577,14 +609,36 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, cha
 		tx.AddTxOut(wire.NewTxOut(r.Amount, script))
 		totalSendAmount += r.Amount
 	}
+
 	// add change output to the transaction if required
 	if totalUTXOAmount >= totalSendAmount+fee {
-		script, err := txscript.PayToAddrScript(changeAddr)
-		if err != nil {
-			return nil, 0, err
-		}
 		if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
-			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
+
+			changeScript, err := txscript.PayToAddrScript(changeAddr)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			if len(redirectedRecipients) > 0 {
+				// first add the redirected recipients
+				fundsLeft := totalUTXOAmount - totalSendAmount
+				feePerRecipient := fee / int64(len(redirectedRecipients))
+				for _, r := range redirectedRecipients {
+					recipientScript, err := txscript.PayToAddrScript(r.To)
+					if err != nil {
+						return nil, 0, err
+					}
+
+					tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
+					fundsLeft -= r.Amount
+				}
+				if fundsLeft > DustAmount {
+					tx.AddTxOut(wire.NewTxOut(fundsLeft, changeScript))
+				}
+			} else {
+				tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, changeScript))
+			}
+
 		}
 	} else if len(recipients) != 0 && len(utxos) != 0 {
 		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+fee)

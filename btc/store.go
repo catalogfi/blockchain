@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -26,6 +27,7 @@ type serializableSpendRequest struct {
 	HashType      txscript.SigHashType
 	Sequence      uint32
 	Utxos         UTXOs
+	Recipient     string
 }
 
 // serializableSendRequest is a serializable version of SendRequest
@@ -54,6 +56,10 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 	}
 
 	for i, spend := range req.Spends {
+		var recipient string
+		if spend.Recipient != nil {
+			recipient = spend.Recipient.EncodeAddress()
+		}
 		primitiveReq.Spends[i] = serializableSpendRequest{
 			Witness:       spend.Witness,
 			Script:        spend.Script,
@@ -62,6 +68,7 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
 			Utxos:         spend.Utxos,
+			Recipient:     recipient,
 		}
 	}
 
@@ -95,6 +102,13 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 		if err != nil {
 			return BatcherRequest{}, err
 		}
+		var recipient btcutil.Address
+		if spend.Recipient != "" {
+			recipient, err = parseAddress(spend.Recipient)
+			if err != nil {
+				return BatcherRequest{}, err
+			}
+		}
 		req.Spends[i] = SpendRequest{
 			Witness:       spend.Witness,
 			Script:        spend.Script,
@@ -103,6 +117,7 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
 			Utxos:         spend.Utxos,
+			Recipient:     recipient,
 		}
 	}
 

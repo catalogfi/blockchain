@@ -406,8 +406,14 @@ func (w *batcherWallet) createRBFTx(
 	// Combine spend UTXOs with provided UTXOs
 	totalUtxos := append(spendUTXOs, utxos...)
 
+	// Generate the recipients for the spend requests
+	extraSendRequests, err := generateSendRequests(spendRequests, spendUTXOsMap, w.Address())
+	if err != nil {
+		return nil, err
+	}
+
 	// Build the RBF transaction
-	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, int(sacpsInAmount-sacpsOutAmount), sendRequests, w.Address(), int64(fee), sequencesMap, checkValidity)
+	tx, signIdx, err := buildRBFTransaction(totalUtxos, sacps, int(sacpsInAmount-sacpsOutAmount), sendRequests, extraSendRequests, w.Address(), int64(fee), sequencesMap, checkValidity)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +483,7 @@ func (w *batcherWallet) createRBFTx(
 				return nil, err
 			}
 		}
-		
+
 		var txBytes []byte
 		if txBytes, err = GetTxRawBytes(tx); err != nil {
 			return nil, err
@@ -645,7 +651,7 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]boo
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
 //
 // checkValidity is used to determine if the transaction should be validated while building
-func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
+func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return nil, 0, err
@@ -675,16 +681,10 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 	}
 
 	// Amount being sent to the change address
-	pendingAmount := int64(0)
 
 	// Add outputs to the transaction
 	totalSendAmount := int64(0)
 	for _, r := range recipients {
-
-		if r.To.EncodeAddress() == changeAddr.EncodeAddress() {
-			pendingAmount += r.Amount
-			continue
-		}
 
 		script, err := txscript.PayToAddrScript(r.To)
 		if err != nil {
@@ -696,18 +696,35 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 	}
 
 	// Add change output to the transaction if required
-	if totalUTXOAmount >= totalSendAmount+pendingAmount+fee {
+	if totalUTXOAmount >= totalSendAmount+fee {
 		script, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
 			return nil, 0, err
 		}
-		if totalUTXOAmount >= totalSendAmount+pendingAmount+fee+DustAmount {
-			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
-		} else if pendingAmount > 0 {
-			tx.AddTxOut(wire.NewTxOut(pendingAmount, script))
+
+		if len(redirectedRecipients) > 0 {
+			fundsLeft := totalUTXOAmount - totalSendAmount
+			feePerRecipient := fee / int64(len(redirectedRecipients))
+			for _, r := range redirectedRecipients {
+				recipientScript, err := txscript.PayToAddrScript(r.To)
+				if err != nil {
+					return nil, 0, err
+				}
+				tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
+				fundsLeft -= r.Amount
+			}
+			if fundsLeft > DustAmount {
+				remainingFee := fee - (int64(len(redirectedRecipients)) * feePerRecipient)
+				tx.AddTxOut(wire.NewTxOut(fundsLeft-remainingFee, script))
+			}
+		} else {
+			if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+				tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
+			}
 		}
+
 	} else if checkValidity {
-		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+pendingAmount+fee)
+		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+fee)
 	}
 
 	// Return the built transaction and the index of inputs that need to be signed

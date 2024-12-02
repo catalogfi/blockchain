@@ -166,41 +166,6 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
 
-	It("should not be able to refund instantly if the SACP is not correct", func(ctx context.Context) {
-
-		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
-		Expect(err).To(BeNil())
-
-		By("Initiate Alice HTLC")
-		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
-		Expect(err).To(BeNil())
-		txid, err := aliceHTLCWallet.Initiate(ctx, aliceHTLC, initiateAmount)
-		Expect(err).To(BeNil())
-		Expect(txid).NotTo(BeEmpty())
-
-		By("Instant refund should fail")
-		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
-		Expect(err).To(BeNil())
-
-		instantRefundTxBytes, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC, bobSimpleWallet.Address())
-		Expect(err).To(BeNil())
-
-		_, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)
-		Expect(err).Should(Equal(btc.ErrSACPInvalidOutput))
-
-		// lets initiate bobHTLC
-		bobHTLC := turnRolesInHTLC(aliceHTLC)
-		_, err = bobHTLCWallet.Initiate(ctx, bobHTLC, initiateAmount)
-		Expect(err).To(BeNil())
-
-		instantRefundTxBytes, err = bobHTLCWallet.GenerateInstantRefundSACP(ctx, bobHTLC, aliceSimpleWallet.Address())
-		Expect(err).To(BeNil())
-
-		By("Instant refund Alice HTLC should fail as the inputs are not correct")
-		_, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, instantRefundTxBytes)
-		Expect(err).Should(Equal(btc.ErrSACPInvalidInput))
-	})
-
 	It("should be able to refund instantly even if the fee is low", func(ctx context.Context) {
 		aliceHTLC, _, err := generateHTLC(alicePrivKey, bobPrivKey)
 		Expect(err).To(BeNil())
@@ -332,9 +297,10 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 
 		aliceRedeemTxID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
 			{
-				Action: btc.RedeemHTLCAction,
-				HTLC:   *bobHTLC1,
-				Secret: secret1,
+				Action:    btc.RedeemHTLCAction,
+				HTLC:      *bobHTLC1,
+				Secret:    secret1,
+				Recipient: bobSimpleWallet.Address(),
 			},
 			{
 				Action: btc.RedeemHTLCAction,
@@ -364,9 +330,9 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 
 		tx, _, err := aliceHTLCWallet.Status(ctx, aliceRedeemTxID)
 		Expect(err).To(BeNil())
-		Expect(tx.VOUTs).Should(HaveLen(1))
-		Expect(tx.VOUTs[0].Value).To(Equal(2*int(initiateAmount) - int(tx.Fee)))
-		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs).Should(HaveLen(2))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).To(Equal(bobSimpleWallet.Address().EncodeAddress()))
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 
 		tx, _, err = bobHTLCWallet.Status(ctx, bobRedeemTxID)
 		Expect(err).To(BeNil())

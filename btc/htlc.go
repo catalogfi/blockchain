@@ -38,6 +38,10 @@ type RawHTLCAction struct {
 	// Index at which the signature should be added in the witness of the SACP tx
 	// could be 0 or 1
 	InstantRefundSigAddAtIdx int
+
+	// Optional recipient address for the HTLC
+	// Only used in the case of RefundHTLCAction or RedeemHTLCAction
+	Recipient btcutil.Address
 }
 
 var (
@@ -195,7 +199,7 @@ func (hw *htlcWallet) Initiate(ctx context.Context, htlc *HTLC, amount int64) (s
 	}, nil, nil)
 }
 
-func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte) (SpendRequest, error) {
+func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte, recipient btcutil.Address) (SpendRequest, error) {
 	if !isSecretValid(secret, htlc) {
 		return SpendRequest{}, ErrInvalidSecret
 	}
@@ -221,12 +225,13 @@ func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte) (SpendRequest, error) {
 		Leaf:          redeemTapLeaf,
 		ScriptAddress: scriptAddr,
 		HashType:      txscript.SigHashAll,
+		Recipient:     recipient,
 	}, nil
 }
 
 // Redeem redeems the HTLC with the secret
 func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error) {
-	redeemSpendRequest, err := hw.redeem(htlc, secret)
+	redeemSpendRequest, err := hw.redeem(htlc, secret, nil)
 	if err != nil {
 		return "", err
 	}
@@ -310,13 +315,13 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 				Amount: htlcAction.Amount,
 			})
 		case RedeemHTLCAction:
-			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret)
+			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret, htlcAction.Recipient)
 			if err != nil {
 				return "", err
 			}
 			spends = append(spends, redeemSpendRequest)
 		case RefundHTLCAction:
-			refundSpendRequest, err := hw.refund(&htlcAction.HTLC)
+			refundSpendRequest, err := hw.refund(&htlcAction.HTLC, htlcAction.Recipient)
 			if err != nil {
 				return "", err
 			}
@@ -335,7 +340,7 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 	return hw.send(ctx, sends, spends, sacps)
 }
 
-func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
+func (hw *htlcWallet) refund(htlc *HTLC, recipient btcutil.Address) (SpendRequest, error) {
 	scriptAddr, err := hw.Address(htlc)
 	if err != nil {
 		return SpendRequest{}, err
@@ -371,6 +376,7 @@ func (hw *htlcWallet) refund(htlc *HTLC) (SpendRequest, error) {
 		ScriptAddress: scriptAddr,
 		HashType:      txscript.SigHashAll,
 		Sequence:      htlc.Timelock,
+		Recipient:     recipient,
 	}, nil
 }
 
@@ -383,7 +389,7 @@ func (hw *htlcWallet) Refund(ctx context.Context, htlc *HTLC, sigTx []byte) (str
 		return hw.send(ctx, nil, nil, [][]byte{sacp})
 	}
 
-	refundSpendRequest, err := hw.refund(htlc)
+	refundSpendRequest, err := hw.refund(htlc, nil)
 	if err != nil {
 		return "", err
 	}
