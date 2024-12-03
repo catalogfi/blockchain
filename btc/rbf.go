@@ -386,14 +386,36 @@ func (w *batcherWallet) createRBFTx(
 
 	var spendUTXOs UTXOs
 	var spendUTXOsMap map[string]UTXOs
+	var totalSpendUTXOValue int64
 
 	// Fetch UTXOs for spend requests
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		spendUTXOs, spendUTXOsMap, _, err = getUTXOsFromSpendRequest(spendRequests)
+		spendUTXOs, spendUTXOsMap, totalSpendUTXOValue, err = getUTXOsFromSpendRequest(spendRequests)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	totalExistingValue := int64(0)
+	for _, utxo := range utxos {
+		totalExistingValue += utxo.Amount
+	}
+
+	totalSendAmount := int64(0)
+	for _, r := range sendRequests {
+		totalSendAmount += r.Amount
+	}
+
+	// Check if the total value of the spend UTXOs and existing UTXOs is enough to cover the fee and send requests
+	if totalSpendUTXOValue+totalExistingValue-int64(fee) < DustAmount+totalSendAmount {
+		err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
+			utxos, _, err = w.getUtxosWithFee(ctx, totalSpendUTXOValue+totalExistingValue+int64(fee), int64(feeRate), avoidUtxos)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Add the provided UTXOs to the spend map
@@ -460,15 +482,7 @@ func (w *batcherWallet) createRBFTx(
 			return totalIn, totalOut
 		}()
 
-		changeIdx, value, ok := getChangeUTXOIndex(w.Address(), tx.TxOut)
-		newChange := value - int64(newFeeEstimate-int(fee))
-		if ok && // change tx out is found
-			totalIn >= totalOut+int64(newFeeEstimate)-value && // totalIn is greater than or equal to the sum of all outs except change
-			newChange > 0 { // updated change is non negative
-			if newChange > DustAmount { // updated change is greater than dust
-				tx.TxOut[changeIdx].Value = newChange
-			}
-		} else {
+		if totalOut+int64(newFeeEstimate) < totalIn {
 			w.logger.Debug(
 				"getting cover utxos",
 				zap.Int64("totalIn", totalIn),
@@ -705,22 +719,27 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 		if len(redirectedRecipients) > 0 {
 			fundsLeft := totalUTXOAmount - totalSendAmount
 			feePerRecipient := fee / int64(len(redirectedRecipients))
+			feeCollected := int64(0)
 			for _, r := range redirectedRecipients {
 				recipientScript, err := txscript.PayToAddrScript(r.To)
 				if err != nil {
 					return nil, 0, err
 				}
-				tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
+				if r.Amount < feePerRecipient+DustAmount {
+					// do not deduct fee here
+					tx.AddTxOut(wire.NewTxOut(r.Amount, recipientScript))
+				} else {
+					tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
+					feeCollected += feePerRecipient
+				}
 				fundsLeft -= r.Amount
 			}
-			if fundsLeft > DustAmount {
-				remainingFee := fee - (int64(len(redirectedRecipients)) * feePerRecipient)
+			remainingFee := fee - feeCollected
+			if fundsLeft > DustAmount+remainingFee {
 				tx.AddTxOut(wire.NewTxOut(fundsLeft-remainingFee, script))
 			}
-		} else {
-			if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
-				tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
-			}
+		} else if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
 		}
 
 	} else if checkValidity {

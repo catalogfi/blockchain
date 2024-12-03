@@ -78,6 +78,9 @@ var _ = Describe("Wallets", Ordered, func() {
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
+		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
+		Expect(err).To(BeNil())
+
 		faucetprivateKey, err := btcec.NewPrivateKey()
 		Expect(err).To(BeNil())
 		faucet, err = btc.NewSimpleWallet(faucetprivateKey, &chainParams, indexer, fixedFeeEstimator, btc.HighFee)
@@ -481,6 +484,51 @@ var _ = Describe("Wallets", Ordered, func() {
 
 		var tx btc.Transaction
 		assertSuccess(wallet, &tx, txId, mode)
+	})
+
+	It("should be able to send to different recipients", func() {
+		p2wshAdditionScript, p2wshAddr, err := additionScript(chainParams)
+		Expect(err).To(BeNil())
+
+		_, err = faucet.Send(context.Background(), []btc.SendRequest{
+			{
+				Amount: 1000,
+				To:     p2wshAddr,
+			},
+		}, nil, nil)
+		Expect(err).To(BeNil())
+
+		randomAddr, err := randomP2wpkhAddress(chainParams)
+		Expect(err).To(BeNil())
+
+		err = localnet.MineBitcoinBlocks(1, indexer)
+		Expect(err).To(BeNil())
+
+		txId, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+			{
+				Witness: [][]byte{
+					{0x1},
+					{0x1},
+					p2wshAdditionScript,
+				},
+				Script:        p2wshAdditionScript,
+				ScriptAddress: p2wshAddr,
+				HashType:      txscript.SigHashAll,
+				Recipient:     randomAddr,
+			},
+		}, nil)
+		Expect(err).To(BeNil())
+		Expect(txId).ShouldNot(BeEmpty())
+
+		var tx btc.Transaction
+		assertSuccess(wallet, &tx, txId, mode)
+
+		Expect(tx.VOUTs).Should(HaveLen(2))
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(randomAddr.EncodeAddress()))
+		Expect(tx.VOUTs[0].Value).Should(Equal(int(1000)))
+
+		// change to the wallet
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 	})
 
 	It("should be able to spend funds from different (p2wsh and p2tr) scripts", func() {
