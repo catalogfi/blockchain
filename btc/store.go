@@ -32,8 +32,10 @@ type serializableSpendRequest struct {
 
 // serializableSendRequest is a serializable version of SendRequest
 type serializableSendRequest struct {
-	Amount int64
-	To     string
+	Amount       int64
+	To           string
+	ID           string
+	InvalidateID string
 }
 
 // serializableBatcherRequest is a serializable version of BatcherRequest
@@ -73,9 +75,13 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 	}
 
 	for i, send := range req.Sends {
+		_, id := send.ID()
+		_, invalidateID := send.InvalidateTxID()
 		primitiveReq.Sends[i] = serializableSendRequest{
-			Amount: send.Amount,
-			To:     send.To.EncodeAddress(),
+			Amount:       send.Amount,
+			To:           send.To.EncodeAddress(),
+			ID:           id,
+			InvalidateID: invalidateID,
 		}
 	}
 	return json.Marshal(primitiveReq)
@@ -127,8 +133,10 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 			return BatcherRequest{}, err
 		}
 		req.Sends[i] = SendRequest{
-			Amount: send.Amount,
-			To:     addr,
+			Amount:       send.Amount,
+			To:           addr,
+			id:           send.ID,
+			invalidateID: send.InvalidateID,
 		}
 	}
 	return req, nil

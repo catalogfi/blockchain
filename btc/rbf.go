@@ -199,10 +199,77 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 	return missingIds
 }
 
+// removeInvalidatedSendRequests removes all send requests which are invalidated
+func removeInvalidatedSendRequests(sendRequests []SendRequest) ([]SendRequest, error) {
+
+	// lets make sure no dup ids are there
+	ids := make(map[string]int)
+	for _, sr := range sendRequests {
+		ok, id := sr.ID()
+		if ok {
+			fmt.Println("id", id)
+			ids[id]++
+		}
+	}
+
+	for _, count := range ids {
+		if count > 1 {
+			return nil, errors.New("duplicate ids found in send requests")
+		}
+	}
+
+	var removeIDs []string
+
+	for _, srI := range sendRequests {
+		found := false
+		ok, id := srI.InvalidateTxID()
+		if ok {
+			// find the id in the sendRequests
+			// if found remove the request from the sendRequests
+			// else remove the send request which has the invalidateID
+			for _, srJ := range sendRequests {
+				ok, srID := srJ.ID()
+				if ok && srID == id && srJ.Amount == srI.Amount {
+					removeIDs = append(removeIDs, srID)
+					found = true
+					break
+				}
+			}
+		}
+		if ok && !found {
+			ok, id := srI.ID()
+			if !ok {
+				return nil, fmt.Errorf("send request has no id")
+			}
+			removeIDs = append(removeIDs, id)
+		}
+	}
+
+	// remove the requests from the sendRequests
+	for _, id := range removeIDs {
+		for i, sr := range sendRequests {
+			ok, srID := sr.ID()
+			if ok && srID == id {
+				sendRequests = append(sendRequests[:i], sendRequests[i+1:]...)
+				break
+			}
+		}
+	}
+
+	return sendRequests, nil
+}
+
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
 func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []BatcherRequest, currentFeeRate, requiredFeeRate int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
+
+	// we need to remove all sendRequests which are invalidated
+	sendRequests, err := removeInvalidatedSendRequests(sendRequests)
+	if err != nil {
+		w.logger.Error("failed to remove invalidated send requests", zap.Error(err))
+		return err
+	}
 
 	// Get unconfirmed UTXOs to avoid them in the new transaction
 	avoidUtxos, err := w.getUnconfirmedUtxos(c)
@@ -231,6 +298,8 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 	if currentFeeRate+10 >= requiredFeeRate {
 		requiredFeeRate = currentFeeRate + 10
 	}
+
+	// need to get
 
 	tx, err := w.createRBFTx(
 		c,

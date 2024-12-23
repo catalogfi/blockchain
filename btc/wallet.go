@@ -121,10 +121,51 @@ type SpendRequest struct {
 }
 
 type SendRequest struct {
+	// Optional ID of the send request
+	id string
+
 	// Amount to send
 	Amount int64
 	// Recipient address
 	To btcutil.Address
+
+	// Invalidate the previous send request if it exists and make a direct send request
+	// instead of routing through middle script
+	invalidateID string
+}
+
+func NewSendRequest(id string, amount int64, to btcutil.Address) SendRequest {
+	return SendRequest{
+		id:     id,
+		Amount: amount,
+		To:     to,
+	}
+}
+
+func NewSendRequestWithInvalidateID(id string, amount int64, to btcutil.Address, invalidateID string) SendRequest {
+	return SendRequest{
+		id:           id,
+		Amount:       amount,
+		To:           to,
+		invalidateID: invalidateID,
+	}
+}
+
+// InvalidateTxID returns true if the send request has to invalidate the previous send request
+// and returns the txid of the previous send request
+func (sr *SendRequest) InvalidateTxID() (bool, string) {
+	if sr.invalidateID == "" {
+		return false, ""
+	}
+	return true, sr.invalidateID
+}
+
+// ID returns true if the send request has an ID and returns the ID
+func (sr *SendRequest) ID() (bool, string) {
+	if sr.id == "" {
+		return false, ""
+	}
+	return true, sr.id
 }
 
 // RedirectedSendRequest is a send request that is redirected from a spend request
@@ -900,9 +941,21 @@ func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest, sacps []
 
 	}
 
+	dupeIds := make(map[string]int)
+
 	for _, r := range sendReqs {
 		if r.Amount <= DustAmount {
 			return ErrAmountLessThanDust
+		}
+		ok, id := r.ID()
+		if ok {
+			dupeIds[id]++
+		}
+	}
+
+	for _, count := range dupeIds {
+		if count > 1 {
+			return fmt.Errorf("duplicate ids found in send requests")
 		}
 	}
 

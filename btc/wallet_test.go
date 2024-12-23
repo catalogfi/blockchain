@@ -81,6 +81,12 @@ var _ = Describe("Wallets", Ordered, func() {
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
+		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
+		Expect(err).To(BeNil())
+
+		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
+		Expect(err).To(BeNil())
+
 		faucetprivateKey, err := btcec.NewPrivateKey()
 		Expect(err).To(BeNil())
 		faucet, err = btc.NewSimpleWallet(faucetprivateKey, &chainParams, indexer, fixedFeeEstimator, btc.HighFee)
@@ -138,14 +144,8 @@ var _ = Describe("Wallets", Ordered, func() {
 		bobAddr := bobWallet.Address()
 
 		req := []btc.SendRequest{
-			{
-				Amount: 100000,
-				To:     wallet.Address(),
-			},
-			{
-				Amount: 100000,
-				To:     bobAddr,
-			},
+			btc.NewSendRequest("1", 100000, wallet.Address()),
+			btc.NewSendRequest("2", 100000, bobAddr),
 		}
 
 		txid, err := wallet.Send(context.Background(), req, nil, nil)
@@ -167,6 +167,61 @@ var _ = Describe("Wallets", Ordered, func() {
 			// change address
 			Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 		}
+
+	})
+
+	It("should be able to send funds with overriding previous send request", func() {
+		err = localnet.MineBitcoinBlocks(1, indexer)
+		Expect(err).To(BeNil())
+
+		pk, err := btcec.NewPrivateKey()
+		Expect(err).To(BeNil())
+		bobWallet, err := btc.NewSimpleWallet(pk, &chainParams, indexer, fixedFeeEstimator, feeLevel)
+		Expect(err).To(BeNil())
+		bobAddr := bobWallet.Address()
+
+		req := []btc.SendRequest{
+			btc.NewSendRequest("1", 100000, wallet.Address()),
+			btc.NewSendRequest("2", 100000, bobAddr),
+		}
+
+		txid, err := wallet.Send(context.Background(), req, nil, nil)
+		Expect(err).To(BeNil())
+
+		var tx btc.Transaction
+		assertSuccess(wallet, &tx, txid, mode)
+
+		// lets create a random address
+		charlieAddr, err := randomP2wpkhAddress(chainParams)
+		Expect(err).To(BeNil())
+
+		fmt.Println("charlieAddr", charlieAddr.EncodeAddress())
+
+		req = []btc.SendRequest{
+			btc.NewSendRequestWithInvalidateID("3", 100000, charlieAddr, "2"),
+		}
+
+		txid, err = wallet.Send(context.Background(), req, nil, nil)
+		Expect(err).To(BeNil())
+		assertSuccess(wallet, &tx, txid, mode)
+
+		daveAddr, err := randomP2wpkhAddress(chainParams)
+		Expect(err).To(BeNil())
+
+		// but change the id to 1
+		req = []btc.SendRequest{
+			btc.NewSendRequestWithInvalidateID("4", 100000, daveAddr, "1"),
+		}
+
+		txid, err = wallet.Send(context.Background(), req, nil, nil)
+		Expect(err).To(BeNil())
+
+		assertSuccess(wallet, &tx, txid, mode)
+
+		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(daveAddr.EncodeAddress()))
+
+		fmt.Println("tx", tx.TxID)
+		fmt.Println("tx.vouts", wallet.Address().EncodeAddress())
 
 	})
 
@@ -927,7 +982,7 @@ var _ = Describe("Wallets", Ordered, func() {
 		By("Send funds to Bob")
 		_, err = faucet.Send(context.Background(), []btc.SendRequest{
 			{
-				Amount: 10000000,
+				Amount: 100000,
 				To:     bobWallet.Address(),
 			},
 		}, nil, nil)
@@ -938,7 +993,7 @@ var _ = Describe("Wallets", Ordered, func() {
 
 		txid, err := wallet.Send(context.Background(), []btc.SendRequest{
 			{
-				Amount: 10000000,
+				Amount: 100000,
 				To:     bobWallet.Address(),
 			},
 		}, nil, [][]byte{sacp1})
@@ -1412,7 +1467,7 @@ func additionTapscript(params chaincfg.Params) ([]byte, *btcutil.AddressTaproot,
 		internalKey, tapScriptRootHash[:],
 	)
 
-	addr, err := btcutil.NewAddressTaproot(outputKey.X().Bytes(), &params)
+	addr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), &params)
 	if err != nil {
 		return nil, nil, nil, err
 	}
