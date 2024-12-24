@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -329,7 +330,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 	w.logger.Info("submitted rbf tx", zap.String("txid", tx.TxHash().String()))
 
 	var transaction Transaction
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
+	err = withContextTimeout(c, time.Second*30, func(ctx context.Context) error {
 		transaction, err = w.indexer.GetTx(ctx, tx.TxHash().String())
 		return err
 	})
