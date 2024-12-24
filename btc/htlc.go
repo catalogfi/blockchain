@@ -312,10 +312,17 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 	for _, htlcAction := range htlcActions {
 		switch htlcAction.Action {
 		case InitiateHTLCAction:
-			addr, err := hw.Address(&htlcAction.HTLC)
-			if err != nil {
-				return "", err
+			var addr btcutil.Address
+			if htlcAction.Recipient != nil {
+				addr = htlcAction.Recipient
+			} else {
+				var err error
+				addr, err = hw.Address(&htlcAction.HTLC)
+				if err != nil {
+					return "", err
+				}
 			}
+
 			if htlcAction.InitID == "" {
 				return "", fmt.Errorf("initID (unique id for the initiate action) is required for initiate action")
 			}
