@@ -42,6 +42,12 @@ type RawHTLCAction struct {
 	// Optional recipient address for the HTLC
 	// Only used in the case of RefundHTLCAction or RedeemHTLCAction
 	Recipient btcutil.Address
+
+	// Only used in the case of InitiateHTLCAction which invalidates the previous initiate tx
+	InvalidateInitID string
+
+	// InitID is the id used for send request
+	InitID string
 }
 
 var (
@@ -310,10 +316,11 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 			if err != nil {
 				return "", err
 			}
-			sends = append(sends, SendRequest{
-				To:     addr,
-				Amount: htlcAction.Amount,
-			})
+			if htlcAction.InitID == "" {
+				return "", fmt.Errorf("initID (unique id for the initiate action) is required for initiate action")
+			}
+
+			sends = append(sends, NewSendRequestWithInvalidateID(htlcAction.InitID, htlcAction.Amount, addr, htlcAction.InvalidateInitID))
 		case RedeemHTLCAction:
 			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret, htlcAction.Recipient)
 			if err != nil {
