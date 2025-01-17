@@ -572,10 +572,6 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
 
-	for _, in := range tx.TxIn {
-		w.logger.Info("Witness size", zap.Int("size", in.Witness.SerializeSize()))
-	}
-
 	tx, err = w.signTx(tx, inValues)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)

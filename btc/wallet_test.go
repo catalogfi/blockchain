@@ -198,7 +198,7 @@ var _ = Describe("Wallets", Ordered, func() {
 		fmt.Println("charlieAddr", charlieAddr.EncodeAddress())
 
 		req = []btc.SendRequest{
-			btc.NewSendRequestWithInvalidateID("3", 100000, charlieAddr, "2"),
+			btc.NewSendRequestWithInvalidateID("3", 100000, charlieAddr, "2", ""),
 		}
 
 		txid, err = wallet.Send(context.Background(), req, nil, nil)
@@ -210,7 +210,7 @@ var _ = Describe("Wallets", Ordered, func() {
 
 		// but change the id to 1
 		req = []btc.SendRequest{
-			btc.NewSendRequestWithInvalidateID("4", 100000, daveAddr, "1"),
+			btc.NewSendRequestWithInvalidateID("4", 100000, daveAddr, "1", ""),
 		}
 
 		txid, err = wallet.Send(context.Background(), req, nil, nil)

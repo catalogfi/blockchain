@@ -100,6 +100,10 @@ type HTLCWallet interface {
 	//
 	// Signature is added at the first index of the witness of the transaction inputs.
 	GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC, recipient btcutil.Address) ([]byte, error)
+
+	// GenerateRedeemSACP generates the SACP tx needed for the redeem action.
+	GenerateRedeemSACP(ctx context.Context, secret []byte, htlc *HTLC, to btcutil.Address) ([]byte, error)
+
 	// Address returns the tapscript address of the HTLC
 	Address(htlc *HTLC) (btcutil.Address, error)
 	// Status returns the transaction if submitted and bool indicating whether the transaction
@@ -155,6 +159,37 @@ func (hw *htlcWallet) Address(htlc *HTLC) (btcutil.Address, error) {
 		return nil, err
 	}
 	return addr, nil
+}
+
+func (hw *htlcWallet) GenerateRedeemSACP(ctx context.Context, secret []byte, htlc *HTLC, to btcutil.Address) ([]byte, error) {
+	redeemTapLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafRedeem)
+	if err != nil {
+		return nil, err
+	}
+
+	witness := [][]byte{
+		AddSignatureSchnorrOp,
+		secret,
+		redeemTapLeaf.Script,
+		cbBytes,
+	}
+
+	scriptAddr, err := hw.Address(htlc)
+	if err != nil {
+		return nil, err
+	}
+
+	txBytes, err := hw.wallet.GenerateSACP(ctx, SpendRequest{
+		Witness:       witness,
+		Leaf:          redeemTapLeaf,
+		ScriptAddress: scriptAddr,
+		HashType:      SigHashSingleAnyoneCanPay,
+		Recipient:     to,
+	}, to)
+	if err != nil {
+		return nil, err
+	}
+	return txBytes, nil
 }
 
 // GenerateInstantRefundSACP generates the SACP tx needed for the instant refunds
