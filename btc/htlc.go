@@ -327,7 +327,7 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 				return "", fmt.Errorf("initID (unique id for the initiate action) is required for initiate action")
 			}
 
-			sends = append(sends, NewSendRequestWithInvalidateID(htlcAction.InitID, htlcAction.Amount, addr, htlcAction.InvalidateInitID))
+			sends = append(sends, NewSendRequestWithInvalidateID(htlcAction.InitID, htlcAction.Amount, addr, htlcAction.InvalidateInitID, ""))
 		case RedeemHTLCAction:
 			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret, htlcAction.Recipient)
 			if err != nil {

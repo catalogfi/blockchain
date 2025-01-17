@@ -132,6 +132,9 @@ type SendRequest struct {
 	// Invalidate the previous send request if it exists and make a direct send request
 	// instead of routing through middle script
 	invalidateID string
+
+	// MergeTxHex is the txid of the tx that is being merged
+	mergeTxHex string
 }
 
 func NewSendRequest(id string, amount int64, to btcutil.Address) SendRequest {
@@ -142,12 +145,13 @@ func NewSendRequest(id string, amount int64, to btcutil.Address) SendRequest {
 	}
 }
 
-func NewSendRequestWithInvalidateID(id string, amount int64, to btcutil.Address, invalidateID string) SendRequest {
+func NewSendRequestWithInvalidateID(id string, amount int64, to btcutil.Address, invalidateID string, mergeTxHex string) SendRequest {
 	return SendRequest{
 		id:           id,
 		Amount:       amount,
 		To:           to,
 		invalidateID: invalidateID,
+		mergeTxHex:   mergeTxHex,
 	}
 }
 
@@ -158,6 +162,13 @@ func (sr *SendRequest) InvalidateTxID() (bool, string) {
 		return false, ""
 	}
 	return true, sr.invalidateID
+}
+
+func (sr *SendRequest) MergeTxHex() (bool, string) {
+	if sr.mergeTxHex == "" {
+		return false, ""
+	}
+	return true, sr.mergeTxHex
 }
 
 // ID returns true if the send request has an ID and returns the ID
@@ -830,6 +841,10 @@ func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []
 	}
 
 	return nil
+}
+
+func SignTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount int64, index int, witness [][]byte, script []byte, leaf *txscript.TapLeaf, hashType txscript.SigHashType, privateKey *secp256k1.PrivateKey) error {
+	return signTx(tx, prevOutFetcher, amount, index, witness, script, leaf, hashType, privateKey)
 }
 
 // Signs the transaction with the given witness and script.

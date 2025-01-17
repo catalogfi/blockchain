@@ -36,6 +36,7 @@ type Transaction struct {
 	VINs     []VIN     `json:"vin"`
 	VOUTs    []Prevout `json:"vout"`
 	Status   Status    `json:"status"`
+	Size     int       `json:"size"`
 }
 
 type VIN struct {
@@ -371,8 +372,8 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 		if err != nil {
 			return err
 		}
+		errMessage := strings.ToLower(string(data))
 		if resp.StatusCode != http.StatusOK {
-			errMessage := strings.ToLower(string(data))
 			switch {
 			case strings.Contains(errMessage, "transaction already in block chain"):
 				return NewNoRetryError(ErrAlreadyInChain)
@@ -381,7 +382,7 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 			case strings.Contains(errMessage, "txn-mempool-conflict"):
 				return NewNoRetryError(ErrMempoolConflict)
 			default:
-				return NewNoRetryError(errors.New(string(data)))
+				return NewNoRetryError(errors.New(errMessage))
 			}
 		}
 		return nil
