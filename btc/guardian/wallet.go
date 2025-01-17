@@ -611,7 +611,12 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to get tx: %w", err)
 	}
 
-	err = w.cache.SaveLatestBatch(ctx, NewBatch(batchTx, reqIDs, previousBatch.Tx.TxID))
+	previousID := "coinbase"
+	if previousBatch != nil {
+		previousID = previousBatch.Tx.TxID
+	}
+
+	err = w.cache.SaveLatestBatch(ctx, NewBatch(batchTx, reqIDs, previousID))
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
 	}
@@ -662,15 +667,7 @@ func calculateFeeRate(weight, feePaid int64) int64 {
 }
 
 func (w *Wallet) addChangeOutput(tx *wire.MsgTx, changeAmt int64) (*wire.MsgTx, error) {
-	myAddr, err := w.Address()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get address: %w", err)
-	}
-	myPKScript, err := txscript.PayToAddrScript(myAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pkscript: %w", err)
-	}
-	tx.AddTxOut(wire.NewTxOut(changeAmt, myPKScript))
+	tx.AddTxOut(wire.NewTxOut(changeAmt, w.pkScript))
 	return tx, nil
 }
 
@@ -707,17 +704,8 @@ func (w *Wallet) decreaseChangeAmount(tx *wire.MsgTx, decrease int64) (*wire.Msg
 }
 
 func (w *Wallet) hasChangeOutput(tx *wire.MsgTx) bool {
-	myAddr, err := w.Address()
-	if err != nil {
-		return false
-	}
-	myPKScript, err := txscript.PayToAddrScript(myAddr)
-	if err != nil {
-		return false
-	}
-
 	for _, out := range tx.TxOut {
-		if bytes.Equal(out.PkScript, myPKScript) {
+		if bytes.Equal(out.PkScript, w.pkScript) {
 			return true
 		}
 	}
@@ -900,19 +888,9 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 		return nil, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	ignoreChangeAddr, err := w.Address()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get address: %w", err)
-	}
-
-	pkscript, err := txscript.PayToAddrScript(ignoreChangeAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pkscript: %w", err)
-	}
-
 	totalOutAmount := int64(0)
 	for _, out := range tx.TxOut {
-		if !bytes.Equal(out.PkScript, pkscript) {
+		if !bytes.Equal(out.PkScript, w.pkScript) {
 			totalOutAmount += out.Value
 		}
 	}
@@ -934,13 +912,8 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 		}
 	}
 
-	myPKScript, err := txscript.PayToAddrScript(ignoreChangeAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pkscript: %w", err)
-	}
-
 	for i, out := range tx.TxOut {
-		if bytes.Equal(out.PkScript, myPKScript) {
+		if bytes.Equal(out.PkScript, w.pkScript) {
 			tx.TxOut[i].Value -= newOutTotalAmount
 		}
 	}
@@ -1056,11 +1029,7 @@ func parseIntoTxOutputs(req []btc.SendRequest) ([]*TxOutput, error) {
 
 func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amount int64) ([]*wire.TxIn, int64, error) {
 
-	addr, err := w.Address()
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get address: %w", err)
-	}
-	utxos, err := w.indexer.GetUTXOs(ctx, addr)
+	utxos, err := w.indexer.GetUTXOs(ctx, w.addr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get utxos: %w", err)
 	}
@@ -1101,12 +1070,8 @@ func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amoun
 	return txIns, amountToBeAdded, nil
 }
 
-func (w *Wallet) Address() (btcutil.Address, error) {
-	addr, err := btcutil.DecodeAddress(w.client.GetAccount().Address, w.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode address: %w", err)
-	}
-	return addr, nil
+func (w *Wallet) Address() btcutil.Address {
+	return w.addr
 }
 
 func (w *Wallet) selectAndAddUTXOsForNewOuts(ctx context.Context, tx *wire.MsgTx, outs []*TxOutput) (*wire.MsgTx, error) {

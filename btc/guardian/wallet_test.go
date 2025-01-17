@@ -60,7 +60,7 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 	require.NoError(t, err)
 
 	// Fund the guardian wallet
-	addr, err := guardianWallet.Address()
+	addr := guardianWallet.Address()
 	require.NoError(t, err)
 	_, err = localnet.FundBitcoin(addr.String(), indexer)
 	require.NoError(t, err)
@@ -106,9 +106,7 @@ func TestGuardianWallet(t *testing.T) {
 		require.Equal(t, transaction.VOUTs[0].Value, int(amount))
 		require.Equal(t, transaction.VOUTs[0].ScriptPubKeyAddress, randomP2PKHAddr1.String())
 
-		addr, err := wallet.Address()
-		require.NoError(t, err)
-		require.Equal(t, addr.String(), transaction.VOUTs[1].ScriptPubKeyAddress)
+		require.Equal(t, wallet.Address().String(), transaction.VOUTs[1].ScriptPubKeyAddress)
 
 		randomP2PKHAddr2 := randomP2PKHAddr()
 
