@@ -1030,6 +1030,10 @@ func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amoun
 		return nil, 0, fmt.Errorf("failed to get utxos: %w", err)
 	}
 
+	if len(utxos) == 0 {
+		return nil, 0, fmt.Errorf("no utxos found")
+	}
+
 	utxosToBeSelected := []btc.UTXO{}
 	amountToBeAdded := int64(0)
 	for _, utxo := range utxos {
