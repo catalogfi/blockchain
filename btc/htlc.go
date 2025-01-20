@@ -22,6 +22,7 @@ const (
 	RedeemHTLCAction        HTLCAction = "redeem"
 	RefundHTLCAction        HTLCAction = "refund"
 	InstantRefundHTLCAction HTLCAction = "instantRefund"
+	UserRedeemHTLCAction    HTLCAction = "userRedeem"
 )
 
 type RawHTLCAction struct {
@@ -33,11 +34,11 @@ type RawHTLCAction struct {
 	// Only used in the case of RedeemHTLCAction.
 	Secret []byte
 	// Only used in the case of RefundHTLCAction.
-	InsantRefundSACPTxBytes []byte
+	SACPTx []byte
 
 	// Index at which the signature should be added in the witness of the SACP tx
 	// could be 0 or 1
-	InstantRefundSigAddAtIdx int
+	SACPSigAddAtIdx int
 
 	// Optional recipient address for the HTLC
 	// Only used in the case of RefundHTLCAction or RedeemHTLCAction
@@ -375,11 +376,16 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 				return "", err
 			}
 			spends = append(spends, refundSpendRequest)
+		case UserRedeemHTLCAction:
+			if htlcAction.SACPTx == nil {
+				return "", fmt.Errorf("SACPTx is required for userRedeem action")
+			}
+			sacps = append(sacps, htlcAction.SACPTx)
 		case InstantRefundHTLCAction:
-			if htlcAction.InstantRefundSigAddAtIdx != 0 && htlcAction.InstantRefundSigAddAtIdx != 1 {
+			if htlcAction.SACPSigAddAtIdx != 0 && htlcAction.SACPSigAddAtIdx != 1 {
 				return "", fmt.Errorf("invalid instantRefundSigAddAtIdx. expected 0 or 1")
 			}
-			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.InsantRefundSACPTxBytes, htlcAction.InstantRefundSigAddAtIdx)
+			refundSACP, err := hw.instantRefund(ctx, &htlcAction.HTLC, htlcAction.SACPTx, htlcAction.SACPSigAddAtIdx)
 			if err != nil {
 				return "", err
 			}
