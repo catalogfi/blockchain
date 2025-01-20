@@ -269,25 +269,6 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	reqIDs := []string{}
-	for _, r := range req {
-		pkScript, err := txscript.PayToAddrScript(r.To)
-		if err != nil {
-			return chainhash.Hash{}, fmt.Errorf("failed to get pk script: %w", err)
-		}
-		for _, out := range tx.TxOut {
-			if bytes.Equal(out.PkScript, pkScript) {
-				ok, id := r.ID()
-				if !ok {
-					return chainhash.Hash{}, fmt.Errorf("request id not found")
-				}
-				reqIDs = append(reqIDs, id)
-			}
-		}
-	}
-
-	onGoingBatch.RequestIds = append(onGoingBatch.RequestIds, reqIDs...)
-
 	ctx, cancel := context.WithTimeout(ctx, 5000*time.Millisecond)
 	defer cancel()
 
@@ -297,21 +278,23 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	}
 	onGoingBatch.Tx = batchTx
 	onGoingBatch.PreviousBatchID = batchTx.TxID
-	err = w.cache.SaveLatestBatch(ctx, onGoingBatch)
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
-	}
 
 	// vouts are necessary for merge requests
-	err = w.saveVouts(ctx, tx, req)
+	reqIDs, err := w.saveVouts(tx, req)
+
+	for reqID, vout := range reqIDs {
+		onGoingBatch.RequestIds[reqID] = vout
+	}
+	
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
 	}
 
 	// save the merge tx fee
-	err = w.cache.SaveMergeTxFee(ctx, mergeTxFee)
+	onGoingBatch.MergeTxFee = mergeTxFee
+	err = w.cache.SaveLatestBatch(ctx, onGoingBatch)
 	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save merge tx fee: %w", err)
+		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
 	}
 
 	return tx.TxHash(), nil
@@ -362,7 +345,7 @@ func extractMergeIDs(req []btc.SendRequest, batch *Batch) ([]btc.SendRequest, []
 
 		fmt.Println("id to merge", id)
 
-		for _, rID := range batch.RequestIds {
+		for rID := range batch.RequestIds {
 			if rID == id {
 				mergeIDs = append(mergeIDs, id)
 				ok, mergeTxHex := r.MergeTxHex()
@@ -593,53 +576,40 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	reqIDs := []string{}
-	for _, r := range remainingRequests {
-		ok, id := r.ID()
-		if !ok {
-			return chainhash.Hash{}, fmt.Errorf("request id not found")
-		}
-		reqIDs = append(reqIDs, id)
-	}
-
 	batchTx, err := w.indexer.GetTx(ctx, tx.TxHash().String())
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to get tx: %w", err)
 	}
 
-	previousID := "coinbase"
+	previousID := CoinbaseBatchID
 	if previousBatch != nil {
 		previousID = previousBatch.Tx.TxID
 	}
 
-	err = w.cache.SaveLatestBatch(ctx, NewBatch(batchTx, reqIDs, previousID))
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
-	}
-
-	err = w.saveVouts(ctx, tx, req)
+	reqIDs, err := w.saveVouts(tx, req)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
 	}
 
-	err = w.cache.SaveMergeTxFee(ctx, 0)
+	err = w.cache.SaveLatestBatch(ctx, NewBatch(batchTx, reqIDs, previousID, 0))
+
 	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save merge tx fee: %w", err)
+		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
 	}
 
 	return tx.TxHash(), nil
 }
 
-func (w *Wallet) saveVouts(ctx context.Context, tx *wire.MsgTx, req []btc.SendRequest) error {
-
+func (w *Wallet) saveVouts(tx *wire.MsgTx, req []btc.SendRequest) (map[string]int, error) {
+	reqToVout := make(map[string]int)
 	for _, r := range req {
 		ok, id := r.ID()
 		if !ok {
-			return fmt.Errorf("request id not found")
+			return reqToVout, fmt.Errorf("request id not found")
 		}
 		toPkScript, err := txscript.PayToAddrScript(r.To)
 		if err != nil {
-			return fmt.Errorf("failed to get to pkscript: %w", err)
+			return reqToVout, fmt.Errorf("failed to get to pkscript: %w", err)
 		}
 		idx := 0
 		for i, out := range tx.TxOut {
@@ -648,13 +618,9 @@ func (w *Wallet) saveVouts(ctx context.Context, tx *wire.MsgTx, req []btc.SendRe
 				break
 			}
 		}
-		err = w.cache.SaveRequestVOUT(ctx, id, idx)
-		if err != nil {
-			return fmt.Errorf("failed to save request vout: %w", err)
-		}
+		reqToVout[id] = idx
 	}
-
-	return nil
+	return reqToVout, nil
 }
 
 func calculateFeeRate(weight, feePaid int64) int64 {
