@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -73,9 +71,6 @@ type IndexerClient interface {
 	// GetUTXOs return all utxos of the given address.
 	GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error)
 
-	// GetUTXOsForAmount returns the utxos necessary to spend the given amount from the given address.
-	GetUTXOsForAmount(ctx context.Context, address btcutil.Address, amount int64) (UTXOs, int64, error)
-
 	// GetTipBlockHeight returns the tip block height.
 	GetTipBlockHeight(ctx context.Context) (uint64, error)
 
@@ -87,31 +82,19 @@ type IndexerClient interface {
 
 	// SubmitTx submits the given tx to the blockchain. The tx needs to be signed.
 	SubmitTx(ctx context.Context, tx *wire.MsgTx) error
-
-	// FeeEstimate returns the estimate fees for different confirmation time.
-	FeeEstimate(ctx context.Context) (FeeSuggestion, error)
 }
 
 type electrsIndexerClient struct {
 	logger        *zap.Logger
 	url           string
 	retryInterval time.Duration
-	utxoCache     map[string]utxoCache
-}
-
-type utxoCache struct {
-	time  time.Time
-	utxos []UTXO
 }
 
 func NewElectrsIndexerClient(logger *zap.Logger, url string, retryInterval time.Duration) IndexerClient {
-
-	utxoCache := make(map[string]utxoCache)
 	return &electrsIndexerClient{
 		logger:        logger,
 		url:           url,
 		retryInterval: retryInterval,
-		utxoCache:     utxoCache,
 	}
 }
 
@@ -159,13 +142,6 @@ func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address b
 // GetUTXOs implements the IndexerClient basing on the electrs indexer API.
 // See https://github.com/Blockstream/esplora/blob/master/API.md
 func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error) {
-
-	// Check if the utxos are cached
-	cache, ok := client.utxoCache[address.EncodeAddress()]
-	if ok && time.Since(cache.time) < 10*time.Second {
-		return cache.utxos, nil
-	}
-
 	endpoint, err := url.JoinPath(client.url, "address", address.EncodeAddress(), "utxo")
 	if err != nil {
 		return nil, err
@@ -197,46 +173,7 @@ func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcuti
 		return nil, err
 	}
 
-	// Cache the utxos
-	client.utxoCache[address.EncodeAddress()] = utxoCache{
-		time:  time.Now(),
-		utxos: utxos,
-	}
-
 	return utxos, nil
-}
-
-// GetUTXOsForAmount returns the utxos necessary to spend the given amount from the given address.
-func (client *electrsIndexerClient) GetUTXOsForAmount(ctx context.Context, address btcutil.Address, amount int64) (UTXOs, int64, error) {
-	utxos, err := client.GetUTXOs(ctx, address)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	totalBalance := int64(0)
-	for _, utxo := range utxos {
-		totalBalance += utxo.Amount
-	}
-	if totalBalance < amount {
-		return nil, 0, fmt.Errorf("insufficient balance: has %d need %d", totalBalance, amount)
-	}
-
-	sort.Slice(utxos, func(i, j int) bool {
-		return utxos[i].Amount > utxos[j].Amount
-	})
-
-	selectedUtxos := []UTXO{}
-	selectedAmount := int64(0)
-
-	for _, utxo := range utxos {
-		selectedUtxos = append(selectedUtxos, utxo)
-		selectedAmount += utxo.Amount
-		if selectedAmount >= amount {
-			break
-		}
-	}
-
-	return selectedUtxos, selectedAmount, nil
 }
 
 func (client *electrsIndexerClient) GetTipBlockHeight(ctx context.Context) (uint64, error) {
@@ -354,13 +291,13 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 	}
 
 	var txBytes []byte
-	if txBytes, err = GetTxRawBytes(tx); err != nil {
+	if txBytes, err = TxRawBytes(tx); err != nil {
 		return err
 	}
 	strBuffer := bytes.NewBufferString(hex.EncodeToString(txBytes))
 
 	// Send the request
-	err = retry(client.logger, ctx, client.retryInterval, func() error {
+	return retry(client.logger, ctx, client.retryInterval, func() error {
 		resp, err := http.Post(endpoint, "application/text", strBuffer)
 		if err != nil {
 			return err
@@ -386,58 +323,6 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	// clear the utxo cache
-	for k := range client.utxoCache {
-		delete(client.utxoCache, k)
-	}
-	return nil
-}
-
-func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggestion, error) {
-	endpoint, err := url.JoinPath(client.url, "fee-estimates")
-	if err != nil {
-		return FeeSuggestion{}, err
-	}
-
-	// Send the request
-	var fees FeeSuggestion
-	err = retry(client.logger, ctx, client.retryInterval, func() error {
-		resp, err := http.Get(endpoint)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			errMsg, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
-			}
-			return fmt.Errorf("FeeEstimate : %v", string(errMsg))
-		}
-
-		feerates := map[string]float64{}
-		if err := json.NewDecoder(resp.Body).Decode(&fees); err != nil {
-			return err
-		}
-		if len(feerates) == 0 {
-			return NewNoRetryError(fmt.Errorf("not enough data"))
-		}
-
-		fees = FeeSuggestion{
-			Minimum: int(math.Ceil(feerates["504"])),
-			Economy: int(math.Ceil(feerates["144"])),
-			Low:     int(math.Ceil(feerates["6"])),
-			Medium:  int(math.Ceil(feerates["3"])),
-			High:    int(math.Ceil(feerates["1"])),
-		}
-
-		return nil
-	})
-	return fees, err
 }
 
 func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {

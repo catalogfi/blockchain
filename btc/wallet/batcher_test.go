@@ -1,51 +1,52 @@
-package btc_test
+package wallet_test
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/wallet"
 )
 
 type mockCache struct {
-	batches     map[string]btc.Batch
+	batches     map[string]wallet.Batch
 	batchList   []string
-	requests    map[string]btc.BatcherRequest
+	requests    map[string]wallet.BatcherRequest
 	requestList []string
-	mode        btc.Strategy
+	mode        wallet.Strategy
 }
 
-func NewTestCache(mode btc.Strategy) btc.Cache {
+func NewTestCache(mode wallet.Strategy) wallet.Cache {
 	return &mockCache{
-		batches:  make(map[string]btc.Batch),
-		requests: make(map[string]btc.BatcherRequest),
+		batches:  make(map[string]wallet.Batch),
+		requests: make(map[string]wallet.BatcherRequest),
 		mode:     mode,
 	}
 }
 
-func (m *mockCache) ReadBatchByReqID(ctx context.Context, id string) (btc.Batch, error) {
+func (m *mockCache) ReadBatchByReqID(ctx context.Context, id string) (wallet.Batch, error) {
 	for _, batchId := range m.batchList {
 		batch, ok := m.batches[batchId]
 		if !ok {
-			return btc.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not recorded")
+			return wallet.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not recorded")
 		}
 		if _, ok := batch.RequestIds[id]; ok {
 			return batch, nil
 		}
 	}
-	return btc.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not found")
+	return wallet.Batch{}, fmt.Errorf("ReadBatchByReqId, batch not found")
 }
 
-func (m *mockCache) ReadBatch(ctx context.Context, txId string) (btc.Batch, error) {
+func (m *mockCache) ReadBatch(ctx context.Context, txId string) (wallet.Batch, error) {
 	batch, ok := m.batches[txId]
 	if !ok {
-		return btc.Batch{}, fmt.Errorf("bReadBatch, batch not found")
+		return wallet.Batch{}, fmt.Errorf("bReadBatch, batch not found")
 	}
 	return batch, nil
 }
 
-func (m *mockCache) ReadPendingBatches(ctx context.Context) ([]btc.Batch, error) {
-	batches := []btc.Batch{}
+func (m *mockCache) ReadPendingBatches(ctx context.Context) ([]wallet.Batch, error) {
+	batches := []wallet.Batch{}
 	for _, batch := range m.batches {
 		if batch.Tx.Status.Confirmed == false {
 			batches = append(batches, batch)
@@ -53,7 +54,7 @@ func (m *mockCache) ReadPendingBatches(ctx context.Context) ([]btc.Batch, error)
 	}
 	return batches, nil
 }
-func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
+func (m *mockCache) SaveBatch(ctx context.Context, batch wallet.Batch) error {
 	if _, ok := m.batches[batch.Tx.TxID]; ok {
 		return fmt.Errorf("batch already exists")
 	}
@@ -67,15 +68,15 @@ func (m *mockCache) SaveBatch(ctx context.Context, batch btc.Batch) error {
 	return nil
 }
 
-func (m *mockCache) ReadRequest(ctx context.Context, id string) (btc.BatcherRequest, error) {
+func (m *mockCache) ReadRequest(ctx context.Context, id string) (wallet.BatcherRequest, error) {
 	request, ok := m.requests[id]
 	if !ok {
-		return btc.BatcherRequest{}, fmt.Errorf("request not found")
+		return wallet.BatcherRequest{}, fmt.Errorf("request not found")
 	}
 	return request, nil
 }
-func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]btc.BatcherRequest, error) {
-	requests := []btc.BatcherRequest{}
+func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]wallet.BatcherRequest, error) {
+	requests := []wallet.BatcherRequest{}
 	for _, request := range m.requests {
 		if request.Status == false {
 			requests = append(requests, request)
@@ -84,7 +85,7 @@ func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]btc.BatcherReque
 	return requests, nil
 }
 
-func (m *mockCache) SaveRequest(ctx context.Context, req btc.BatcherRequest) error {
+func (m *mockCache) SaveRequest(ctx context.Context, req wallet.BatcherRequest) error {
 	if _, ok := m.requests[req.ID]; ok {
 		return fmt.Errorf("request already exists")
 	}
@@ -106,7 +107,7 @@ func (m *mockCache) UpdateBatchFees(ctx context.Context, txId []string, feeRate 
 	return nil
 }
 
-func (m *mockCache) UpdateAndDeletePendingBatches(ctx context.Context, updatedBatches ...btc.Batch) error {
+func (m *mockCache) UpdateAndDeletePendingBatches(ctx context.Context, updatedBatches ...wallet.Batch) error {
 	for _, batch := range updatedBatches {
 		if _, ok := m.batches[batch.Tx.TxID]; !ok {
 			return fmt.Errorf("UpdateAndDeleteBatches, batch not found")
@@ -123,7 +124,7 @@ func (m *mockCache) UpdateAndDeletePendingBatches(ctx context.Context, updatedBa
 	return nil
 }
 
-func (m *mockCache) UpdateBatches(ctx context.Context, updatedBatches ...btc.Batch) error {
+func (m *mockCache) UpdateBatches(ctx context.Context, updatedBatches ...wallet.Batch) error {
 	for _, batch := range updatedBatches {
 		if _, ok := m.batches[batch.Tx.TxID]; !ok {
 			return fmt.Errorf("UpdateBatches, batch not found")
@@ -133,9 +134,9 @@ func (m *mockCache) UpdateBatches(ctx context.Context, updatedBatches ...btc.Bat
 	return nil
 }
 
-func (m *mockCache) ReadLatestBatch(ctx context.Context) (btc.Batch, error) {
+func (m *mockCache) ReadLatestBatch(ctx context.Context) (wallet.Batch, error) {
 	if len(m.batchList) == 0 {
-		return btc.Batch{}, btc.ErrStoreNotFound
+		return wallet.Batch{}, wallet.ErrStoreNotFound
 	}
 	nbatches := len(m.batchList) - 1
 	for nbatches >= 0 {
@@ -145,11 +146,11 @@ func (m *mockCache) ReadLatestBatch(ctx context.Context) (btc.Batch, error) {
 		}
 		nbatches--
 	}
-	return btc.Batch{}, fmt.Errorf("no batch found")
+	return wallet.Batch{}, fmt.Errorf("no batch found")
 }
 
-func (m *mockCache) ReadRequests(ctx context.Context, ids ...string) ([]btc.BatcherRequest, error) {
-	requests := []btc.BatcherRequest{}
+func (m *mockCache) ReadRequests(ctx context.Context, ids ...string) ([]wallet.BatcherRequest, error) {
+	requests := []wallet.BatcherRequest{}
 	for _, id := range ids {
 		request, ok := m.requests[id]
 		if !ok {

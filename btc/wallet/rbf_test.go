@@ -1,4 +1,4 @@
-package btc_test
+package wallet_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/wallet"
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,10 +36,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
 
-	var wallet btc.BatcherWallet
-	var cache btc.Cache
+	var wallet wallet.BatcherWallet
+	var cache wallet.Cache
 
-	faucet, err := btc.NewSimpleWallet(privateKey, chainParams, indexer, mockFeeEstimator, btc.HighFee)
+	faucet, err := wallet.NewSimpleWallet(privateKey, chainParams, indexer, mockFeeEstimator, btc.HighFee)
 	Expect(err).To(BeNil())
 
 	defaultAmount := int64(100000)
@@ -80,8 +81,8 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		db, err := leveldb.OpenFile(dbPath, nil)
 		Expect(err).To(BeNil())
 
-		cache = btc.NewBatcherCache(db, "", btc.RBF)
-		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+		cache = wallet.NewBatcherCache(db, "", wallet.RBF)
+		wallet, _ = wallet.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, wallet.WithPTI(5*time.Second), wallet.WithStrategy(wallet.RBF))
 
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
@@ -92,7 +93,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		sacp, err = generateSACP(faucet, *chainParams, privateKey, randAddr, 10000, 100)
 		Expect(err).To(BeNil())
 
-		faucetTx, err := faucet.Send(context.Background(), []btc.SendRequest{
+		faucetTx, err := faucet.Send(context.Background(), []wallet.SendRequest{
 			{
 				Amount: defaultAmount,
 				To:     p2wshSigCheckScriptAddr,
@@ -135,7 +136,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	})
 
 	It("should be able to send funds", func() {
-		req := []btc.SendRequest{
+		req := []wallet.SendRequest{
 			{
 				Amount: defaultAmount,
 				To:     wallet.Address(),
@@ -181,7 +182,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		defaultAmount := int64(defaultAmount)
 
 		By("Send funds to Bob and Dave by spending the scripts")
-		id, err := wallet.Send(context.Background(), []btc.SendRequest{
+		id, err := wallet.Send(context.Background(), []wallet.SendRequest{
 			{
 				Amount: defaultAmount,
 				To:     address1,
@@ -198,10 +199,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 				Amount: defaultAmount,
 				To:     address2,
 			},
-		}, []btc.SpendRequest{
+		}, []wallet.SpendRequest{
 			{
 				Witness: [][]byte{
-					btc.AddSignatureSegwitOp,
+					wallet.AddSignatureSegwitOp,
 					p2wshSigCheckScript,
 				},
 				Script:        p2wshSigCheckScript,
@@ -220,7 +221,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 			},
 			{
 				Witness: [][]byte{
-					btc.AddSignatureSchnorrOp,
+					wallet.AddSignatureSchnorrOp,
 					checkSigScript,
 					checkSigScriptCb,
 				},
@@ -255,7 +256,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(tx.VOUTs[4].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
 		By("Add new request with a spend")
-		id, err = wallet.Send(context.Background(), []btc.SendRequest{}, []btc.SpendRequest{
+		id, err = wallet.Send(context.Background(), []wallet.SendRequest{}, []wallet.SpendRequest{
 			{
 				Witness: [][]byte{
 					{0x1},
@@ -310,10 +311,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	})
 
 	It("should be able to mix SACPs with spend requests", func() {
-		id, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{
+		id, err := wallet.Send(context.Background(), nil, []wallet.SpendRequest{
 			{
 				Witness: [][]byte{
-					btc.AddSignatureSegwitOp,
+					wallet.AddSignatureSegwitOp,
 					p2wshSigCheckScript2,
 				},
 				Script:        p2wshSigCheckScript2,

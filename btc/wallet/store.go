@@ -1,4 +1,4 @@
-package btc
+package wallet
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/catalogfi/blockchain/btc"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -26,7 +27,7 @@ type serializableSpendRequest struct {
 	ScriptAddress string
 	HashType      txscript.SigHashType
 	Sequence      uint32
-	Utxos         UTXOs
+	Utxos         btc.UTXOs
 	Recipient     string
 }
 
@@ -136,7 +137,7 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 
 // serializableBatch is a serializable version of Batch
 type serializableBatch struct {
-	Tx          Transaction
+	Tx          btc.Transaction
 	RequestIds  []string
 	IsFinalized bool
 	Strategy    Strategy

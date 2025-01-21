@@ -1,4 +1,4 @@
-package btc
+package wallet
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/catalogfi/blockchain/btc"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 )
@@ -41,7 +42,7 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	}
 
 	// Fetch the transaction details for the latest batch.
-	var tx Transaction
+	var tx btc.Transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		tx, err = w.indexer.GetTx(ctx, latestBatch.Tx.TxID)
 		return err
@@ -112,7 +113,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 	currentFeeRate := int(batch.Tx.Fee) * blockchain.WitnessScaleFactor / (batch.Tx.Weight)
 
 	// Attempt to create a new RBF batch with combined requests.
-	if err = w.createNewRBFBatch(c, append(existingRequests, newRequests...), currentFeeRate, 0); err != ErrTxInputsMissingOrSpent {
+	if err = w.createNewRBFBatch(c, append(existingRequests, newRequests...), currentFeeRate, 0); err != btc.ErrTxInputsMissingOrSpent {
 		if err != nil {
 			w.logger.Error("failed to create new rbf batch", zap.Error(err), zap.String("txid", batch.Tx.TxID))
 		}
@@ -159,7 +160,7 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 
 	// Loop through the batches to find a confirmed batch
 	for _, batch := range batches {
-		var tx Transaction
+		var tx btc.Transaction
 		err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 			tx, err = w.indexer.GetTx(ctx, batch.Tx.TxID)
 			return err
@@ -213,7 +214,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	// Determine the required fee rate if not provided
 	if requiredFeeRate == 0 {
-		var feeRates FeeSuggestion
+		var feeRates btc.FeeSuggestion
 		err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 			feeRates, err = w.feeEstimator.FeeSuggestion()
 			return err
@@ -259,7 +260,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, pendingRequests []B
 
 	w.logger.Info("submitted rbf tx", zap.String("txid", tx.TxHash().String()))
 
-	var transaction Transaction
+	var transaction btc.Transaction
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		transaction, err = w.indexer.GetTx(ctx, tx.TxHash().String())
 		return err
@@ -298,7 +299,7 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 		return err
 	}
 
-	var tx Transaction
+	var tx btc.Transaction
 	// Check if the transaction is already confirmed
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 		tx, err = w.indexer.GetTx(ctx, latestBatch.Tx.TxID)
@@ -339,7 +340,7 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 func (w *batcherWallet) createRBFTx(
 	c context.Context,
 	// Unspent transaction outputs to be used in the transaction
-	utxos UTXOs,
+	utxos btc.UTXOs,
 	spendRequests []SpendRequest,
 	sendRequests []SendRequest,
 	sacps [][]byte,
@@ -384,8 +385,8 @@ func (w *batcherWallet) createRBFTx(
 		return err
 	})
 
-	var spendUTXOs UTXOs
-	var spendUTXOsMap map[string]UTXOs
+	var spendUTXOs btc.UTXOs
+	var spendUTXOsMap map[string]btc.UTXOs
 	var totalSpendUTXOValue int64
 
 	// Fetch UTXOs for spend requests
@@ -408,7 +409,7 @@ func (w *batcherWallet) createRBFTx(
 	}
 
 	// Check if the total value of the spend UTXOs and existing UTXOs is enough to cover the fee and send requests
-	if totalSpendUTXOValue+totalExistingValue-int64(fee) < DustAmount+totalSendAmount {
+	if totalSpendUTXOValue+totalExistingValue-int64(fee) < btc.DustAmount+totalSendAmount {
 		err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 			utxos, _, err = w.getUtxosWithFee(ctx, totalSpendUTXOValue+totalExistingValue+int64(fee), int64(feeRate), avoidUtxos)
 			return err
@@ -499,7 +500,7 @@ func (w *batcherWallet) createRBFTx(
 		}
 
 		var txBytes []byte
-		if txBytes, err = GetTxRawBytes(tx); err != nil {
+		if txBytes, err = btc.TxRawBytes(tx); err != nil {
 			return nil, err
 		}
 		w.logger.Info(
@@ -535,7 +536,7 @@ func getChangeUTXOIndex(address btcutil.Address, txOuts []*wire.TxOut) (int64, i
 	return 0, 0, false
 }
 
-func getPendingFundingUTXOs(ctx context.Context, cache Cache, funderAddr btcutil.Address) (UTXOs, error) {
+func getPendingFundingUTXOs(ctx context.Context, cache Cache, funderAddr btcutil.Address) (btc.UTXOs, error) {
 	pendingFundingUtxos, err := cache.ReadPendingBatches(ctx)
 	if err != nil {
 		return nil, err
@@ -547,15 +548,15 @@ func getPendingFundingUTXOs(ctx context.Context, cache Cache, funderAddr btcutil
 	}
 	scriptHex := hex.EncodeToString(script)
 
-	utxos := UTXOs{}
+	utxos := btc.UTXOs{}
 	for _, batch := range pendingFundingUtxos {
 		for _, vin := range batch.Tx.VINs {
 			if vin.Prevout.ScriptPubKey == scriptHex {
-				utxos = append(utxos, UTXO{
+				utxos = append(utxos, btc.UTXO{
 					TxID:   vin.TxID,
 					Vout:   uint32(vin.Vout),
 					Amount: int64(vin.Prevout.Value),
-					Status: &Status{
+					Status: &btc.Status{
 						Confirmed: false,
 					},
 				})
@@ -566,7 +567,7 @@ func getPendingFundingUTXOs(ctx context.Context, cache Cache, funderAddr btcutil
 }
 
 // getUtxosWithFee is an iterative function that returns self sufficient UTXOs to cover the required fee and change left
-func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int64, avoidUtxos map[string]bool) (UTXOs, int64, error) {
+func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int64, avoidUtxos map[string]bool) (btc.UTXOs, int64, error) {
 
 	// Read pending funding UTXOs
 	prevUtxos, err := getPendingFundingUTXOs(ctx, w.cache, w.Address())
@@ -575,7 +576,7 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 		return nil, 0, err
 	}
 
-	var coverUtxos UTXOs
+	var coverUtxos btc.UTXOs
 
 	// Get UTXOs from the indexer
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
@@ -591,9 +592,9 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 	utxos := append(prevUtxos, coverUtxos...)
 	total := int64(0)
 	overhead := int64(0)
-	selectedUtxos := []UTXO{}
+	selectedUtxos := []btc.UTXO{}
 	for _, utxo := range utxos {
-		if utxo.Amount < DustAmount {
+		if utxo.Amount < btc.DustAmount {
 			continue
 		}
 		if avoidUtxos[utxo.TxID] {
@@ -613,7 +614,7 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 		return nil, 0, errors.New("insufficient funds")
 	}
 	change := total - requiredFee
-	if change < DustAmount {
+	if change < btc.DustAmount {
 		change = 0
 	}
 
@@ -621,18 +622,18 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, amount, feeRate int
 	return selectedUtxos, change, nil
 }
 
-func getPendingChangeUTXOs(ctx context.Context, cache Cache) ([]UTXO, error) {
+func getPendingChangeUTXOs(ctx context.Context, cache Cache) ([]btc.UTXO, error) {
 	// Read pending change UTXOs
 	pendingChangeUtxos, err := cache.ReadPendingBatches(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	utxos := []UTXO{}
+	utxos := []btc.UTXO{}
 	for _, batch := range pendingChangeUtxos {
-		//last vout is the change output
+		// last vout is the change output
 		idx := len(batch.Tx.VOUTs) - 1
-		utxos = append(utxos, UTXO{
+		utxos = append(utxos, btc.UTXO{
 			TxID:   batch.Tx.TxID,
 			Vout:   uint32(idx),
 			Amount: int64(batch.Tx.VOUTs[idx].Value),
@@ -665,7 +666,7 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]boo
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
 //
 // checkValidity is used to determine if the transaction should be validated while building
-func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
+func buildRBFTransaction(utxos btc.UTXOs, sacps [][]byte, sacpsFee int, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32, checkValidity bool) (*wire.MsgTx, int, error) {
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return nil, 0, err
@@ -725,7 +726,7 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 				if err != nil {
 					return nil, 0, err
 				}
-				if r.Amount < feePerRecipient+DustAmount {
+				if r.Amount < feePerRecipient+btc.DustAmount {
 					// do not deduct fee here
 					tx.AddTxOut(wire.NewTxOut(r.Amount, recipientScript))
 				} else {
@@ -735,10 +736,10 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 				fundsLeft -= r.Amount
 			}
 			remainingFee := fee - feeCollected
-			if fundsLeft > DustAmount+remainingFee {
+			if fundsLeft > btc.DustAmount+remainingFee {
 				tx.AddTxOut(wire.NewTxOut(fundsLeft-remainingFee, script))
 			}
-		} else if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+		} else if totalUTXOAmount >= totalSendAmount+fee+btc.DustAmount {
 			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
 		}
 
@@ -751,7 +752,7 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 }
 
 // getRbfSequenceMap updates the sequence map with rbf sequences for cover UTXOs
-func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[string]uint32 {
+func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos btc.UTXOs) map[string]uint32 {
 	for _, utxo := range coverUtxos {
 		sequencesMap[utxo.TxID] = wire.MaxTxInSequenceNum - 2
 	}
@@ -759,8 +760,8 @@ func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[str
 }
 
 // getUTXOsFromSpendRequest returns UTXOs from spend requests and the total value of the UTXOs
-func getUTXOsFromSpendRequest(spendReq []SpendRequest) (UTXOs, utxoMap, int64, error) {
-	utxos := UTXOs{}
+func getUTXOsFromSpendRequest(spendReq []SpendRequest) (btc.UTXOs, utxoMap, int64, error) {
+	utxos := btc.UTXOs{}
 	totalValue := int64(0)
 	utxoMap := make(utxoMap)
 

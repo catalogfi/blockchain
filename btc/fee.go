@@ -3,6 +3,7 @@ package btc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
 const (
@@ -22,63 +24,25 @@ const (
 	BlockstreamAPI = "https://blockstream.info/api/fee-estimates"
 )
 
-type FeeLevel string
+type UnknownUtxo error
 
-var (
-	MediumFee FeeLevel = "medium"
-	HighFee   FeeLevel = "high"
-	LowFee    FeeLevel = "low"
-)
-
-var (
-	// RedeemHtlcRefundSigScriptSize is an estimate of the sigScript size when refunding an htlc script
-	// stack number + stack size * 4 + signature + public key + script size
-	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + NormalHtlcSize
-
-	// RedeemHtlcRedeemSigScriptSize is an estimate of the sigScript size when redeeming an htlc script
-	// stack number + stack size * 5 + signature + public key + secret + script size
-	RedeemHtlcRedeemSigScriptSize = func(secretSize int) int {
-		return 1 + 5 + 73 + 33 + secretSize + +1 + NormalHtlcSize
-	}
-
-	// RedeemMultisigSigScriptSize is an estimate of the sigScript size from an 2-of-2 multisig script
-	// stack number + stack size * 4 + signature * 2 + script size
-	RedeemMultisigSigScriptSize = 1 + 4 + 73*2 + 71
-)
-
-// EstimateVirtualSize will return an estimate virtual size of the given unsigned tx. The extraBaseSize will be the signature
-// size of all legacy type utxos and extraSegwitSize will be signature size of all segwit utxos.
-func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int {
-	baseSize := tx.SerializeSizeStripped()
-	baseSize += extraBaseSize
-	swSize := 2 + extraSegwitSize
-	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
+func NewUnknownUtxoError(txid string) UnknownUtxo {
+	return fmt.Errorf("unknown utxo = %v ", txid)
 }
 
-// EstimateFee will return the estimated fee for the given transaction.
-// Tx should be a fully signed segwit transaction.
-func EstimateSegwitFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel) (int, error) {
-	baseSize := tx.SerializeSizeStripped()
-	totalSize := tx.SerializeSize()
-	weight := baseSize*3 + totalSize
-	vSize := weight / blockchain.WitnessScaleFactor
+var (
+	BaseSizeP2PKH = txsizes.RedeemP2PKHSigScriptSize
 
-	fees, err := estimator.FeeSuggestion()
-	if err != nil {
-		return 0, err
-	}
-	feeRate := fees.Medium
-	switch feeLevel {
-	case MediumFee:
-		feeRate = fees.Medium
-	case HighFee:
-		feeRate = fees.High
-	case LowFee:
-		feeRate = fees.Low
-	}
+	BaseSizeP2WPKH = 0
 
-	return vSize * feeRate, nil
-}
+	BaseSizeP2TR = 0
+
+	SegwitSizeP2PKH = 0
+
+	SegwitSizeP2WPKH = txsizes.RedeemP2WPKHInputWitnessWeight
+
+	SegwitSizeP2TR = txsizes.RedeemP2TRInputWitnessWeight
+)
 
 // TxVirtualSize returns the virtual size of a transaction.
 func TxVirtualSize(tx *wire.MsgTx) int {
@@ -101,12 +65,117 @@ func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int {
 	return int(fees)
 }
 
+// SizeEstimator collects estimated signature size of UTXOs, it then can be used to estimate the transaction size for
+// fee purpose.
+type SizeEstimator struct {
+	mu            *sync.Mutex
+	baseSizeMap   map[string]int
+	segwitSizeMap map[string]int
+}
+
+// NewEmptySizeEstimator returns an empty SizeEstimator
+func NewEmptySizeEstimator() *SizeEstimator {
+	return &SizeEstimator{
+		mu:            new(sync.Mutex),
+		baseSizeMap:   make(map[string]int),
+		segwitSizeMap: make(map[string]int),
+	}
+}
+
+// NewSizeEstimator returns an SizeEstimator with some preload UTXOs.
+func NewSizeEstimator(utxos []UTXO, base, segwit int) *SizeEstimator {
+	baseSizeMap := make(map[string]int)
+	segwitSizeMap := make(map[string]int)
+	if base != 0 || segwit != 0 {
+		for _, utxo := range utxos {
+			baseSizeMap[utxo.String()] = base
+			segwitSizeMap[utxo.String()] = segwit
+		}
+	}
+
+	return &SizeEstimator{
+		mu:            new(sync.Mutex),
+		baseSizeMap:   baseSizeMap,
+		segwitSizeMap: segwitSizeMap,
+	}
+}
+
+// AddUtxos adds a list of UTXOs and their estimated base and segwit size
+func (estimator *SizeEstimator) AddUtxos(utxos []UTXO, base, segwit int) {
+	estimator.mu.Lock()
+	defer estimator.mu.Unlock()
+
+	for _, utxo := range utxos {
+		estimator.baseSizeMap[utxo.String()] = base
+		estimator.segwitSizeMap[utxo.String()] = segwit
+	}
+}
+
+func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
+	estimator.mu.Lock()
+	defer estimator.mu.Unlock()
+
+	base, ok := estimator.baseSizeMap[utxo.String()]
+	if !ok {
+		return 0, 0, NewUnknownUtxoError(utxo.String())
+	}
+	segwit, ok := estimator.segwitSizeMap[utxo.String()]
+	if !ok {
+		return 0, 0, NewUnknownUtxoError(utxo.String())
+	}
+	return base, segwit, nil
+}
+
+func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
+	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
+	for _, input := range tx.TxIn {
+		key := input.PreviousOutPoint.String()
+		base, ok := estimator.baseSizeMap[key]
+		if !ok {
+			return 0, NewUnknownUtxoError(key)
+		}
+		totalBase += base
+		segwit, ok := estimator.segwitSizeMap[key]
+		if !ok {
+			return 0, NewUnknownUtxoError(key)
+		}
+		totalSegwit += segwit
+	}
+
+	// Additional 2 weight units for segwit marker + flag if tx has any witness input
+	if totalSegwit > 0 {
+		totalSegwit += 2
+	}
+
+	return totalBase + (totalSegwit+3)/blockchain.WitnessScaleFactor, nil
+}
+
+type FeeLevel string
+
+var (
+	FeeLow    FeeLevel = "low"
+	FeeMedium FeeLevel = "medium"
+	FeeHigh   FeeLevel = "high"
+)
+
 type FeeSuggestion struct {
-	Minimum int `json:"minimumFee"`
-	Economy int `json:"economyFee"`
-	Low     int `json:"hourFee"`
-	Medium  int `json:"halfHourFee"`
-	High    int `json:"fastestFee"`
+	Low    int `json:"low"`
+	Medium int `json:"medium"`
+	High   int `json:"high"`
+}
+
+// Fee will return the fee rate of the given fee level.
+func (feeSuggestion FeeSuggestion) Fee(level FeeLevel) int {
+	switch level {
+	case FeeLow:
+		return feeSuggestion.Low
+	case FeeMedium:
+		return feeSuggestion.Medium
+	case FeeHigh:
+		return feeSuggestion.High
+	default:
+		panic(fmt.Sprintf("unknown fee level: %v", level))
+	}
 }
 
 type FeeEstimator interface {
@@ -153,13 +222,23 @@ func (f *mempoolFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		}
 		defer resp.Body.Close()
 
-		var res FeeSuggestion
+		res := struct {
+			Minimum int `json:"minimumFee"`
+			Economy int `json:"economyFee"`
+			Low     int `json:"hourFee"`
+			Medium  int `json:"halfHourFee"`
+			High    int `json:"fastestFee"`
+		}{}
 		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 			return FeeSuggestion{}, err
 		}
-		f.last = res
+		f.last = FeeSuggestion{
+			Low:    res.Economy,
+			Medium: res.Medium,
+			High:   res.High,
+		}
 		f.lastTime = time.Now()
-		return res, nil
+		return f.last, nil
 	}
 	return f.last, nil
 }
@@ -200,15 +279,13 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 				return FeeSuggestion{}, err
 			}
 			if len(fees) == 0 {
-				return FeeSuggestion{2, 2, 2, 2, 2}, nil
+				return FeeSuggestion{2, 2, 2}, nil
 			}
 
 			feerates := FeeSuggestion{
-				Minimum: int(math.Ceil(fees["504"])),
-				Economy: int(math.Ceil(fees["144"])),
-				Low:     int(math.Ceil(fees["6"])),
-				Medium:  int(math.Ceil(fees["3"])),
-				High:    int(math.Ceil(fees["1"])),
+				Low:    int(math.Ceil(fees["6"])),
+				Medium: int(math.Ceil(fees["3"])),
+				High:   int(math.Ceil(fees["1"])),
 			}
 
 			f.last = feerates
@@ -217,7 +294,7 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		}
 		return f.last, nil
 	} else {
-		return FeeSuggestion{1, 1, 1, 1, 1}, nil
+		return FeeSuggestion{1, 1, 1}, nil
 	}
 }
 
@@ -225,18 +302,16 @@ type fixFeeEstimator struct {
 	fee int
 }
 
-func (f fixFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
-	return FeeSuggestion{
-		Minimum: f.fee,
-		Economy: f.fee,
-		Low:     f.fee,
-		Medium:  f.fee,
-		High:    f.fee,
-	}, nil
-}
-
 func NewFixFeeEstimator(fee int) FeeEstimator {
 	return fixFeeEstimator{
 		fee: fee,
 	}
+}
+
+func (f fixFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
+	return FeeSuggestion{
+		Low:    f.fee,
+		Medium: f.fee,
+		High:   f.fee,
+	}, nil
 }

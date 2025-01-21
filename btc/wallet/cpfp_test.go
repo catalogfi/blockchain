@@ -1,4 +1,4 @@
-package btc_test
+package wallet_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/wallet"
 	"github.com/catalogfi/blockchain/localnet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,8 +31,8 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	Expect(err).To(BeNil())
 
 	mockFeeEstimator := NewMockFeeEstimator(10)
-	cache := NewTestCache(btc.CPFP)
-	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
+	cache := NewTestCache(wallet.CPFP)
+	wallet, err := wallet.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, wallet.WithPTI(5*time.Second), wallet.WithStrategy(wallet.CPFP))
 	Expect(err).To(BeNil())
 
 	BeforeAll(func() {
@@ -47,7 +48,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 	})
 
 	It("should be able to send funds", func() {
-		req := []btc.SendRequest{
+		req := []wallet.SendRequest{
 			{
 				Amount: 100000,
 				To:     wallet.Address(),
@@ -105,7 +106,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 		address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
 		Expect(err).To(BeNil())
 
-		req := []btc.SendRequest{
+		req := []wallet.SendRequest{
 			{
 				Amount: 100000,
 				To:     address1,
@@ -176,7 +177,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		By("Send funds to Bob and Dave by spending the scripts")
-		id, err := wallet.Send(context.Background(), []btc.SendRequest{
+		id, err := wallet.Send(context.Background(), []wallet.SendRequest{
 			{
 				Amount: amount,
 				To:     address1,
@@ -185,7 +186,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 				Amount: amount,
 				To:     address2,
 			},
-		}, []btc.SpendRequest{
+		}, []wallet.SpendRequest{
 			{
 				Witness: [][]byte{
 					{0x1},
@@ -198,7 +199,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			},
 			{
 				Witness: [][]byte{
-					btc.AddSignatureSegwitOp,
+					wallet.AddSignatureSegwitOp,
 					p2wshSigCheckScript,
 				},
 				Script:        p2wshSigCheckScript,
@@ -217,7 +218,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 			},
 			{
 				Witness: [][]byte{
-					btc.AddSignatureSchnorrOp,
+					wallet.AddSignatureSchnorrOp,
 					checkSigScript,
 					checkSigScriptCb,
 				},
@@ -249,7 +250,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 		Expect(tx.VOUTs[1].ScriptPubKeyAddress).Should(Equal(address2.EncodeAddress()))
 		Expect(tx.VOUTs[2].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
 
-		//Validate whether dave and bob received the right amount
+		// Validate whether dave and bob received the right amount
 		Expect(tx.VOUTs[0].Value).Should(Equal(int(amount)))
 		Expect(tx.VOUTs[1].Value).Should(Equal(int(amount)))
 
@@ -258,7 +259,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 
 func fundScripts(addresses []string) error {
 	for _, address := range addresses {
-		_, err := localnet.FundBitcoin(address, indexer)
+		_, err := localnet.FundBitcoin(address, btc.indexer)
 		if err != nil {
 			return err
 		}

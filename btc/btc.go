@@ -14,7 +14,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
 const (
@@ -30,35 +29,10 @@ const (
 	SigHashSingleAnyoneCanPay = txscript.SigHashSingle | txscript.SigHashAnyOneCanPay
 )
 
-// SizeUpdater returns the base and segwit size of signing a particular type of utxo. This is used by the tx building
-// function to estimate the fee.
-type SizeUpdater func() (int, int)
-
-var (
-	P2pkhUpdater = func() (int, int) {
-		return txsizes.RedeemP2PKHSigScriptSize, 0
-	}
-
-	P2wpkhUpdater = func() (int, int) {
-		return 0, txsizes.RedeemP2WPKHInputWitnessWeight
-	}
-
-	HtlcUpdater = func(secretSize int) func() (int, int) {
-		return func() (int, int) {
-			if secretSize == 0 {
-				return 0, RedeemHtlcRefundSigScriptSize
-			}
-			return 0, RedeemHtlcRedeemSigScriptSize(secretSize)
-		}
-	}
-
-	MultisigUpdater = func() (int, int) {
-		return 0, RedeemMultisigSigScriptSize
-	}
-)
-
+// UTXOs is a list of UTXOs.
 type UTXOs []UTXO
 
+// UTXO is an unspent transaction output.
 type UTXO struct {
 	TxID   string  `json:"txid"`
 	Vout   uint32  `json:"vout"`
@@ -66,22 +40,32 @@ type UTXO struct {
 	Status *Status `json:"status"`
 }
 
+// String returns a string that identifies this UTXO, it is in the format of "<txid>:<vout>".
+func (utxo UTXO) String() string {
+	return fmt.Sprintf("%v:%v", utxo.TxID, utxo.Vout)
+}
+
+// Recipient is a recipient of a transaction. It contains the address and the amount to be sent.
 type Recipient struct {
 	To     string `json:"to"`
 	Amount int64  `json:"amount"`
 }
 
-type RawInputs struct {
-	VIN        []UTXO
-	BaseSize   int
-	SegwitSize int
-}
-
-func NewRawInputs() RawInputs {
-	return RawInputs{
-		VIN:        nil,
-		BaseSize:   0,
-		SegwitSize: 0,
+// PublicKeyAddress generates a Bitcoin address from a given public key, depending on the specified address type.
+// If an unsupported address type is provided, it returns an error.
+func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, pub *btcec.PublicKey) (btcutil.Address, error) {
+	switch addrType {
+	case waddrmgr.RawPubKey:
+		return btcutil.NewAddressPubKey(pub.SerializeCompressed(), network)
+	case waddrmgr.PubKeyHash:
+		return btcutil.NewAddressPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
+	case waddrmgr.WitnessPubKey:
+		return btcutil.NewAddressWitnessPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
+	case waddrmgr.TaprootPubKey:
+		// We assume the key is already tweaked. You'll need to tweak the key first if it's the internal key.
+		return btcutil.NewAddressTaproot(schnorr.SerializePubKey(pub), network)
+	default:
+		return nil, fmt.Errorf("unsupported address type")
 	}
 }
 
@@ -91,17 +75,12 @@ func NewRawInputs() RawInputs {
 // to cover the output amount and fees. We assume the utxos all comes from a single address. The `sizeUpdater` function
 // returns the base and segwit size of each utxo from the `utxos`. If there's any change, it will be sent back to the
 // `changeAddr`.
-func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	totalIn, totalOut := int64(0), int64(0)
-	base, segwit := inputs.BaseSize, inputs.SegwitSize
 
 	// Adding required inputs and output
-	for _, utxo := range inputs.VIN {
-		// // Skip the utxo if the amount is not large enough.
-		// if utxo.Amount <= int64(minUtxoValue) {
-		// 	continue
-		// }
+	for _, utxo := range inputs {
 		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return nil, err
@@ -132,7 +111,10 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 			return false, nil
 		}
 
-		vs := EstimateVirtualSize(tx, base, segwit)
+		vs, err := sizeEstimator.EstimateTxVirtualSize(tx)
+		if err != nil {
+			return false, err
+		}
 		fees := int64(vs * feeRate)
 
 		// If the amount is enough to cover the outputs and fees
@@ -147,7 +129,10 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
 
 					// Estimate the fees again as we add a new output
-					vs := EstimateVirtualSize(tx, base, segwit)
+					vs, err := sizeEstimator.EstimateTxVirtualSize(tx)
+					if err != nil {
+						return false, err
+					}
 					fees := int64(vs * feeRate)
 
 					// Adjust the change utxo amount if it's still enough, delete it otherwise
@@ -165,7 +150,7 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 		return false, nil
 	}
 
-	// Check if the existing inputs are enough and we might not need to add extra utxos
+	// Check if the existing inputs are enough and we might not need to add any extra utxo
 	enough, err := valueCheck()
 	if err != nil {
 		return nil, err
@@ -174,19 +159,17 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 		return tx, nil
 	}
 
-	// Calculate the minimum utxo value we want to add to the tx.
-	// This is to prevent adding a dust utxo and cause the tx use more fees.
-	minUtxoValue := 0
-	if sizeUpdater != nil {
-		minBase, minSegwit := sizeUpdater()
-		minVS := minBase + (minSegwit+3)/blockchain.WitnessScaleFactor
-		minUtxoValue = minVS * feeRate
-	}
-
 	// Keep adding utxos until we have enough funds to cover the output amount
 	for _, utxo := range utxos {
-		// Skip dust utxo
-		if utxo.Amount < int64(minUtxoValue) {
+		// Ignore tx which isn't worth to add to the tx
+		base, segwit, err := sizeEstimator.FetchSize(utxo)
+		if err != nil {
+			return nil, err
+		}
+		// +2 for segwit marker + flag if previous tx not has segwit, +3 to round up the value
+		worstVS := base + (segwit+2+3)/blockchain.WitnessScaleFactor
+		cost := worstVS * feeRate
+		if int64(cost) > utxo.Amount {
 			continue
 		}
 
@@ -196,11 +179,6 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 		}
 		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
 		totalIn += utxo.Amount
-		if sizeUpdater != nil {
-			additionalBaseSize, additionalSegwitSize := sizeUpdater()
-			base += additionalBaseSize
-			segwit += additionalSegwitSize
-		}
 
 		// Check if we have enough inputs to cover the outputs and fee
 		enough, err := valueCheck()
@@ -217,8 +195,8 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, u
 
 // BuildRbfTransaction is similar to `BuildTransaction`, the only difference is it updates the sequence of all the tx
 // inputs to `mempool.MaxRBFSequence`, so the tx is RBF-compatible.
-func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs, utxos []UTXO, sizeUpdater SizeUpdater, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx, err := BuildTransaction(network, feeRate, inputs, utxos, sizeUpdater, recipients, changeAddr)
+func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+	tx, err := BuildTransaction(network, feeRate, inputs, utxos, sizeEstimator, recipients, changeAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -228,19 +206,87 @@ func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs RawInputs
 	return tx, nil
 }
 
-// SignP2pkhTx is a helper function to sign inputs from a p2pkh address. It uses `txscript.SigHashAll` and compressed
-// public key as default.
-func SignP2pkhTx(network *chaincfg.Params, key *btcec.PrivateKey, tx *wire.MsgTx) error {
-	addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
-	if err != nil {
-		return err
-	}
-	for i := range tx.TxIn {
-		pkScript, err := txscript.PayToAddrScript(addr)
+func AddUtxoToCoverTxFees(tx *wire.MsgTx, utxos []UTXO, sizeEstimator *SizeEstimator, feeRate int, changeAddr btcutil.Address) error {
+	sigBaseSize, sigSegwitSize := 0, 0
+
+	totalIn := int64(0)
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
 		if err != nil {
 			return err
 		}
+		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
+		tx.AddTxIn(txIn)
+		totalIn += utxo.Amount
 
+		// Calculate the size
+		utxoBaseSize, utxoSegwitSize, err := sizeEstimator.FetchSize(utxo)
+		if err != nil {
+			return err
+		}
+		sigBaseSize += utxoBaseSize
+		sigSegwitSize += utxoSegwitSize
+		size := tx.SerializeSize()
+		baseSize := tx.SerializeSizeStripped()
+		swSize := size - baseSize
+		vs := baseSize + sigBaseSize + (swSize+sigSegwitSize+3)/blockchain.WitnessScaleFactor
+		fees := int64(vs * feeRate)
+
+		// If the amount is enough to cover the outputs and fees
+		if totalIn > fees {
+			// Add a change utxo to the output if the change amount is greater than the dust
+			if totalIn-fees > DustAmount {
+				if changeAddr != nil {
+					changeScript, err := txscript.PayToAddrScript(changeAddr)
+					if err != nil {
+						return err
+					}
+					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
+
+					// Estimate the fees again as we add a new output
+					size := tx.SerializeSize()
+					baseSize := tx.SerializeSizeStripped()
+					swSize := size - baseSize
+					vs := baseSize + sigBaseSize + (swSize+sigSegwitSize+3)/blockchain.WitnessScaleFactor
+					fees := int64(vs * feeRate)
+
+					// Adjust the change utxo amount if it's still enough, delete it otherwise
+					if totalIn-fees > DustAmount {
+						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - fees
+					} else {
+						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("funds not enough")
+}
+
+// TxRawBytes returns the raw bytes of a transaction.
+func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+	if err := tx.Serialize(buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// SignP2pkhTx is a helper function to sign inputs from a p2pkh address. It requires all inputs to be p2pkh. It uses
+// `txscript.SigHashAll` and compressed public key as default.
+func SignP2pkhTx(network *chaincfg.Params, key *btcec.PrivateKey, tx *wire.MsgTx) error {
+	addr, err := PublicKeyAddress(network, waddrmgr.PubKeyHash, key.PubKey())
+	if err != nil {
+		return err
+	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return err
+	}
+
+	for i := range tx.TxIn {
 		sigScript, err := txscript.SignatureScript(tx, i, pkScript, txscript.SigHashAll, key, true)
 		if err != nil {
 			return err
@@ -250,29 +296,70 @@ func SignP2pkhTx(network *chaincfg.Params, key *btcec.PrivateKey, tx *wire.MsgTx
 	return nil
 }
 
-// PublicKeyAddress is a helper function which calculates the address of the given public key. This function only
-// supports address types are derived from a public key.
-func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, pub *btcec.PublicKey) (btcutil.Address, error) {
-	switch addrType {
-	case waddrmgr.RawPubKey:
-		return btcutil.NewAddressPubKey(pub.SerializeCompressed(), network)
-	case waddrmgr.PubKeyHash:
-		return btcutil.NewAddressPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
-	case waddrmgr.WitnessPubKey:
-		return btcutil.NewAddressWitnessPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
-	case waddrmgr.TaprootPubKey:
-		tapKey := txscript.ComputeTaprootKeyNoScript(pub)
-		return btcutil.NewAddressTaproot(schnorr.SerializePubKey(tapKey), network)
-	default:
-		return nil, fmt.Errorf("unsupported address type")
+func SignP2wpkhTx(network *chaincfg.Params, utxos []UTXO, key *btcec.PrivateKey, tx *wire.MsgTx) error {
+	addr, err := PublicKeyAddress(network, waddrmgr.WitnessPubKey, key.PubKey())
+	if err != nil {
+		return err
 	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return err
+	}
+	fetcher, err := InitFetcher(utxos, pkScript)
+	if err != nil {
+		return err
+	}
+
+	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+	for i := range tx.TxIn {
+		output := fetcher.FetchPrevOutput(tx.TxIn[i].PreviousOutPoint)
+		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, i, output.Value, output.PkScript, txscript.SigHashAll, key)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[i].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
+	}
+
+	return nil
 }
 
-// GetTxRawBytes returns the raw bytes of a transaction.
-func GetTxRawBytes(tx *wire.MsgTx) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-	if err := tx.Serialize(buf); err != nil {
-		return nil, err
+func SignP2trTx(utxos []UTXO, key *btcec.PrivateKey, tx *wire.MsgTx) error {
+	tapPubKey := txscript.ComputeTaprootKeyNoScript(key.PubKey())
+	pkScript, err := txscript.PayToTaprootScript(tapPubKey)
+	if err != nil {
+		return err
 	}
-	return buf.Bytes(), nil
+	fetcher, err := InitFetcher(utxos, pkScript)
+	if err != nil {
+		return err
+	}
+
+	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+	for i := range tx.TxIn {
+		output := fetcher.FetchPrevOutput(tx.TxIn[i].PreviousOutPoint)
+		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, i, output.Value, pkScript, nil, txscript.SigHashAll, key)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[i].Witness = wire.TxWitness{sig}
+	}
+
+	return nil
+}
+
+// InitFetcher initializes a txscript.MultiPrevOutFetcher with the given utxos and script.
+// The returned fetcher can be used to sign transactions with the given utxos as inputs.
+func InitFetcher(utxos []UTXO, script []byte) (*txscript.MultiPrevOutFetcher, error) {
+	fetcher := txscript.NewMultiPrevOutFetcher(nil)
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		fetcher.AddPrevOut(wire.OutPoint{
+			Hash:  *hash,
+			Index: utxo.Vout,
+		}, wire.NewTxOut(utxo.Amount, script))
+	}
+	return fetcher, nil
 }

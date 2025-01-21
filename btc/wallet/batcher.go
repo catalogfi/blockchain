@@ -1,4 +1,4 @@
-package btc
+package wallet
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
+	"github.com/catalogfi/blockchain/btc"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"go.uber.org/zap"
 )
@@ -41,7 +42,7 @@ var (
 	ErrInsufficientFundsInRequest = func(have, need int64) error {
 		return fmt.Errorf("%v , have :%v, need at least : %v", ErrBatchParametersNotMet, have, need)
 	}
-	ErrUnconfirmedUTXO = func(utxo UTXO) error {
+	ErrUnconfirmedUTXO = func(utxo btc.UTXO) error {
 		return fmt.Errorf("%v ,unconfirmed utxo :%v", ErrBatchParametersNotMet, utxo)
 	}
 )
@@ -67,7 +68,7 @@ type Lifecycle interface {
 // should implement example implementations include in-memory cache and
 // rdbs cache
 type Cache interface {
-	// ReadBatchByReqID reads a batch based on the request ID.
+	// ReadBatchByReqID reads a batch based on the request String.
 	ReadBatchByReqID(ctx context.Context, reqID string) (Batch, error)
 	// ReadPendingBatches reads all pending batches for a given strategy.
 	ReadPendingBatches(ctx context.Context) ([]Batch, error)
@@ -95,7 +96,7 @@ type Cache interface {
 	// SaveBatch saves a batch.
 	SaveBatch(ctx context.Context, batch Batch) error
 
-	// ReadRequest reads a request based on its ID.	// ReadRequests reads multiple requests based on their IDs.
+	// ReadRequest reads a request based on its String.	// ReadRequests reads multiple requests based on their IDs.
 	ReadRequests(ctx context.Context, id ...string) ([]BatcherRequest, error)
 	// ReadPendingRequests reads all pending requests.
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
@@ -138,7 +139,7 @@ var (
 )
 
 type TxOptions struct {
-	FeeLevel    FeeLevel
+	FeeLevel    btc.FeeLevel
 	MaxFeeRate  int
 	MinFeeDelta int
 	MaxFeeDelta int
@@ -154,20 +155,20 @@ type batcherWallet struct {
 
 	sw           Wallet
 	opts         BatcherOptions
-	indexer      IndexerClient
-	feeEstimator FeeEstimator
+	indexer      btc.IndexerClient
+	feeEstimator btc.FeeEstimator
 	cache        Cache
 }
 
 type Batch struct {
-	Tx         Transaction
+	Tx         btc.Transaction
 	RequestIds map[string]bool
 	// true indicates that the batch is finalized and will not be replaced by more fee.
 	IsFinalized bool
 	Strategy    Strategy
 }
 
-func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
+func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer btc.IndexerClient, feeEstimator btc.FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
 	wallet := &batcherWallet{
 		indexer:      indexer,
 		privateKey:   privateKey,
@@ -197,7 +198,7 @@ func defaultBatcherOptions() BatcherOptions {
 	return BatcherOptions{
 		PTI: 1 * time.Minute,
 		TxOptions: TxOptions{
-			FeeLevel:    HighFee,
+			FeeLevel:    btc.HighFee,
 			MaxFeeRate:  0,
 			MinFeeDelta: 0,
 			MaxFeeDelta: 0,
@@ -247,7 +248,7 @@ func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 	return w.sw.SignSACPTx(tx, idx, amount, leaf, scriptAddr, witness)
 }
 
-func (w *batcherWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error {
+func (w *batcherWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos btc.UTXOs, startingIdx int) error {
 	return w.sw.SignCoverUTXOs(tx, utxos, startingIdx)
 }
 
@@ -275,22 +276,22 @@ func (w *batcherWallet) Send(ctx context.Context, sends []SendRequest, spends []
 }
 
 // Status returns the status of a transaction based on the tracking id
-func (w *batcherWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
+func (w *batcherWallet) Status(ctx context.Context, id string) (btc.Transaction, bool, error) {
 	request, err := w.cache.ReadRequests(ctx, id)
 	if err != nil {
-		return Transaction{}, false, err
+		return btc.Transaction{}, false, err
 	}
 	if !request[0].Status {
-		return Transaction{}, false, nil
+		return btc.Transaction{}, false, nil
 	}
 	batch, err := w.cache.ReadBatchByReqID(ctx, id)
 	if err != nil {
-		return Transaction{}, false, err
+		return btc.Transaction{}, false, err
 	}
 
 	tx, err := w.indexer.GetTx(ctx, batch.Tx.TxID)
 	if err != nil {
-		return Transaction{}, false, err
+		return btc.Transaction{}, false, err
 	}
 	return tx, true, nil
 }
@@ -458,7 +459,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	}
 
 	spendsAmount := int64(0)
-	spendsUtxos := UTXOs{}
+	spendsUtxos := btc.UTXOs{}
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
 		spendsUtxos, _, spendsAmount, err = populateUTXOsForSpendRequest(ctx, w.indexer, spends)
 		return err
@@ -512,20 +513,20 @@ func validateUpdate(currentFeeRate, requiredFeeRate int, opts BatcherOptions) er
 }
 
 // selects the fee rate based on the fee level option
-func selectFee(feeRate FeeSuggestion, feeLevel FeeLevel) int {
+func selectFee(feeRate btc.FeeSuggestion, feeLevel btc.FeeLevel) int {
 	switch feeLevel {
-	case MediumFee:
+	case btc.MediumFee:
 		return feeRate.Medium
-	case HighFee:
+	case btc.HighFee:
 		return feeRate.High
-	case LowFee:
+	case btc.LowFee:
 		return feeRate.Low
 	default:
 		return feeRate.High
 	}
 }
 
-func filterPendingBatches(batches []Batch, indexer IndexerClient) (pendingBatches []Batch, confirmedBatches []Batch, err error) {
+func filterPendingBatches(batches []Batch, indexer btc.IndexerClient) (pendingBatches []Batch, confirmedBatches []Batch, err error) {
 	for _, batch := range batches {
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		defer cancel()
@@ -565,8 +566,8 @@ func unpackBatcherRequests(reqs []BatcherRequest) ([]SpendRequest, []SendRequest
 	return spendRequests, sendRequests, sacps, reqIds
 }
 
-func populateUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq *[]SpendRequest) (UTXOs, utxoMap, int64, error) {
-	utxos := UTXOs{}
+func populateUTXOsForSpendRequest(ctx context.Context, indexer btc.IndexerClient, spendReq *[]SpendRequest) (btc.UTXOs, utxoMap, int64, error) {
+	utxos := btc.UTXOs{}
 	totalValue := int64(0)
 	utxoMap := make(utxoMap)
 

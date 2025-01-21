@@ -1,4 +1,4 @@
-package btc_test
+package wallet_test
 
 import (
 	"os"
@@ -23,10 +23,11 @@ var (
 	debug       string
 
 	// Vars
-	network *chaincfg.Params
-	logger  *zap.Logger
-	indexer btc.IndexerClient
-	client  btc.Client
+	network      *chaincfg.Params
+	logger       *zap.Logger
+	indexer      btc.IndexerClient
+	client       btc.Client
+	feeEstimator btc.FeeEstimator
 )
 
 func TestBtc(t *testing.T) {
@@ -65,4 +66,5 @@ var _ = BeforeSuite(func() {
 	}
 	client, err = btc.NewClient(config)
 	Expect(err).Should(BeNil())
+	feeEstimator = btc.NewFixFeeEstimator(10)
 })

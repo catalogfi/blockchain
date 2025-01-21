@@ -1,4 +1,4 @@
-package btc
+package wallet
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/catalogfi/blockchain/btc"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -88,7 +89,7 @@ var (
 	AddXOnlyPubkeyOp = []byte("add_xonly_pubkey")
 )
 
-type utxoMap map[string]UTXOs
+type utxoMap map[string]btc.UTXOs
 
 type SpendRequest struct {
 	// Witness required to spend the script.
@@ -114,7 +115,7 @@ type SpendRequest struct {
 	Sequence uint32
 
 	// UTXO to spend
-	Utxos UTXOs
+	Utxos btc.UTXOs
 
 	// Optional Recipient address
 	Recipient btcutil.Address
@@ -138,7 +139,7 @@ type Wallet interface {
 
 	// Spend funds from multiple scripts and send funds to multiple recipients at the same time in a
 	// single transaction.
-	// Returns the transaction ID (txid) and an error.
+	// Returns the transaction String (txid) and an error.
 	//
 	// Example:
 	// Send funds to multiple recipients
@@ -172,12 +173,12 @@ type Wallet interface {
 	// tx is not mutated instead a new copy is created internally to perform the signing.
 	SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf txscript.TapLeaf, scriptAddr btcutil.Address, witness [][]byte) ([][]byte, error)
 
-	// Status checks the status of a transaction using its transaction ID (txid).
+	// Status checks the status of a transaction using its transaction String (txid).
 	// Returns the transaction and a boolean indicating whether the transaction is submitted or not and an error
-	Status(ctx context.Context, id string) (Transaction, bool, error)
+	Status(ctx context.Context, id string) (btc.Transaction, bool, error)
 
 	// Signs cover utxos
-	SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error
+	SignCoverUTXOs(tx *wire.MsgTx, utxos btc.UTXOs, startingIdx int) error
 
 	// Weight of the covering UTXO
 	CoverUTXOSpendWeight() int
@@ -186,16 +187,16 @@ type Wallet interface {
 // SimpleWallet is a Wallet implementation that can send and spend funds.
 type SimpleWallet struct {
 	privateKey   *btcec.PrivateKey
-	indexer      IndexerClient
-	feeEstimator FeeEstimator
+	indexer      btc.IndexerClient
+	feeEstimator btc.FeeEstimator
 	chainParams  *chaincfg.Params
 	signerAddr   btcutil.Address
-	feeLevel     FeeLevel
+	feeLevel     btc.FeeLevel
 }
 
 // Generates a new p2wpkh simple wallet
-func NewSimpleWallet(privKey *btcec.PrivateKey, chainParams *chaincfg.Params, indexer IndexerClient, feeEstimator FeeEstimator, feeLevel FeeLevel) (Wallet, error) {
-	address, err := PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, privKey.PubKey())
+func NewSimpleWallet(privKey *btcec.PrivateKey, chainParams *chaincfg.Params, indexer btc.IndexerClient, feeEstimator btc.FeeEstimator, feeLevel btc.FeeLevel) (Wallet, error) {
+	address, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, privKey.PubKey())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +217,7 @@ func (sw *SimpleWallet) Address() btcutil.Address {
 }
 
 func (sw *SimpleWallet) Send(ctx context.Context, sendRequests []SendRequest, spendRequests []SpendRequest, sacps [][]byte) (string, error) {
-	//TODO: Estimate a fee based on requests
+	// TODO: Estimate a fee based on requests
 	fee := 1000
 
 	// validate the requests
@@ -247,7 +248,7 @@ func (sw *SimpleWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 	}
 
 	fetcher := txscript.NewCannedPrevOutputFetcher(script, amount)
-	err = signTx(cTx, fetcher, amount, idx, witness, script, &leaf, SigHashSingleAnyoneCanPay, sw.privateKey)
+	err = signTx(cTx, fetcher, amount, idx, witness, script, &leaf, btc.SigHashSingleAnyoneCanPay, sw.privateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -256,11 +257,11 @@ func (sw *SimpleWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf t
 
 // GenerateSACP generates a SACP tx for the given spend request.
 func (sw *SimpleWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest, to btcutil.Address) ([]byte, error) {
-	if spendReq.HashType != txscript.SigHashDefault && spendReq.HashType != SigHashSingleAnyoneCanPay {
+	if spendReq.HashType != txscript.SigHashDefault && spendReq.HashType != btc.SigHashSingleAnyoneCanPay {
 		return nil, ErrSACPInvalidHashType
 	}
 	if spendReq.HashType == txscript.SigHashDefault {
-		spendReq.HashType = SigHashSingleAnyoneCanPay
+		spendReq.HashType = btc.SigHashSingleAnyoneCanPay
 	}
 
 	if err := validateRequests([]SpendRequest{spendReq}, nil, nil); err != nil {
@@ -299,7 +300,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 	}
 
 	// estimate the fee required to make the transaction
-	feeToBePaid, err := EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
+	feeToBePaid, err := btc.EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +311,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 
 	// serialize the transaction
 	var txBytes []byte
-	if txBytes, err = GetTxRawBytes(tx); err != nil {
+	if txBytes, err = btc.TxRawBytes(tx); err != nil {
 		return nil, err
 	}
 	return txBytes, nil
@@ -373,7 +374,7 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	}
 
 	// estimate the fee required to make the transaction
-	feeToBePaid, err := EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
+	feeToBePaid, err := btc.EstimateSegwitFee(tx, sw.feeEstimator, sw.feeLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -407,22 +408,22 @@ func generateSendRequests(spendRequests []SpendRequest, utxoMap utxoMap, current
 	return sendRequests, nil
 }
 
-// Status checks the status of a transaction using its transaction ID (txid).
-func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
+// Status checks the status of a transaction using its transaction String (txid).
+func (sw *SimpleWallet) Status(ctx context.Context, id string) (btc.Transaction, bool, error) {
 	tx, err := sw.indexer.GetTx(ctx, id)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
-			return Transaction{}, false, nil
+			return btc.Transaction{}, false, nil
 		}
-		return Transaction{}, false, err
+		return btc.Transaction{}, false, err
 	}
 	return tx, true, nil
 }
 
 // Signs the send transaction (p2wpkh spend).
 // Use startingIdx to start signing from a specific index
-func (w *SimpleWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error {
+func (w *SimpleWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos btc.UTXOs, startingIdx int) error {
 	// get the send signing script
 	script, err := txscript.PayToAddrScript(w.signerAddr)
 	if err != nil {
@@ -453,7 +454,7 @@ func (w *SimpleWallet) CoverUTXOSpendWeight() int {
 // ------------------ Helper functions ------------------
 
 // getSACPAmounts returns the total input and output amounts for the given SACPs
-func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, error) {
+func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer btc.IndexerClient) (int64, int64, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {
 		return 0, 0, err
@@ -479,7 +480,7 @@ func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) 
 }
 
 // getFeeUsedInSACPs returns the amount of fee used in the given SACPs
-func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
+func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer btc.IndexerClient) (int, error) {
 	totalInputAmount, totalOutputAmount, err := getSACPAmounts(ctx, sacps, indexer)
 	if err != nil {
 		return 0, err
@@ -487,7 +488,7 @@ func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClien
 	return int(totalInputAmount - totalOutputAmount), nil
 }
 
-func submitTx(ctx context.Context, indexer IndexerClient, tx *wire.MsgTx) (string, error) {
+func submitTx(ctx context.Context, indexer btc.IndexerClient, tx *wire.MsgTx) (string, error) {
 	txid := tx.TxHash().String()
 	err := indexer.SubmitTx(ctx, tx)
 	if err != nil {
@@ -497,7 +498,7 @@ func submitTx(ctx context.Context, indexer IndexerClient, tx *wire.MsgTx) (strin
 }
 
 // getPrevoutsForSACPs returns the previous outputs and txouts for the given SACPs used to build the prevOutFetcher
-func getPrevoutsForSACPs(ctx context.Context, tx *wire.MsgTx, endingSACPIdx int, indexer IndexerClient) ([]wire.OutPoint, []*wire.TxOut, error) {
+func getPrevoutsForSACPs(ctx context.Context, tx *wire.MsgTx, endingSACPIdx int, indexer btc.IndexerClient) ([]wire.OutPoint, []*wire.TxOut, error) {
 	prevouts := []wire.OutPoint{}
 	txOuts := []*wire.TxOut{}
 	for i := 0; i < endingSACPIdx; i++ {
@@ -520,7 +521,7 @@ func getPrevoutsForSACPs(ctx context.Context, tx *wire.MsgTx, endingSACPIdx int,
 }
 
 // getUTXOsForRequests returns the UTXOs required to spend the scripts and cover the send amount.
-func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs []SpendRequest, sendReqs []SendRequest, feePayer btcutil.Address, fee, sacpFee int) (UTXOs, UTXOs, utxoMap, error) {
+func getUTXOsForRequests(ctx context.Context, indexer btc.IndexerClient, spendReqs []SpendRequest, sendReqs []SendRequest, feePayer btcutil.Address, fee, sacpFee int) (btc.UTXOs, btc.UTXOs, utxoMap, error) {
 
 	spendUTXOs, spendUTXOsMap, balanceOfScripts, err := getUTXOsForSpendRequest(ctx, indexer, spendReqs)
 	if err != nil {
@@ -528,7 +529,7 @@ func getUTXOsForRequests(ctx context.Context, indexer IndexerClient, spendReqs [
 	}
 
 	// coverUTXOs are the UTXOs used to cover the remaining amount required to send
-	var coverUTXOs UTXOs
+	var coverUTXOs btc.UTXOs
 	totalSendAmount := calculateTotalSendAmount(sendReqs)
 	if balanceOfScripts <= totalSendAmount && sacpFee <= fee {
 		utxos, _, err := indexer.GetUTXOsForAmount(ctx, feePayer, totalSendAmount-balanceOfScripts+int64(fee))
@@ -565,7 +566,7 @@ func generateSequenceMap(utxosMap utxoMap, spendRequest []SpendRequest) map[stri
 // Merge multiple sacps into a single transaction
 func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 	idx := 0
-	tx := wire.NewMsgTx(DefaultTxVersion)
+	tx := wire.NewMsgTx(btc.DefaultTxVersion)
 	for _, sacp := range sacps {
 		sacpTx, err := buildAndValidateSacpTx(sacp)
 		if err != nil {
@@ -584,7 +585,7 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 }
 
 // Builds an unsigned transaction with the given utxos, recipients, change address and fee.
-func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
+func buildTransaction(utxos btc.UTXOs, sacps [][]byte, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
 
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
@@ -623,7 +624,7 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, red
 	}
 
 	// add change output to the transaction if required
-	if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+	if totalUTXOAmount >= totalSendAmount+fee+btc.DustAmount {
 
 		changeScript, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
@@ -641,7 +642,7 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, red
 					return nil, 0, err
 				}
 
-				if r.Amount < feePerRecipient+DustAmount {
+				if r.Amount < feePerRecipient+btc.DustAmount {
 					tx.AddTxOut(wire.NewTxOut(r.Amount, recipientScript))
 				} else {
 					tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
@@ -650,7 +651,7 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, red
 				fundsLeft -= r.Amount
 			}
 			remainingFee := fee - feeCollected
-			if fundsLeft > DustAmount+remainingFee {
+			if fundsLeft > btc.DustAmount+remainingFee {
 				tx.AddTxOut(wire.NewTxOut(fundsLeft-remainingFee, changeScript))
 			}
 		} else {
@@ -662,8 +663,8 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, red
 	return tx, idx, nil
 }
 
-func getUTXOsForSpendRequest(ctx context.Context, indexer IndexerClient, spendReq []SpendRequest) (UTXOs, utxoMap, int64, error) {
-	utxos := UTXOs{}
+func getUTXOsForSpendRequest(ctx context.Context, indexer btc.IndexerClient, spendReq []SpendRequest) (btc.UTXOs, utxoMap, int64, error) {
+	utxos := btc.UTXOs{}
 	totalValue := int64(0)
 	utxoMap := make(utxoMap)
 
@@ -709,7 +710,7 @@ func parseAddress(addr string) (btcutil.Address, error) {
 //
 // outpoints should have corresponding txouts in the same order.
 func buildPrevOutFetcher(utxosByAddressMap utxoMap, outpoints []wire.OutPoint, txouts []*wire.TxOut) (txscript.PrevOutputFetcher, error) {
-	fetcher := NewPrevOutFetcherBuilder()
+	fetcher := btc.NewPrevOutFetcherBuilder()
 	for addrStr, utxos := range utxosByAddressMap {
 		addr, err := parseAddress(addrStr)
 		if err != nil {
@@ -747,7 +748,7 @@ func getScriptToSign(scriptAddr btcutil.Address, script []byte) ([]byte, error) 
 // Signs the spend transaction
 //
 // Internally signTx is called for each input to sign the transaction.
-func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap utxoMap, indexer IndexerClient, privateKey *secp256k1.PrivateKey) error {
+func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []SpendRequest, utxoMap utxoMap, indexer btc.IndexerClient, privateKey *secp256k1.PrivateKey) error {
 
 	// building the prevOutFetcherBuilder
 	// get the prevouts and txouts for the sacps to build the prevOutFetcher
@@ -901,7 +902,7 @@ func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest, sacps []
 	}
 
 	for _, r := range sendReqs {
-		if r.Amount <= DustAmount {
+		if r.Amount <= btc.DustAmount {
 			return ErrAmountLessThanDust
 		}
 	}

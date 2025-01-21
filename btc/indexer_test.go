@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/catalogfi/blockchain/localnet"
+	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/fatih/color"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -22,31 +21,14 @@ var _ = Describe("Indexer client", func() {
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("GetUTXOs()")
-			key, err := btcec.NewPrivateKey()
+			key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			addr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(key.PubKey().SerializeCompressed()), network)
+			txid, err := btctest.FaucetWaitedMined(addr.EncodeAddress(), indexer)
 			Expect(err).To(BeNil())
-			txid, err := localnet.FundBTC(addr.EncodeAddress())
-			Expect(err).To(BeNil())
-			time.Sleep(5 * time.Second)
 			utxos, err := indexer.GetUTXOs(context.Background(), addr)
 			Expect(err).To(BeNil())
 			Expect(len(utxos)).Should(BeNumerically(">=", 1))
 			exist := false
-			for _, utxo := range utxos {
-				if utxo.TxID == txid.String() {
-					exist = true
-					break
-				}
-			}
-			Expect(exist).Should(BeTrue())
-
-			By("GetUTXOsForAmount()")
-			utxos, utxosValue, err := indexer.GetUTXOsForAmount(context.Background(), addr, 1e8)
-			Expect(err).To(BeNil())
-			Expect(utxosValue).Should(BeNumerically(">=", 1e8))
-			Expect(len(utxos)).Should(BeNumerically(">=", 1))
-			exist = false
 			for _, utxo := range utxos {
 				if utxo.TxID == txid.String() {
 					exist = true
@@ -85,21 +67,11 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			rawTx, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, addr)
+			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
+			rawTx, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, addr)
 			Expect(err).To(BeNil())
-			for i := range rawTx.TxIn {
-				pkScript, err := txscript.PayToAddrScript(addr)
-				Expect(err).To(BeNil())
-				sigScript, err := txscript.SignatureScript(rawTx, i, pkScript, txscript.SigHashAll, key, true)
-				Expect(err).To(BeNil())
-				rawTx.TxIn[i].SignatureScript = sigScript
-			}
+			Expect(btc.SignP2pkhTx(network, key, rawTx)).Should(Succeed())
 			Expect(client.SubmitTx(context.Background(), rawTx)).Should(Succeed())
-
-			By("FeeEstimate()")
-			By("    --local env should not have enough data for the estimate")
-			_, err = indexer.FeeEstimate(context.Background())
-			Expect(err.Error()).Should(ContainSubstring("not enough data"))
 
 			By("GetAddressTxs()")
 			txs, err := indexer.GetAddressTxs(context.Background(), addr, "")
@@ -117,16 +89,8 @@ var _ = Describe("Indexer client", func() {
 	Context("errors", func() {
 		It("should return specific errors", func() {
 			By("New address")
-			privKey, err := btcec.NewPrivateKey()
+			key, pkAddr, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, indexer)
 			Expect(err).To(BeNil())
-			pubKey := privKey.PubKey()
-			pkAddr, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pubKey.SerializeCompressed()), network)
-			Expect(err).To(BeNil())
-
-			By("funding the addresses")
-			_, err = localnet.FundBTC(pkAddr.EncodeAddress())
-			Expect(err).To(BeNil())
-			time.Sleep(5 * time.Second)
 
 			By("Construct a new tx")
 			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr)
@@ -138,16 +102,10 @@ var _ = Describe("Indexer client", func() {
 					Amount: amount,
 				},
 			}
-			transaction, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients, pkAddr)
+			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
+			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr)
 			Expect(err).To(BeNil())
-			for i := range transaction.TxIn {
-				pkScript, err := txscript.PayToAddrScript(pkAddr)
-				Expect(err).To(BeNil())
-
-				sigScript, err := txscript.SignatureScript(transaction, i, pkScript, txscript.SigHashAll, privKey, true)
-				Expect(err).To(BeNil())
-				transaction.TxIn[i].SignatureScript = sigScript
-			}
+			Expect(btc.SignP2pkhTx(network, key, transaction)).Should(Succeed())
 
 			By("Submit the transaction")
 			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
@@ -155,8 +113,7 @@ var _ = Describe("Indexer client", func() {
 			time.Sleep(time.Second)
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(localnet.MineBTCBlock()).Should(Succeed())
-			time.Sleep(1 * time.Second)
+			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 			err = indexer.SubmitTx(context.Background(), transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
 
@@ -167,16 +124,9 @@ var _ = Describe("Indexer client", func() {
 					Amount: 2 * amount,
 				},
 			}
-			transaction1, err := btc.BuildTransaction(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, recipients1, pkAddr)
+			transaction1, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			for i := range transaction1.TxIn {
-				pkScript, err := txscript.PayToAddrScript(pkAddr)
-				Expect(err).To(BeNil())
-
-				sigScript, err := txscript.SignatureScript(transaction1, i, pkScript, txscript.SigHashAll, privKey, true)
-				Expect(err).To(BeNil())
-				transaction1.TxIn[i].SignatureScript = sigScript
-			}
+			Expect(btc.SignP2pkhTx(network, key, transaction)).Should(Succeed())
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
 			err = indexer.SubmitTx(context.Background(), transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())

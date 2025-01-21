@@ -1,4 +1,4 @@
-package btc_test
+package wallet_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/catalogfi/blockchain/btc"
+	"github.com/catalogfi/blockchain/btc/wallet"
 	"github.com/syndtr/goleveldb/leveldb"
 	"golang.org/x/exp/maps"
 
@@ -15,7 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func saveBatch(batch btc.Batch, cache btc.Cache) error {
+func saveBatch(batch wallet.Batch, cache wallet.Cache) error {
 	for reqId := range batch.RequestIds {
 		req := dummyRequest()
 		req.ID = reqId
@@ -31,7 +32,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 
 	dbPath := "./testdb"
 	var db *leveldb.DB
-	var cache btc.Cache
+	var cache wallet.Cache
 	var err error
 
 	ctx := context.Background()
@@ -41,7 +42,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 		db, err = leveldb.OpenFile(dbPath, nil)
 		Expect(err).To(BeNil())
 
-		cache = btc.NewBatcherCache(db, "", btc.CPFP)
+		cache = wallet.NewBatcherCache(db, "", wallet.CPFP)
 	})
 
 	AfterAll(func() {
@@ -72,7 +73,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 			Expect(err).To(BeNil())
 
 			err = cache.SaveBatch(ctx, batchToSave)
-			Expect(err).To(Equal(btc.ErrStoreAlreadyExists))
+			Expect(err).To(Equal(wallet.ErrStoreAlreadyExists))
 		})
 		It("should save a finalized batch", func() {
 			err = cache.DeletePendingBatches(ctx)
@@ -109,7 +110,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 
 			// check for invalid request id
 			_, err = cache.ReadBatchByReqID(ctx, "invalid")
-			Expect(err).To(Equal(btc.ErrStoreNotFound))
+			Expect(err).To(Equal(wallet.ErrStoreNotFound))
 		})
 	})
 
@@ -206,7 +207,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 
 		It("should return an error if nothing to update", func() {
 			err := cache.UpdateAndDeletePendingBatches(ctx)
-			Expect(err).To(Equal(btc.ErrStoreNothingToUpdate))
+			Expect(err).To(Equal(wallet.ErrStoreNothingToUpdate))
 		})
 
 		It("should create a batch that does not exist", func() {
@@ -250,7 +251,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 			Expect(err).To(BeNil())
 			Expect(len(reqs)).To(Equal(0))
 
-			//make sure batch is updated
+			// make sure batch is updated
 			updatedBatch, err := cache.ReadBatch(ctx, batch.Tx.TxID)
 			Expect(err).To(BeNil())
 
@@ -299,7 +300,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 		})
 		It("should return an error if request not found", func() {
 			_, err := cache.ReadRequests(ctx, "invalid")
-			Expect(err).To(Equal(btc.ErrStoreNotFound))
+			Expect(err).To(Equal(wallet.ErrStoreNotFound))
 		})
 	})
 
@@ -330,11 +331,11 @@ var _ = Describe("BatcherCache", Ordered, func() {
 
 })
 
-func dummyBatch() btc.Batch {
+func dummyBatch() wallet.Batch {
 	reqIds := make(map[string]bool)
 	reqIds["id1"] = true
 	reqIds["id2"] = true
-	return btc.Batch{
+	return wallet.Batch{
 		Tx: btc.Transaction{
 			TxID: fmt.Sprintf("%d", time.Now().UnixNano()),
 			Status: btc.Status{
@@ -343,21 +344,21 @@ func dummyBatch() btc.Batch {
 		},
 		RequestIds:  reqIds,
 		IsFinalized: false,
-		Strategy:    btc.CPFP,
+		Strategy:    wallet.CPFP,
 	}
 }
 
-func confirmBatch(b btc.Batch) btc.Batch {
+func confirmBatch(b wallet.Batch) wallet.Batch {
 	batch := b
 	batch.Tx.Status.Confirmed = true
 	return batch
 }
 
-func dummyRequest() btc.BatcherRequest {
-	return btc.BatcherRequest{
+func dummyRequest() wallet.BatcherRequest {
+	return wallet.BatcherRequest{
 		ID:     fmt.Sprintf("%d", time.Now().UnixNano()),
 		Status: false,
-		Spends: []btc.SpendRequest{
+		Spends: []wallet.SpendRequest{
 			{
 				Utxos: []btc.UTXO{
 					{
