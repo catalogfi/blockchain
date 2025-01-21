@@ -151,19 +151,19 @@ func (w *Wallet) shouldCreateNewBatch(ctx context.Context) (*Batch, bool, error)
 	return batch, confirmed, nil
 }
 
-func (w *Wallet) getVoutIndicesForMergeRequests(ctx context.Context, mergeRequestIDs []string) ([]int, error) {
+func (w *Wallet) getVoutIndicesForMergeRequests(mergeRequestIDs []string, onGoingBatch *Batch) ([]int, error) {
 	indices := []int{}
 	for _, id := range mergeRequestIDs {
-		vout, err := w.cache.ReadRequestVOUT(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read request vout: %w", err)
+		vout, ok := onGoingBatch.RequestIds[id]
+		if ok == false {
+			return nil, fmt.Errorf("failed to read request vout from batch")
 		}
 		indices = append(indices, vout)
 	}
 	return indices, nil
 }
 
-func (w *Wallet) handleMergeRequests(ctx context.Context, tx *wire.MsgTx, req []btc.SendRequest, onGoingBatch *Batch) (*wire.MsgTx, []*TxOutput, []string, error) {
+func (w *Wallet) handleMergeRequests(tx *wire.MsgTx, req []btc.SendRequest, onGoingBatch *Batch) (*wire.MsgTx, []*TxOutput, []string, error) {
 	// check for merges, and if there are there, we need to remove them from the tx
 
 	remainingRequests, mergeIDs, mergeTxHexes, err := extractMergeIDs(req, onGoingBatch)
@@ -174,7 +174,7 @@ func (w *Wallet) handleMergeRequests(ctx context.Context, tx *wire.MsgTx, req []
 
 	prettyPrint(mergeIDs)
 
-	indices, err := w.getVoutIndicesForMergeRequests(ctx, mergeIDs)
+	indices, err := w.getVoutIndicesForMergeRequests(mergeIDs, onGoingBatch)
 	if err != nil {
 		w.logger.Error("Failed to get vout indices for merge requests", zap.Error(err))
 		return nil, nil, nil, fmt.Errorf("failed to get vout indices for merge requests: %w", err)
@@ -213,7 +213,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to get raw tx from batch: %w", err)
 	}
 
-	tx, newTxOuts, mergeTxHexes, err := w.handleMergeRequests(ctx, tx, req, onGoingBatch)
+	tx, newTxOuts, mergeTxHexes, err := w.handleMergeRequests(tx, req, onGoingBatch)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to handle merge requests: %w", err)
 	}
@@ -233,7 +233,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
-	tx, mergeTxFee, err := w.includeMergeTxFee(ctx, tx, mergeTxHexes)
+	tx, mergeTxFee, err := w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to include merge tx fee: %w", err)
 	}
@@ -285,7 +285,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	for reqID, vout := range reqIDs {
 		onGoingBatch.RequestIds[reqID] = vout
 	}
-	
+
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
 	}
@@ -698,12 +698,8 @@ func (w *Wallet) getChangeAmount(tx *wire.MsgTx) int64 {
 	return 0
 }
 
-func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxHexes []string) (*wire.MsgTx, int64, error) {
-	mergeTxFee, err := w.cache.ReadMergeTxFee(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to read merge tx fee: %w", err)
-	}
-
+func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxHexes []string, mergeTxFee int64) (*wire.MsgTx, int64, error) {
+	var err error
 	if len(mergeTxHexes) > 0 {
 		if mergeTxFee > 0 {
 			tx, err = w.decreaseChangeAmount(tx, mergeTxFee+1)
