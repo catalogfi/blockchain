@@ -8,6 +8,7 @@ import (
 
 type Batch struct {
 	Tx              btc.Transaction
+	// maps RequestId to Vouts in Tx
 	RequestIds      map[string]int
 	PreviousBatchID string
 	MergeTxFee      int64
