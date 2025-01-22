@@ -233,7 +233,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
-	tx, mergeTxFee, err := w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
+	tx, _, err = w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to include merge tx fee: %w", err)
 	}
@@ -269,35 +269,9 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 5000*time.Millisecond)
-	defer cancel()
+	txHash, err := w.handlePostSubmission(ctx, req, tx, onGoingBatch, "")
+	return txHash, err
 
-	batchTx, err := w.indexer.GetTx(ctx, tx.TxHash().String())
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to get tx: %w", err)
-	}
-	onGoingBatch.Tx = batchTx
-	onGoingBatch.PreviousBatchID = batchTx.TxID
-
-	// vouts are necessary for merge requests
-	reqIDs, err := w.saveVouts(tx, req)
-
-	for reqID, vout := range reqIDs {
-		onGoingBatch.RequestIds[reqID] = vout
-	}
-
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
-	}
-
-	// save the merge tx fee
-	onGoingBatch.MergeTxFee = mergeTxFee
-	err = w.cache.SaveLatestBatch(ctx, onGoingBatch)
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
-	}
-
-	return tx.TxHash(), nil
 }
 
 // removeIndicesFromTx removes the indices from the tx and pushes the remaining txouts to the new tx
@@ -576,28 +550,8 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	batchTx, err := w.indexer.GetTx(ctx, tx.TxHash().String())
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to get tx: %w", err)
-	}
-
-	previousID := CoinbaseBatchID
-	if previousBatch != nil {
-		previousID = previousBatch.Tx.TxID
-	}
-
-	reqIDs, err := w.saveVouts(tx, req)
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
-	}
-
-	err = w.cache.SaveLatestBatch(ctx, NewBatch(batchTx, reqIDs, previousID, 0))
-
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
-	}
-
-	return tx.TxHash(), nil
+	txHash, err := w.handlePostSubmission(ctx, req, tx, previousBatch, CoinbaseBatchID)
+	return txHash, err
 }
 
 func (w *Wallet) saveVouts(tx *wire.MsgTx, req []btc.SendRequest) (map[string]int, error) {
@@ -1043,4 +997,54 @@ func (w *Wallet) selectAndAddUTXOsForNewOuts(ctx context.Context, tx *wire.MsgTx
 	}
 
 	return tx, nil
+}
+
+func (w *Wallet) handlePostSubmission(ctx context.Context, req []btc.SendRequest, tx *wire.MsgTx, workingBatch *Batch, previousID string) (chainhash.Hash, error) {
+
+	batchTx, err := w.indexer.GetTx(ctx, tx.TxHash().String())
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to get tx: %w", err)
+	}
+	reqIDs, err := w.saveVouts(tx, req)
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
+	}
+
+	var finalBatch *Batch
+	// Creating A New Batch
+	if len(previousID) > 0 {
+		if workingBatch != nil {
+			previousID = workingBatch.Tx.TxID
+		}
+		finalBatch = NewBatch(batchTx, reqIDs, previousID, 0)
+	} else {
+		// Updating OngoingBatch
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5000*time.Millisecond)
+		defer cancel()
+
+		workingBatch.Tx = batchTx
+		workingBatch.PreviousBatchID = batchTx.TxID
+
+		// vouts are necessary for merge requests
+		reqIDs, err := w.saveVouts(tx, req)
+
+		for reqID, vout := range reqIDs {
+			workingBatch.RequestIds[reqID] = vout
+		}
+
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to save vouts: %w", err)
+		}
+
+		finalBatch = workingBatch
+
+	}
+
+	err = w.cache.SaveLatestBatch(ctx, finalBatch)
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to save batch: %w", err)
+	}
+
+	return tx.TxHash(), nil
 }
