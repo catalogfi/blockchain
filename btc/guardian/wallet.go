@@ -270,7 +270,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	err = w.saveLatestBatch(ctx, req, tx, onGoingBatch, "")
+	err = w.saveLatestBatch(ctx, req, tx, onGoingBatch)
 	return tx.TxHash(), err
 
 }
@@ -317,8 +317,6 @@ func extractMergeIDs(req []btc.SendRequest, batch *Batch) ([]btc.SendRequest, []
 			remainingRequests = append(remainingRequests, r)
 			continue
 		}
-
-		fmt.Println("id to merge", id)
 
 		for rID := range batch.RequestIds {
 			if rID == id {
@@ -551,7 +549,7 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
-	err = w.saveLatestBatch(ctx, req, tx, previousBatch, CoinbaseBatchID)
+	err = w.saveLatestBatch(ctx, req, tx, previousBatch)
 	return tx.TxHash(), err
 }
 
@@ -1000,12 +998,12 @@ func (w *Wallet) selectAndAddUTXOsForNewOuts(ctx context.Context, tx *wire.MsgTx
 	return tx, nil
 }
 
-func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx *wire.MsgTx, workingBatch *Batch, previousID string) error {
+func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx *wire.MsgTx, workingBatch *Batch) error {
 
-	childCtx, cancel := context.WithTimeout(ctx, 10000*time.Millisecond)
+	txCtx, cancel := context.WithTimeout(ctx, 10000*time.Millisecond)
 	defer cancel()
 
-	batchTx, err := w.indexer.GetTx(childCtx, tx.TxHash().String())
+	batchTx, err := w.indexer.GetTx(txCtx, tx.TxHash().String())
 	if err != nil {
 		return fmt.Errorf("failed to get tx: %w", err)
 	}
@@ -1016,29 +1014,19 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 
 	var finalBatch *Batch
 	// Creating A New Batch
-	if previousID == CoinbaseBatchID {
-		if workingBatch != nil {
-			previousID = workingBatch.Tx.TxID
-			for req, vout := range workingBatch.RequestIds {
-				reqIDs[req] = vout
-			}
-		}
 
-		finalBatch = NewBatch(batchTx, reqIDs, previousID, 0)
-
+	if workingBatch == nil {
+		finalBatch = NewBatch(batchTx, reqIDs, CoinbaseBatchID, 0)
 	} else {
+		workingBatch.PreviousBatchID = workingBatch.Tx.TxID
 		workingBatch.Tx = batchTx
-		workingBatch.PreviousBatchID = batchTx.TxID
-
-		// vouts are necessary for merge requests
 		for reqID, vout := range reqIDs {
 			workingBatch.RequestIds[reqID] = vout
 		}
-
 		finalBatch = workingBatch
 	}
 
-	err = w.cache.SaveLatestBatch(childCtx, finalBatch)
+	err = w.cache.SaveLatestBatch(txCtx, finalBatch)
 	if err != nil {
 		return fmt.Errorf("failed to save batch: %w", err)
 	}
