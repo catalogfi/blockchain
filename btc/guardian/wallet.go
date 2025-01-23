@@ -220,11 +220,17 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 
 	tx, err = w.tryAdjustingAmountsForNewOuts(ctx, tx, newTxOuts)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return w.batchAndBroadcast(ctx, req, onGoingBatch)
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust amounts for new outs: %w", err)
 	}
 
 	values, totalInAmount, err := w.getInAmounts(ctx, tx)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return w.batchAndBroadcast(ctx, req, onGoingBatch)
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -236,6 +242,9 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 
 	tx, onGoingBatch.MergeTxFee, err = w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return w.batchAndBroadcast(ctx, req, onGoingBatch)
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to include merge tx fee: %w", err)
 	}
 
@@ -264,7 +273,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 			return chainhash.Hash{}, fmt.Errorf("failed to get batch status: %w", statusErr)
 		}
 		w.logger.Info("Batch status", zap.Bool("confirmed", confirmed), zap.Bool("notFound", notFound))
-		if confirmed || notFound || strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+		if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") || notFound || confirmed {
 			return w.batchAndBroadcast(ctx, req, onGoingBatch)
 		}
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
@@ -396,6 +405,9 @@ func (w *Wallet) mergeTxFee(ctx context.Context, txHex string) (int, error) {
 
 	_, totalInAmount, err := w.getInAmounts(ctx, msgTx)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return 0, err
+		}
 		return 0, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -520,6 +532,9 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 
 	inValues, totalInAmount, err := w.getInAmounts(ctx, tx)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return w.batchAndBroadcast(ctx, req, previousBatch)
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -664,6 +679,9 @@ func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxH
 		for _, mergeTxHex := range mergeTxHexes {
 			fee, err := w.mergeTxFee(ctx, mergeTxHex)
 			if err != nil {
+				if strings.Contains(err.Error(), "Transaction not found") {
+					return nil, 0, nil
+				}
 				return nil, 0, fmt.Errorf("failed to get merge tx fee: %w", err)
 			}
 			tx, err = w.decreaseChangeAmount(tx, int64(fee))
@@ -796,6 +814,9 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 
 	_, totalInAmount, err := w.getInAmounts(ctx, tx)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -1005,6 +1026,10 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 
 	batchTx, err := w.indexer.GetTx(txCtx, tx.TxHash().String())
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			_, err = w.batchAndBroadcast(ctx, req, workingBatch)
+			return err
+		}
 		return fmt.Errorf("failed to get tx: %w", err)
 	}
 	reqIDs, err := w.getVoutsFromTx(tx, req)
