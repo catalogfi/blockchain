@@ -2,6 +2,7 @@ package btc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -272,6 +273,36 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func SignUtxos(network *chaincfg.Params, addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *btcec.PrivateKey, fetcher *txscript.MultiPrevOutFetcher) error {
+	outpoint := fetcher.FetchPrevOutput(tx.TxIn[index].PreviousOutPoint)
+	switch addrType {
+	case waddrmgr.PubKeyHash:
+		sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, txscript.SigHashAll, key, true)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[index].SignatureScript = sigScript
+	case waddrmgr.WitnessPubKey:
+		sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, txscript.SigHashAll, key)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[index].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
+	case waddrmgr.TaprootPubKey:
+		sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, nil, txscript.SigHashAll, key)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[index].Witness = wire.TxWitness{sig}
+	default:
+		return errors.New("unknown address type")
+	}
+
+	return nil
 }
 
 // SignP2pkhTx is a helper function to sign inputs from a p2pkh address. It requires all inputs to be p2pkh. It uses

@@ -3,27 +3,61 @@ package btctest
 import (
 	"context"
 	crand "crypto/rand"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/rand"
-	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
-	"github.com/fatih/color"
 )
 
 const (
 	DefaultRegtestHost    = "0.0.0.0:18443"
 	DefaultRegtestIndexer = "http://localhost:30000"
 )
+
+type WaitMinedFunc func(ctx context.Context, indexer btc.IndexerClient) error
+
+func WaitMined(ctx context.Context, indexer btc.IndexerClient, f WaitMinedFunc) error {
+	for time.Sleep(time.Second); ; time.Sleep(time.Second) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("tx not found: %w", ctx.Err())
+		default:
+		}
+
+		if err := f(ctx, indexer); err == nil {
+			return nil
+		}
+	}
+}
+
+func WaitTx(txid string) WaitMinedFunc {
+	return func(ctx context.Context, indexer btc.IndexerClient) error {
+		_, err := indexer.GetTx(ctx, txid)
+		return err
+	}
+}
+
+func WaitBlock(height uint64) WaitMinedFunc {
+	return func(ctx context.Context, indexer btc.IndexerClient) error {
+		latest, err := indexer.GetTipBlockHeight(ctx)
+		if err != nil {
+			return err
+		}
+		if latest < height {
+			return errors.New("block not mined")
+		}
+		return nil
+	}
+}
 
 // NewBtcKey generates a new bitcoin private key.
 func NewBtcKey(network *chaincfg.Params, addrType waddrmgr.AddressType) (*btcec.PrivateKey, btcutil.Address, error) {
@@ -48,22 +82,29 @@ func NewBtcKey(network *chaincfg.Params, addrType waddrmgr.AddressType) (*btcec.
 	return key, addr, nil
 }
 
-// NewBtcAddrWithFunds generates a new bitcoin private key and funds it using the `merry faucet` command.
+// NewBtcAddrWithFunds generates a new bitcoin private key and funds it using the `merry faucet` command. The `indexer`
+// parameter is optional and can be used to wait for the tx to be mined.
 func NewBtcAddrWithFunds(network *chaincfg.Params, addrType waddrmgr.AddressType, indexer btc.IndexerClient) (*btcec.PrivateKey, btcutil.Address, error) {
 	key, addr, err := NewBtcKey(network, addrType)
 	if err != nil {
 		return nil, nil, err
 	}
+	txid, err := Faucet(addr.EncodeAddress())
+	if err != nil {
+		return nil, nil, err
+	}
 	if indexer != nil {
-		_, err := FaucetWaitedMined(addr.EncodeAddress(), indexer)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err = WaitMined(ctx, indexer, WaitTx(txid.String()))
 		return key, addr, err
 	}
-	_, err = Faucet(addr.EncodeAddress())
-	return key, addr, err
+	return key, addr, nil
 }
 
 // RandomSecret creates a random secret with size [1,32)
-func RandomSecret() []byte {
+func RandomSecret() ([]byte, [32]byte) {
 	length := rand.Intn(31) + 1
 	data := make([]byte, length)
 
@@ -71,89 +112,15 @@ func RandomSecret() []byte {
 	if err != nil {
 		panic(err)
 	}
-	return data
+	hash := sha256.Sum256(data)
+	return data, hash
 }
 
-// Faucet funds the given address using the `merry faucet` command. It will transfer 1 BTC to the target address
-// and automatically generate a new block for the tx. It returns the txid of the funding transaction.
-func Faucet(addr string) (*chainhash.Hash, error) {
-	res, err := RunOutput("merry", "faucet", "--to", addr)
-	if err != nil {
-		return nil, err
-	}
-	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
-	color.Green(fmt.Sprintf("Funding address1 %v , txid = %v", addr, txid))
-
-	return chainhash.NewHashFromStr(txid)
-}
-
-// FaucetWaitedMined does the same thing as Faucet, but it will wait until the tx been detected by the indexer.
-func FaucetWaitedMined(addr string, indexer btc.IndexerClient) (*chainhash.Hash, error) {
-	res, err := RunOutput("merry", "faucet", "--to", addr)
-	if err != nil {
-		return nil, err
-	}
-	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	for time.Sleep(3 * time.Second); ; time.Sleep(time.Second) {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("tx not found: %w", err)
-		default:
-		}
-
-		_, err := indexer.GetTx(ctx, txid)
-		if err != nil {
-			continue
-		}
-		break
-	}
-	color.Green(fmt.Sprintf("Funding address1 %v , txid = %v", addr, txid))
-	return chainhash.NewHashFromStr(txid)
-}
-
-// NewBlock will mine a new block in the reg testnet. This is usually useful when we need to test something with
-// confirmations. It uses the `merry faucet` command to generate a new block, the receiver address is a dummy address
-// which shouldn't affect our testing
-func NewBlock() error {
-	addr := "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
-	_, err := RunOutput("merry", "faucet", "--to", addr)
-	color.Green("Mined a new block")
-	return err
-}
-
-// NewBlockWaitMined does the same thing as NewBlock, but it will wait until the tx been detected by the indexer.
-func NewBlockWaitMined(indexer btc.IndexerClient) error {
-	addr := "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
-	res, err := RunOutput("merry", "faucet", "--to", addr)
-	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	for time.Sleep(3 * time.Second); ; time.Sleep(time.Second) {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("tx not found: %w", err)
-		default:
-		}
-
-		_, err := indexer.GetTx(ctx, txid)
-		if err != nil {
-			continue
-		}
-		break
-	}
-	color.Green("Mined a new block")
-	return nil
-}
-
-// RunOutput the command and catch the output
-func RunOutput(name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
-	return cmd.Output()
+// NewHtlc creates a new HTLC with random secret.
+func NewHtlc(initiatorPubKey, redeemerPubKey *btcec.PublicKey, timelock, amount int64) (*btc.HTLC, []byte, error) {
+	initiatorPubBytes := schnorr.SerializePubKey(initiatorPubKey)
+	redeemerPubBytes := schnorr.SerializePubKey(redeemerPubKey)
+	secret, secretHash := RandomSecret()
+	htlc, err := btc.NewHTLC(initiatorPubBytes, redeemerPubBytes, secretHash[:], timelock, amount)
+	return htlc, secret, err
 }

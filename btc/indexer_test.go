@@ -18,13 +18,15 @@ import (
 )
 
 var _ = Describe("Indexer client", func() {
-	Context("When using electrs API", func() {
+	Context("When using electrs API", func(ctx context.Context) {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("GetUTXOs()")
 			key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
-			txid, err := btctest.FaucetWaitedMined(addr.EncodeAddress(), indexer)
+			txid, err := btctest.Faucet(addr.EncodeAddress())
 			Expect(err).To(BeNil())
+			Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(txid.String()))).Should(Succeed())
+
 			utxos, err := indexer.GetUTXOs(context.Background(), addr)
 			Expect(err).To(BeNil())
 			Expect(len(utxos)).Should(BeNumerically(">=", 1))

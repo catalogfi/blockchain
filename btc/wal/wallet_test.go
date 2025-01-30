@@ -2,7 +2,6 @@ package wallet_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"log"
 	"time"
@@ -21,10 +20,10 @@ import (
 
 var _ = Describe("Wallet", func() {
 	Context("Operation on an HTLC", func() {
-		It("should be able to initiate and redeem an HTLC", func() {
+		It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 			By("Init keys and wallet")
 			addrType := waddrmgr.WitnessPubKey
-			key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+			key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
 			Expect(err).Should(BeNil())
 			key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).Should(BeNil())
@@ -33,22 +32,15 @@ var _ = Describe("Wallet", func() {
 			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 
-			By("Initiate an HTLC")
-			secret := btctest.RandomSecret()
-			secretHash := sha256.Sum256(secret)
-			timelock := int64(144)
-			key1PubBytes := schnorr.SerializePubKey(key1.PubKey())
-			key2PubBytes := schnorr.SerializePubKey(key2.PubKey())
-			htlc, err := btc.NewHTLC(key1PubBytes, key2PubBytes, secretHash[:], timelock, 1e7)
+			By("Initiate and redeem an HTLC")
+			amount, timelock := int64(1e7), int64(144)
+			htlc, secret, err := btctest.NewHtlc(key1.PubKey(), key2.PubKey(), timelock, amount)
 			Expect(err).Should(BeNil())
-			_, err = wal1.Initiate(context.Background(), htlc)
+			_, err = wal1.Initiate(ctx, htlc)
 			Expect(err).Should(BeNil())
 			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
-
-			By("Redeem an HTLC")
-			txid, err := wal2.Redeem(context.Background(), htlc, secret)
+			_, err = wal2.Redeem(ctx, htlc, secret)
 			Expect(err).Should(BeNil())
-			log.Print("txid = ", txid)
 		})
 
 		It("should be able to refund an HTLC after it expires", func() {
@@ -62,17 +54,12 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Initiate an HTLC")
-			secret := btctest.RandomSecret()
-			secretHash := sha256.Sum256(secret)
-			timelock := int64(6)
-			key1PubBytes := schnorr.SerializePubKey(key1.PubKey())
-			key2PubBytes := schnorr.SerializePubKey(key2.PubKey())
-			htlc, err := btc.NewHTLC(key1PubBytes, key2PubBytes, secretHash[:], timelock, 1e7)
-			Expect(err).Should(BeNil())
+			amount, timelock := int64(1e7), int64(6)
+			htlc, _, err := btctest.NewHtlc(key1.PubKey(), key2.PubKey(), timelock, amount)
 			_, err = wal1.Initiate(context.Background(), htlc)
 			Expect(err).Should(BeNil())
 
-			By("Mine expiry no of blocks")
+			By("Mine expiry number of blocks")
 			for i := 0; i < int(timelock)-1; i++ {
 				err = btctest.NewBlock()
 				Expect(err).Should(BeNil())
@@ -80,15 +67,56 @@ var _ = Describe("Wallet", func() {
 			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 
 			By("Refund an HTLC")
-			txid, err := wal1.Refund(context.Background(), htlc)
+			_, err = wal1.Refund(context.Background(), htlc)
 			Expect(err).Should(BeNil())
-			log.Print("txid = ", txid)
 		})
 
-		FIt("should be able to instant refund an HTLC", func() {
+		It("should be able to instant refund a HTLC", func(ctx context.Context) {
 			By("Init keys and wallet")
 			addrType := waddrmgr.WitnessPubKey
-			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+			key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+			Expect(err).Should(BeNil())
+			key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+			Expect(err).Should(BeNil())
+			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+			Expect(err).Should(BeNil())
+			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+			Expect(err).Should(BeNil())
+
+			By("Initiate an HTLC")
+			amount, timelock := int64(1e7), int64(6)
+			htlc, _, err := btctest.NewHtlc(key1.PubKey(), key2.PubKey(), timelock, amount)
+			initTx, err := wal1.Initiate(context.Background(), htlc)
+			Expect(err).Should(BeNil())
+
+			By("Initiate the HTLC with the pre-signed instant refund tx")
+			initUtxo := btc.UTXO{
+				TxID:   initTx.TxHash().String(),
+				Vout:   0,
+				Amount: amount,
+			}
+			recipient := btc.Recipient{
+				To:     wal2.Address().String(),
+				Amount: amount,
+			}
+			refundTx, err := wallet.NewInstantRefundTx(network, key1, htlc, initUtxo, recipient)
+			Expect(err).Should(BeNil())
+			raw, err := btc.TxRawBytes(refundTx)
+			Expect(err).Should(BeNil())
+			log.Print(hex.EncodeToString(raw))
+
+			By("Mine a new block")
+			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+
+			By("Use the instant refund leaf to refund the HTLC")
+			_, err = wal2.InstantRefund(ctx, htlc, refundTx)
+			Expect(err).Should(BeNil())
+		})
+
+		It("should be able to instant refund an HTLC", func() {
+			By("Init keys and wallet")
+			addrType := waddrmgr.WitnessPubKey
+			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
 			Expect(err).Should(BeNil())
 			key2, addr2, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).Should(BeNil())
@@ -99,8 +127,7 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Initiate an HTLC")
-			secret := btctest.RandomSecret()
-			secretHash := sha256.Sum256(secret)
+			_, secretHash := btctest.RandomSecret()
 			timelock := int64(6)
 			key1PubBytes := schnorr.SerializePubKey(key1.PubKey())
 			key2PubBytes := schnorr.SerializePubKey(key2.PubKey())
