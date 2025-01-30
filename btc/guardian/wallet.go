@@ -970,7 +970,7 @@ func parseIntoTxOutputs(req []btc.SendRequest) ([]*TxOutput, error) {
 
 func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amount int64) ([]*wire.TxIn, int64, error) {
 
-	utxos, err := w.indexer.GetUTXOs(ctx, w.addr)
+	utxos, _, err := w.indexer.GetUTXOsForAmount(ctx, w.addr, amount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get utxos: %w", err)
 	}
@@ -992,6 +992,10 @@ func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amoun
 			utxosToBeSelected = append(utxosToBeSelected, utxo)
 			amountToBeAdded += utxo.Amount
 		}
+	}
+
+	if amountToBeAdded < amount {
+		return nil, 0, fmt.Errorf("insufficient balance : has %d and need %d", amountToBeAdded, amount)
 	}
 
 	txIns := []*wire.TxIn{}
