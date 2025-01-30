@@ -35,7 +35,9 @@ type Wallet struct {
 	rpc            btc.BitcoinRPCClient
 }
 
-func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, indexer btc.IndexerClient, chainParams *chaincfg.Params, feeEstimator btc.FeeEstimator, logger *zap.Logger, rpcconfig btc.BitcoinRPCClient, feeLevel ...btc.FeeLevel) (*Wallet, error) {
+const indexerTimeout = 3 * time.Second
+
+func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, indexer btc.IndexerClient, chainParams *chaincfg.Params, feeEstimator btc.FeeEstimator, logger *zap.Logger, bitcoinRPC btc.BitcoinRPCClient, feeLevel ...btc.FeeLevel) (*Wallet, error) {
 	defaultFeeLevel := btc.MediumFee
 	if len(feeLevel) > 0 {
 		defaultFeeLevel = feeLevel[0]
@@ -77,7 +79,7 @@ func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, i
 		logger:         logger,
 		addr:           addr,
 		pkScript:       pkScript,
-		rpc:            rpcconfig,
+		rpc:            bitcoinRPC,
 	}, nil
 }
 
@@ -883,9 +885,9 @@ func prettyPrint(anything interface{}) {
 func (w *Wallet) getInAmounts(ctx context.Context, tx *wire.MsgTx) ([]int64, int64, error) {
 	amounts := []int64{}
 	for _, in := range tx.TxIn {
-		childCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		prevTx, err := w.indexer.GetTx(childCtx, in.PreviousOutPoint.Hash.String())
+		ctx, cancel := context.WithTimeout(ctx, indexerTimeout)
+		prevTx, err := w.indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
+		cancel()
 		if err != nil {
 			return nil, 0, err
 		}
@@ -907,7 +909,7 @@ func (w *Wallet) getTotalOutAmount(tx *wire.MsgTx) int64 {
 }
 
 func (w *Wallet) batchStatus(ctx context.Context, batch *Batch) (bool, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, indexerTimeout)
 	defer cancel()
 	tx, err := w.indexer.GetTx(ctx, batch.Tx.TxID)
 	if err != nil {
@@ -923,7 +925,7 @@ func (w *Wallet) batchStatus(ctx context.Context, batch *Batch) (bool, bool, err
 
 func (w *Wallet) txFromBatch(ctx context.Context, batch *Batch) (*wire.MsgTx, error) {
 	// get the txHex from indexer
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, indexerTimeout)
 	defer cancel()
 	txHex, err := w.indexer.GetTxHex(ctx, batch.Tx.TxID)
 	if err != nil {
@@ -1028,7 +1030,7 @@ func (w *Wallet) selectAndAddUTXOsForNewOuts(ctx context.Context, tx *wire.MsgTx
 
 func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx *wire.MsgTx, workingBatch *Batch) error {
 
-	txCtx, cancel := context.WithTimeout(ctx, 10000*time.Millisecond)
+	txCtx, cancel := context.WithTimeout(ctx, indexerTimeout)
 	defer cancel()
 	batchTx, err := w.indexer.GetTx(txCtx, tx.TxHash().String())
 	if err != nil {

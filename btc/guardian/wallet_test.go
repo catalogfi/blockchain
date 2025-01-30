@@ -13,7 +13,6 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/guardian"
 	"github.com/catalogfi/blockchain/localnet"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
@@ -75,13 +74,13 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	rpcConfig := btc.BitcoinRPCClient{
+	bitcoinRPC := btc.BitcoinRPCClient{
 		RpcUser: "admin1",
 		RpcPass: "123",
 		RpcURL:  "http://0.0.0.0:18443",
 	}
 	// Create wallets
-	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, rpcConfig)
+	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
 
 	simpleWallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.MediumFee)
@@ -130,13 +129,13 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
-	rpcConfig := btc.BitcoinRPCClient{
+	bitcoinRPC := btc.BitcoinRPCClient{
 		RpcUser: "admin1",
 		RpcPass: "123",
 		RpcURL:  "http://0.0.0.0:18443",
 	}
 	// Create walletstxfrom
-	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, rpcConfig)
+	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
 
 	simpleWallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.MediumFee)
@@ -206,8 +205,6 @@ func TestGuardianWallet(t *testing.T) {
 			mergeReqs := rand.Intn(redeems) + 1
 			normalReqs := rand.Intn(10)
 
-			fmt.Println("inits : ", inits, "\nredeems : ", redeems, "\nmergeReqs : ", mergeReqs, "\nnormalReqs", normalReqs)
-
 			simpleWallets, _ := setupSimpleWallets(t, inits)
 			mergeTxHexes := make(map[string]string)
 			utxos := make(map[string][]btc.Prevout)
@@ -220,7 +217,6 @@ func TestGuardianWallet(t *testing.T) {
 			tx, err := wallet.Send(ctx, sendReqs)
 			require.NoError(t, err)
 			require.NotEmpty(t, tx)
-			fmt.Println("after sending to simple the tx is ", tx.String())
 
 			time.Sleep(time.Duration(5) * time.Second)
 
@@ -233,7 +229,6 @@ func TestGuardianWallet(t *testing.T) {
 					btc.NewSendRequest(fmt.Sprintf("1_%d", k), amount-fee, randomP2PKHAddr2),
 				}, nil, nil)
 
-				fmt.Println("After sending to random address ", txString)
 
 				require.NoError(t, err)
 				require.NotEmpty(t, txString)
@@ -251,7 +246,6 @@ func TestGuardianWallet(t *testing.T) {
 
 			mergeRe := []btc.SendRequest{}
 			for l := 0; l < mergeReqs; l++ {
-				fmt.Println("l ==> ", l)
 				for _, out := range utxos[fmt.Sprintf("1_%d", l)] {
 					addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
 					require.NoError(t, err)
@@ -260,15 +254,11 @@ func TestGuardianWallet(t *testing.T) {
 			}
 			if len(mergeRe) > 0 {
 				tx, err := wallet.Send(ctx, mergeRe)
-				fmt.Println("after merging : ", tx)
 				if err != nil && err.Error() == "no remaining requests to process" {
 					fmt.Println("no remaining requests to process")
 					continue
 				}
-				if err != nil {
-					fmt.Println(err)
-				}
-
+				
 				require.NoError(t, err)
 				require.NotEmpty(t, tx)
 
@@ -345,28 +335,4 @@ func indexerClient() btc.IndexerClient {
 		panic(err)
 	}
 	return btc.NewElectrsIndexerClient(logger, "http://localhost:30000", 2*time.Second)
-}
-
-func TestLess(t *testing.T) {
-	setup, ctx := setupSimpleFunded(t)
-	simple := setup.simple
-	gWallet := setup.guardian
-
-	for i := 0; i < 10; i++ {
-		tx, err := simple.Send(ctx, []btc.SendRequest{
-			btc.NewSendRequest(fmt.Sprintf("1_%d", i), 1000, gWallet.Address()),
-		}, nil, nil)
-		if err != nil {
-
-		}
-		assert.NotEmpty(t, tx)
-	}
-
-	tx, err := gWallet.Send(ctx, []btc.SendRequest{
-		btc.NewSendRequest("5", 10000, randomP2PKHAddr()),
-	})
-	fmt.Println(tx.String())
-	if err != nil {
-		fmt.Println(err)
-	}
 }
