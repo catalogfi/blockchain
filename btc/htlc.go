@@ -169,6 +169,7 @@ func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
 }
 
 func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
+	// TODO : should not consider scam/dust utxos
 	for _, utxo := range utxos {
 		if utxo.Status != nil && utxo.Status.Confirmed {
 			if latest-*utxo.Status.BlockHeight >= uint64(htlc.Timelock) {

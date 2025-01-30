@@ -2,8 +2,6 @@ package wallet_test
 
 import (
 	"context"
-	"encoding/hex"
-	"log"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -101,9 +99,6 @@ var _ = Describe("Wallet", func() {
 			}
 			refundTx, err := wallet.NewInstantRefundTx(network, key1, htlc, initUtxo, recipient)
 			Expect(err).Should(BeNil())
-			raw, err := btc.TxRawBytes(refundTx)
-			Expect(err).Should(BeNil())
-			log.Print(hex.EncodeToString(raw))
 
 			By("Mine a new block")
 			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
@@ -204,7 +199,6 @@ var _ = Describe("Wallet", func() {
 			}
 
 			// Submit tx1
-			log.Print(tx1.TxHash().String())
 			Expect(indexer.SubmitTx(context.Background(), tx1)).Should(Succeed())
 			time.Sleep(10 * time.Second)
 
@@ -243,15 +237,8 @@ var _ = Describe("Wallet", func() {
 					tx2.TxIn[i].Witness = append(tx2.TxIn[i].Witness, sig2, sig1, leaf.Script, ctrBlkBytes)
 
 					// tx2.TxIn[i].Witness = tx1.TxIn[i].Witness
-					log.Printf("have %v witness", len(tx2.TxIn[i].Witness))
 				}
 			}
-			raw, err := btc.TxRawBytes(tx2)
-			Expect(err).Should(BeNil())
-
-			log.Print(hex.EncodeToString(raw))
-
-			log.Print(tx2.TxHash().String())
 			Expect(indexer.SubmitTx(context.Background(), tx2)).Should(Succeed())
 		})
 	})

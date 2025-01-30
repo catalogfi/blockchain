@@ -94,7 +94,7 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *btc.HTLC) (*wire.MsgTx, e
 	}
 
 	// Sign tx
-	if err := wal.signTx(tx, utxos); err != nil {
+	if err := btc.SignTx(wal.addrType, tx, wal.key, utxos); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +109,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *btc.HTLC, secret []byte) (*
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
-	// Make sure the HTLC is initiated and not redeemed yet
+	// Make sure the HTLC is redeemable
 	addr, err := htlc.Address(wal.network)
 	if err != nil {
 		return nil, err
@@ -276,7 +276,6 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *btc.HTLC, tx *wire.M
 	if err != nil {
 		return nil, err
 	}
-
 	utxos, err := wal.indexer.GetUTXOs(ctx, wal.Address())
 	if err != nil {
 		return nil, err
@@ -285,10 +284,8 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *btc.HTLC, tx *wire.M
 	if err != nil {
 		return nil, err
 	}
-	log.Print("pkScript: ", hex.EncodeToString(pkScript))
-	log.Print("pkScript: ", hex.EncodeToString(wal.addr.ScriptAddress()))
 
-	fetcher, err := btc.InitFetcher(utxos, wal.addr.ScriptAddress())
+	fetcher, err := btc.InitFetcher(utxos, pkScript)
 	if err != nil {
 		return nil, err
 	}
@@ -324,10 +321,9 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *btc.HTLC, tx *wire.M
 			initiatorSig := tx.TxIn[i].Witness[0]
 			transaction.TxIn[i].Witness = append(wire.TxWitness{}, redeemerSig, initiatorSig, leaf.Script, ctrBlkBytes)
 		} else {
-			if err := btc.SignUtxos(wal.network, wal.addrType, transaction, i, wal.key, fetcher); err != nil {
+			if err := btc.SignUtxos(wal.addrType, transaction, i, wal.key, fetcher, sigHashes); err != nil {
 				return nil, err
 			}
-
 		}
 	}
 
@@ -336,19 +332,6 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *btc.HTLC, tx *wire.M
 		return nil, err
 	}
 	return transaction, nil
-}
-
-func (wal *wallet) signTx(tx *wire.MsgTx, utxos []btc.UTXO) error {
-	switch wal.addrType {
-	case waddrmgr.PubKeyHash:
-		return btc.SignP2pkhTx(wal.network, wal.key, tx)
-	case waddrmgr.WitnessPubKey:
-		return btc.SignP2wpkhTx(wal.network, utxos, wal.key, tx)
-	case waddrmgr.TaprootPubKey:
-		return btc.SignP2trTx(utxos, wal.key, tx)
-	default:
-		panic(fmt.Sprintf("unknown address type: %v", wal.addrType))
-	}
 }
 
 // NewInstantRefundTx builds a new tx to redeem an HTLC instantly using the instantRefund branch. The instant refund tx
