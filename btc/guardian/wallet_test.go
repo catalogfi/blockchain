@@ -13,6 +13,7 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/guardian"
 	"github.com/catalogfi/blockchain/localnet"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/syndtr/goleveldb/leveldb"
 	"go.uber.org/zap"
@@ -51,7 +52,7 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 		for {
 			localnet.MineBTCBlock()
 			rand.NewSource(time.Now().Unix())
-			seconds := time.Duration(rand.Intn(20) + 20)
+			seconds := time.Duration(rand.Intn(20))
 			time.Sleep(seconds * time.Second)
 		}
 	}()
@@ -102,7 +103,7 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 		for {
 			localnet.MineBTCBlock()
 			rand.NewSource(time.Now().Unix())
-			seconds := time.Duration(rand.Intn(20) + 20)
+			seconds := time.Duration(rand.Intn(5) + 5)
 			time.Sleep(seconds * time.Second)
 		}
 	}()
@@ -191,10 +192,10 @@ func TestGuardianWallet(t *testing.T) {
 	})
 
 	t.Run("should be able to merge merge txs", func(t *testing.T) {
-		for i := 0; i < 1; i++ {
-			inits := rand.Intn(10)
-			redeems := rand.Intn(inits + 1)
-			mergeReqs := rand.Intn(redeems + 1)
+		for i := 0; i < 10; i++ {
+			inits := rand.Intn(25) + 25
+			redeems := (rand.Intn(inits) % 25) + 1
+			mergeReqs := rand.Intn(redeems) + 1
 			normalReqs := rand.Intn(10)
 
 			fmt.Println("inits : ", inits, "\nredeems : ", redeems, "\nmergeReqs : ", mergeReqs, "\nnormalReqs", normalReqs)
@@ -203,16 +204,17 @@ func TestGuardianWallet(t *testing.T) {
 			mergeTxHexes := make(map[string]string)
 			utxos := make(map[string][]btc.Prevout)
 
+			sendReqs := []btc.SendRequest{}
 			for j := 0; j < inits; j++ {
-				tx, err := wallet.Send(ctx, []btc.SendRequest{
-					btc.NewSendRequest(fmt.Sprintf("3_%d", j), amount, simpleWallets[j].Address()),
-				})
-				fmt.Println("after funding simple : ", tx)
-				require.NoError(t, err)
-				require.NotEmpty(t, tx)
-				fmt.Println("after sending to simple the tx is ", tx.String())
-				time.Sleep(5 * time.Second)
+				sendReqs = append(sendReqs, btc.NewSendRequest(fmt.Sprintf("3_%d_%d", i, j), amount, simpleWallets[j].Address()))
 			}
+
+			tx, err := wallet.Send(ctx, sendReqs)
+			require.NoError(t, err)
+			require.NotEmpty(t, tx)
+			fmt.Println("after sending to simple the tx is ", tx.String())
+
+			time.Sleep(time.Duration(5) * time.Second)
 
 			for k := 0; k < redeems; k++ {
 				randomP2PKHAddr2 := randomP2PKHAddr()
@@ -223,8 +225,7 @@ func TestGuardianWallet(t *testing.T) {
 					btc.NewSendRequest(fmt.Sprintf("1_%d", k), amount-fee, randomP2PKHAddr2),
 				}, nil, nil)
 
-				fmt.Println("from ", simpleWallets[k].Address(), " to ==> ", randomP2PKHAddr2.EncodeAddress())
-				fmt.Println("after sending to random Address ", txString)
+				fmt.Println("After sending to random address ", txString)
 
 				require.NoError(t, err)
 				require.NotEmpty(t, txString)
@@ -233,7 +234,6 @@ func TestGuardianWallet(t *testing.T) {
 
 				txx, err := setup.indexer.GetTx(ctx, txString)
 
-				fmt.Println("k ====> ", k)
 				mergeTxHexes[fmt.Sprintf("1_%d", k)] = txHex
 				utxos[fmt.Sprintf("1_%d", k)] = txx.VOUTs
 
@@ -243,37 +243,16 @@ func TestGuardianWallet(t *testing.T) {
 
 			mergeRe := []btc.SendRequest{}
 			for l := 0; l < mergeReqs; l++ {
-
 				fmt.Println("l ==> ", l)
 				for _, out := range utxos[fmt.Sprintf("1_%d", l)] {
 					addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
-					fmt.Println(addr.EncodeAddress(), "  ", out.ScriptPubKeyAddress)
 					require.NoError(t, err)
-					mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID(fmt.Sprintf("4_%d", l), int64(out.Value), addr, fmt.Sprintf("3_%d", l), mergeTxHexes[fmt.Sprintf("1_%d", l)]))
+					mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID(fmt.Sprintf("4_%d_%d", i, l), int64(out.Value), addr, fmt.Sprintf("3_%d_%d", i, l), mergeTxHexes[fmt.Sprintf("1_%d", l)]))
 				}
-
 			}
 			if len(mergeRe) > 0 {
 				tx, err := wallet.Send(ctx, mergeRe)
-				if err != nil && err.Error() == "no remaining requests to process" {
-					fmt.Println("no remaining requests to process")
-					continue
-				}
-
 				fmt.Println("after merging : ", tx)
-				require.NoError(t, err)
-				require.NotEmpty(t, tx)
-
-			}
-
-			normalRe := []btc.SendRequest{}
-			for i := 0; i < normalReqs; i++ {
-				randomAddr := randomP2PKHAddr()
-				normalRe = append(normalRe, btc.NewSendRequest(fmt.Sprintf("2_%d", i), amount-1000, randomAddr))
-			}
-
-			if len(normalRe) > 0 {
-				tx, err := wallet.Send(ctx, normalRe)
 				if err != nil && err.Error() == "no remaining requests to process" {
 					fmt.Println("no remaining requests to process")
 					continue
@@ -281,7 +260,29 @@ func TestGuardianWallet(t *testing.T) {
 				if err != nil {
 					fmt.Println(err)
 				}
-				fmt.Println("after merging : ", tx)
+
+				require.NoError(t, err)
+				require.NotEmpty(t, tx)
+
+			}
+
+			normalRe := []btc.SendRequest{}
+			for p := 0; p < normalReqs; p++ {
+				randomAddr := randomP2PKHAddr()
+				normalRe = append(normalRe, btc.NewSendRequest(fmt.Sprintf("2_%d_%d", i, p), amount-1000, randomAddr))
+			}
+
+			if len(normalRe) > 0 {
+				tx, err := wallet.Send(ctx, normalRe)
+				fmt.Println("after normal req : ", tx)
+				if err != nil && err.Error() == "no remaining requests to process" {
+					fmt.Println("no remaining requests to process")
+					continue
+				}
+				if err != nil {
+					fmt.Println(err)
+				}
+
 				require.NoError(t, err)
 				require.NotEmpty(t, tx)
 			}
@@ -336,4 +337,28 @@ func indexerClient() btc.IndexerClient {
 		panic(err)
 	}
 	return btc.NewElectrsIndexerClient(logger, "http://localhost:30000", 2*time.Second)
+}
+
+func TestLess(t *testing.T) {
+	setup, ctx := setupSimpleFunded(t)
+	simple := setup.simple
+	gWallet := setup.guardian
+
+	for i := 0; i < 10; i++ {
+		tx, err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest(fmt.Sprintf("1_%d", i), 1000, gWallet.Address()),
+		}, nil, nil)
+		if err != nil {
+
+		}
+		assert.NotEmpty(t, tx)
+	}
+
+	tx, err := gWallet.Send(ctx, []btc.SendRequest{
+		btc.NewSendRequest("5", 10000, randomP2PKHAddr()),
+	})
+	fmt.Println(tx.String())
+	if err != nil {
+		fmt.Println(err)
+	}
 }

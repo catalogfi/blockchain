@@ -217,6 +217,9 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 
 	tx, err := w.txFromBatch(ctx, onGoingBatch)
 	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not found") {
+			return w.batchAndBroadcast(ctx, req, onGoingBatch)
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to get raw tx from batch: %w", err)
 	}
 
@@ -568,6 +571,11 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
+	if previousBatch != nil {
+		fmt.Println(previousBatch.RequestIds)
+		previousBatch.RequestIds = map[string]int{}
+	}
+
 	err = w.saveLatestBatch(ctx, req, tx, previousBatch)
 	return tx.TxHash(), err
 }
@@ -877,7 +885,9 @@ func prettyPrint(anything interface{}) {
 func (w *Wallet) getInAmounts(ctx context.Context, tx *wire.MsgTx) ([]int64, int64, error) {
 	amounts := []int64{}
 	for _, in := range tx.TxIn {
-		prevTx, err := w.indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
+		childCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		prevTx, err := w.indexer.GetTx(childCtx, in.PreviousOutPoint.Hash.String())
 		if err != nil {
 			return nil, 0, err
 		}
@@ -899,7 +909,7 @@ func (w *Wallet) getTotalOutAmount(tx *wire.MsgTx) int64 {
 }
 
 func (w *Wallet) batchStatus(ctx context.Context, batch *Batch) (bool, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tx, err := w.indexer.GetTx(ctx, batch.Tx.TxID)
 	if err != nil {
@@ -915,6 +925,8 @@ func (w *Wallet) batchStatus(ctx context.Context, batch *Batch) (bool, bool, err
 
 func (w *Wallet) txFromBatch(ctx context.Context, batch *Batch) (*wire.MsgTx, error) {
 	// get the txHex from indexer
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	txHex, err := w.indexer.GetTxHex(ctx, batch.Tx.TxID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tx hex: %w", err)
