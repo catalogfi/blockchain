@@ -62,7 +62,7 @@ Example:
 
 ### Fee estimator
 
-The fee estimator estimates network fees using various APIs.
+The fee estimator gs network fees using various APIs.
 > The result is in `sats/vB`
 
 Example:

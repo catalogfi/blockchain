@@ -8,15 +8,22 @@ import (
 
 type Batch struct {
 	Tx              btc.Transaction
-	RequestIds      []string
+	// maps RequestId to Vouts in Tx
+	RequestIds      map[string]int
 	PreviousBatchID string
+	MergeTxFee      int64
 }
 
-func NewBatch(tx btc.Transaction, requestIds []string, previousBatchID string) *Batch {
+const CoinbaseBatchID = "coinbase"
+const GuardianWitnessSize = 267
+const GuardianChangeSize = 43
+
+func NewBatch(tx btc.Transaction, requestIds map[string]int, previousBatchID string, mergeTxFee int64) *Batch {
 	return &Batch{
 		Tx:              tx,
 		RequestIds:      requestIds,
 		PreviousBatchID: previousBatchID,
+		MergeTxFee:      mergeTxFee,
 	}
 }
 
