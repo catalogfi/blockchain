@@ -409,7 +409,6 @@ func ValidateInstantRefundTx(htlc *btc.HTLC, tx *wire.MsgTx) error {
 	if err != nil {
 		return err
 	}
-	log.Print("sighash before = ", hex.EncodeToString(tapSigHashes))
 
 	sigBytes := tx.TxIn[0].Witness[0]
 	if len(sigBytes) == schnorr.SignatureSize+1 {

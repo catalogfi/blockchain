@@ -127,7 +127,6 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTX
 			return false, err
 		}
 		fees := int64(vs * feeRate)
-		log.Printf("1 estimate size = %v.  fee = %v", vs, fees)
 
 		// If the amount is enough to cover the outputs and fees
 		if totalIn > totalOut+fees {
@@ -146,7 +145,6 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTX
 						return false, err
 					}
 					fees := int64(vs * feeRate)
-					log.Printf("2 estimate size = %v.  fee = %v", vs, fees)
 
 					// Adjust the change utxo amount if it's still enough, delete it otherwise
 					if totalIn-totalOut-fees > DustAmount {
