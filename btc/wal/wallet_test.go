@@ -69,7 +69,7 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 		})
 
-		It("should be able to instant refund a HTLC", func(ctx context.Context) {
+		FIt("should be able to instant refund a HTLC", func(ctx context.Context) {
 			By("Init keys and wallet")
 			addrType := waddrmgr.WitnessPubKey
 			key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)

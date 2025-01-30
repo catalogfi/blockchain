@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"sync"
@@ -143,6 +144,7 @@ func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 
 func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
 	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
+	log.Printf("totalBase = %v, totalSegwit = %v", totalBase, totalSegwit)
 	for _, input := range tx.TxIn {
 		key := input.PreviousOutPoint.String()
 		base, ok := estimator.baseSizeMap[key]
@@ -155,6 +157,7 @@ func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, erro
 			return 0, NewUnknownUtxoError(key)
 		}
 		totalSegwit += segwit
+		log.Printf("utxo %v size = %v | %v", key, base, segwit)
 	}
 
 	// Additional 2 weight units for segwit marker + flag if tx has any witness input

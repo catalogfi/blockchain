@@ -71,15 +71,16 @@ var (
 	// MaxInitiationUtxoNumber is the maximum number of utxos that can be used to initiate an HTLC.
 	MaxInitiationUtxoNumber = 1
 
-	// todo : calculate these
 	BaseSizeHtlcRedeem        = 0
 	BaseSizeHtlcRefund        = 0
 	BaseSizeHtlcInstantRefund = 0
 
-	// todo : calculate these
-	SegwitSizeHtlcRedeem        = 10
-	SegwitSizeHtlcRefund        = 0
-	SegwitSizeHtlcInstantRefund = 0
+	// SegwitSizeHtlcRedeem = stack number + stack size * 4 + signature + secret + script size + control block
+	SegwitSizeHtlcRedeem = func(secretSize int) int { return 1 + 4 + 65 + secretSize + 69 + 65 }
+	// SegwitSizeHtlcRefund = stack number + stack size * 3 + signature + script size + control block
+	SegwitSizeHtlcRefund = 1 + 3 + 65 + 36 + 97
+	// SegwitSizeHtlcInstantRefund = stack number + stack size * 4 + signature1 + signature2 + script size + control block
+	SegwitSizeHtlcInstantRefund = 1 + 4 + 65 + 65 + 70 + 97
 )
 
 type HTLC struct {

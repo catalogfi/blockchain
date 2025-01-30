@@ -133,7 +133,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *btc.HTLC, secret []byte) (*
 	}
 
 	// Build tx
-	sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeHtlcRedeem, btc.SegwitSizeHtlcRedeem)
+	sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeHtlcRedeem, btc.SegwitSizeHtlcRedeem(len(secret)))
 	tx, err := btc.BuildTransaction(wal.network, feeRate.High, utxos, nil, sizeEstimator, nil, wal.Address())
 	if err != nil {
 		return nil, err
@@ -200,7 +200,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *btc.HTLC) (*wire.MsgTx, err
 	}
 
 	// Build tx
-	sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeHtlcRedeem, btc.SegwitSizeHtlcRedeem)
+	sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeHtlcRefund, btc.SegwitSizeHtlcRefund)
 	tx, err := btc.BuildTransaction(wal.network, feeRate.High, utxos, nil, sizeEstimator, nil, wal.Address())
 	if err != nil {
 		return nil, err
