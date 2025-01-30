@@ -17,9 +17,10 @@ var _ = Describe("Bitcoin", func() {
 	Context("Build a transaction", func() {
 		It("should be able to build a transaction", func() {
 			By("Initialize keys and addresses")
-			privKey1, p2pkhAddr1, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, indexer)
+			addrType := waddrmgr.PubKeyHash
+			privKey1, p2pkhAddr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).To(BeNil())
-			_, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, p2pkhAddr2, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).To(BeNil())
 
 			By("Construct a transaction which sends money from p2pkhAddr1 to p2pkhAddr2")
@@ -37,7 +38,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2pkhTx(network, privKey1, transaction)).Should(Succeed())
+			Expect(btc.SignTx(addrType, transaction, privKey1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
 			By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
 		})
@@ -46,9 +47,10 @@ var _ = Describe("Bitcoin", func() {
 	Context("RBF", func() {
 		It("should be able to build and replace an RBF transaction", func(ctx context.Context) {
 			By("Initialize keys and addresses")
-			privKey1, p2pkhAddr1, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, indexer)
+			addrType := waddrmgr.PubKeyHash
+			privKey1, p2pkhAddr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).To(BeNil())
-			_, p2pkhAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, p2pkhAddr2, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).To(BeNil())
 
 			By("Construct a RBF tx which sends money from p2pkhAddr1 to p2pkhAddr2")
@@ -66,7 +68,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2pkhTx(network, privKey1, transaction)).Should(Succeed())
+			Expect(btc.SignTx(addrType, transaction, privKey1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 			By(color.GreenString("RBF tx hash = %v", transaction.TxHash().String()))
 
@@ -76,16 +78,17 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the replacement tx")
-			Expect(btc.SignP2pkhTx(network, privKey1, replaceTx)).Should(Succeed())
+			Expect(btc.SignTx(addrType, replaceTx, privKey1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, replaceTx)).Should(Succeed())
 			By(color.GreenString("Replaced RBF tx hash = %v", replaceTx.TxHash().String()))
 		})
 
 		It("should get an error when trying to replace a mined tx", func(ctx context.Context) {
 			By("Initialize keys and addresses")
-			privKey, pkAddr, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, indexer)
+			addrType := waddrmgr.PubKeyHash
+			privKey, pkAddr, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).To(BeNil())
-			_, toAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, toAddr, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).To(BeNil())
 
 			By("Construct a RBF tx which sends money from pkAddr to toAddr")
@@ -103,7 +106,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2pkhTx(network, privKey, transaction)).Should(Succeed())
+			Expect(btc.SignTx(addrType, transaction, privKey, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 			By(color.GreenString("RBF tx hash = %v", transaction.TxHash().String()))
 
@@ -116,7 +119,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and attempt to submit the replacement tx")
-			Expect(btc.SignP2pkhTx(network, privKey, replaceTx)).Should(Succeed())
+			Expect(btc.SignTx(addrType, replaceTx, privKey, utxos)).Should(Succeed())
 			err = indexer.SubmitTx(ctx, replaceTx)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 		})

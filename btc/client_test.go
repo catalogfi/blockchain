@@ -127,7 +127,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
-			Expect(btc.SignP2pkhTx(network, privKey, transaction)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, privKey, utxos)).Should(Succeed())
 
 			By("Expect `ErrTxNotFound` before submitting the tx")
 			txid := transaction.TxHash()
@@ -159,7 +159,7 @@ var _ = Describe("bitcoin client", func() {
 
 			transaction1, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignP2pkhTx(network, privKey, transaction1)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
 
 			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
@@ -191,7 +191,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2pkhTx(network, privKey1, transaction)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, privKey1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("Expect an error if the utxo is spent")

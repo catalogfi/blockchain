@@ -18,8 +18,8 @@ import (
 )
 
 var _ = Describe("Indexer client", func() {
-	Context("When using electrs API", func(ctx context.Context) {
-		It("should be able to fetch the utxos of an address ", func() {
+	Context("When using electrs API", func() {
+		It("should be able to fetch the utxos of an address ", func(ctx context.Context) {
 			By("GetUTXOs()")
 			key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 			Expect(err).To(BeNil())
@@ -72,7 +72,7 @@ var _ = Describe("Indexer client", func() {
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			rawTx, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, addr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignP2pkhTx(network, key, rawTx)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, rawTx, key, utxos)).Should(Succeed())
 			Expect(client.SubmitTx(context.Background(), rawTx)).Should(Succeed())
 
 			By("GetAddressTxs()")
@@ -107,7 +107,7 @@ var _ = Describe("Indexer client", func() {
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignP2pkhTx(network, key, transaction)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 
 			By("Submit the transaction")
 			Expect(indexer.SubmitTx(context.Background(), transaction)).Should(Succeed())
@@ -128,7 +128,7 @@ var _ = Describe("Indexer client", func() {
 			}
 			transaction1, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignP2pkhTx(network, key, transaction)).Should(Succeed())
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
 			err = indexer.SubmitTx(context.Background(), transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())

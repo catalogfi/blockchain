@@ -154,7 +154,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2pkhTx(network, key1, transaction))
+			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("The actual fee rate should be within [feeRate -1 , feeRate] range")
@@ -186,7 +186,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2wpkhTx(network, utxos, key1, transaction))
+			Expect(btc.SignTx(waddrmgr.WitnessPubKey, transaction, key1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("The actual fee rate should be within [feeRate -1 , feeRate] range")
@@ -218,7 +218,7 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignP2trTx(utxos, key1, transaction))
+			Expect(btc.SignTx(waddrmgr.TaprootPubKey, transaction, key1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("The actual fee rate should be within [feeRate -1 , feeRate] range")

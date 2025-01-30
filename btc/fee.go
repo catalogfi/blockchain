@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
@@ -97,6 +98,20 @@ func NewSizeEstimator(utxos []UTXO, base, segwit int) *SizeEstimator {
 		mu:            new(sync.Mutex),
 		baseSizeMap:   baseSizeMap,
 		segwitSizeMap: segwitSizeMap,
+	}
+}
+
+// NewSizeEstimatorOfAddrType returns an SizeEstimator basing on the provided address type.
+func NewSizeEstimatorOfAddrType(utxos []UTXO, addrType waddrmgr.AddressType) *SizeEstimator {
+	switch addrType {
+	case waddrmgr.PubKeyHash:
+		return NewSizeEstimator(utxos, BaseSizeP2PKH, SegwitSizeP2PKH)
+	case waddrmgr.WitnessPubKey:
+		return NewSizeEstimator(utxos, BaseSizeP2WPKH, SegwitSizeP2WPKH)
+	case waddrmgr.TaprootPubKey:
+		return NewSizeEstimator(utxos, BaseSizeP2TR, SegwitSizeP2TR)
+	default:
+		panic(fmt.Sprintf("unknown address type: %v", addrType))
 	}
 }
 

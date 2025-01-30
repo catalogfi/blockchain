@@ -2,7 +2,6 @@ package btc
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -50,6 +49,16 @@ func (utxo UTXO) String() string {
 type Recipient struct {
 	To     string `json:"to"`
 	Amount int64  `json:"amount"`
+}
+
+// SingleRecipient is a helper function to initiate a recipient list with only one element.
+func SingleRecipient(to string, amount int64) []Recipient {
+	return []Recipient{
+		{
+			To:     to,
+			Amount: amount,
+		},
+	}
 }
 
 // PublicKeyAddress generates a Bitcoin address from a given public key, depending on the specified address type.
@@ -207,65 +216,6 @@ func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []
 	return tx, nil
 }
 
-func AddUtxoToCoverTxFees(tx *wire.MsgTx, utxos []UTXO, sizeEstimator *SizeEstimator, feeRate int, changeAddr btcutil.Address) error {
-	sigBaseSize, sigSegwitSize := 0, 0
-
-	totalIn := int64(0)
-	for _, utxo := range utxos {
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
-		if err != nil {
-			return err
-		}
-		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
-		tx.AddTxIn(txIn)
-		totalIn += utxo.Amount
-
-		// Calculate the size
-		utxoBaseSize, utxoSegwitSize, err := sizeEstimator.FetchSize(utxo)
-		if err != nil {
-			return err
-		}
-		sigBaseSize += utxoBaseSize
-		sigSegwitSize += utxoSegwitSize
-		size := tx.SerializeSize()
-		baseSize := tx.SerializeSizeStripped()
-		swSize := size - baseSize
-		vs := baseSize + sigBaseSize + (swSize+sigSegwitSize+3)/blockchain.WitnessScaleFactor
-		fees := int64(vs * feeRate)
-
-		// If the amount is enough to cover the outputs and fees
-		if totalIn > fees {
-			// Add a change utxo to the output if the change amount is greater than the dust
-			if totalIn-fees > DustAmount {
-				if changeAddr != nil {
-					changeScript, err := txscript.PayToAddrScript(changeAddr)
-					if err != nil {
-						return err
-					}
-					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
-
-					// Estimate the fees again as we add a new output
-					size := tx.SerializeSize()
-					baseSize := tx.SerializeSizeStripped()
-					swSize := size - baseSize
-					vs := baseSize + sigBaseSize + (swSize+sigSegwitSize+3)/blockchain.WitnessScaleFactor
-					fees := int64(vs * feeRate)
-
-					// Adjust the change utxo amount if it's still enough, delete it otherwise
-					if totalIn-fees > DustAmount {
-						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - fees
-					} else {
-						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
-					}
-				}
-			}
-			return nil
-		}
-	}
-
-	return fmt.Errorf("funds not enough")
-}
-
 // TxRawBytes returns the raw bytes of a transaction.
 func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
@@ -273,109 +223,6 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func SignUtxos(network *chaincfg.Params, addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *btcec.PrivateKey, fetcher *txscript.MultiPrevOutFetcher) error {
-	outpoint := fetcher.FetchPrevOutput(tx.TxIn[index].PreviousOutPoint)
-	switch addrType {
-	case waddrmgr.PubKeyHash:
-		sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, txscript.SigHashAll, key, true)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].SignatureScript = sigScript
-	case waddrmgr.WitnessPubKey:
-		sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, txscript.SigHashAll, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
-	case waddrmgr.TaprootPubKey:
-		sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, nil, txscript.SigHashAll, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].Witness = wire.TxWitness{sig}
-	default:
-		return errors.New("unknown address type")
-	}
-
-	return nil
-}
-
-// SignP2pkhTx is a helper function to sign inputs from a p2pkh address. It requires all inputs to be p2pkh. It uses
-// `txscript.SigHashAll` and compressed public key as default.
-func SignP2pkhTx(network *chaincfg.Params, key *btcec.PrivateKey, tx *wire.MsgTx) error {
-	addr, err := PublicKeyAddress(network, waddrmgr.PubKeyHash, key.PubKey())
-	if err != nil {
-		return err
-	}
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return err
-	}
-
-	for i := range tx.TxIn {
-		sigScript, err := txscript.SignatureScript(tx, i, pkScript, txscript.SigHashAll, key, true)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[i].SignatureScript = sigScript
-	}
-	return nil
-}
-
-func SignP2wpkhTx(network *chaincfg.Params, utxos []UTXO, key *btcec.PrivateKey, tx *wire.MsgTx) error {
-	addr, err := PublicKeyAddress(network, waddrmgr.WitnessPubKey, key.PubKey())
-	if err != nil {
-		return err
-	}
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return err
-	}
-	fetcher, err := InitFetcher(utxos, pkScript)
-	if err != nil {
-		return err
-	}
-
-	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-	for i := range tx.TxIn {
-		output := fetcher.FetchPrevOutput(tx.TxIn[i].PreviousOutPoint)
-		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, i, output.Value, output.PkScript, txscript.SigHashAll, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[i].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
-	}
-
-	return nil
-}
-
-func SignP2trTx(utxos []UTXO, key *btcec.PrivateKey, tx *wire.MsgTx) error {
-	tapPubKey := txscript.ComputeTaprootKeyNoScript(key.PubKey())
-	pkScript, err := txscript.PayToTaprootScript(tapPubKey)
-	if err != nil {
-		return err
-	}
-	fetcher, err := InitFetcher(utxos, pkScript)
-	if err != nil {
-		return err
-	}
-
-	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-	for i := range tx.TxIn {
-		output := fetcher.FetchPrevOutput(tx.TxIn[i].PreviousOutPoint)
-		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, i, output.Value, pkScript, nil, txscript.SigHashAll, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[i].Witness = wire.TxWitness{sig}
-	}
-
-	return nil
 }
 
 // InitFetcher initializes a txscript.MultiPrevOutFetcher with the given utxos and script.
