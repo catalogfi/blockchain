@@ -2,10 +2,8 @@ package wallet
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
