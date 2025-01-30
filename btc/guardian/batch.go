@@ -15,6 +15,8 @@ type Batch struct {
 }
 
 const CoinbaseBatchID = "coinbase"
+const GuardianChangeSize = 267
+const GuardianWitnessSize = 43
 
 func NewBatch(tx btc.Transaction, requestIds map[string]int, previousBatchID string, mergeTxFee int64) *Batch {
 	return &Batch{

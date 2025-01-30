@@ -6,6 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -195,6 +199,9 @@ func (w *Wallet) handleMergeRequests(tx *wire.MsgTx, req []btc.SendRequest, onGo
 }
 
 func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Hash, error) {
+	if len(req) == 0 {
+		return chainhash.Hash{}, fmt.Errorf("no request found")
+	}
 
 	if err := validateRequests(req, w.addr); err != nil {
 		return chainhash.Hash{}, err
@@ -233,6 +240,10 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		}
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
+
+	fee := getDescendantsFee(onGoingBatch.Tx.TxID)
+
+	onGoingBatch.MergeTxFee += fee
 
 	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
 	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate)
@@ -405,9 +416,6 @@ func (w *Wallet) mergeTxFee(ctx context.Context, txHex string) (int, error) {
 
 	_, totalInAmount, err := w.getInAmounts(ctx, msgTx)
 	if err != nil {
-		if strings.Contains(err.Error(), "Transaction not found") {
-			return 0, err
-		}
 		return 0, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -492,7 +500,6 @@ func (w *Wallet) getReqIDs(req []btc.SendRequest) ([]string, error) {
 
 // TODO: never maintain duplicates
 func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, previousBatch *Batch) (chainhash.Hash, error) {
-
 	if previousBatch != nil {
 		requestsToAdd, err := w.getUnconfirmedRequests(ctx, previousBatch)
 		if err != nil {
@@ -532,9 +539,6 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 
 	inValues, totalInAmount, err := w.getInAmounts(ctx, tx)
 	if err != nil {
-		if strings.Contains(err.Error(), "Transaction not found") {
-			return w.batchAndBroadcast(ctx, req, previousBatch)
-		}
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -670,7 +674,7 @@ func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxH
 	var err error
 	if len(mergeTxHexes) > 0 {
 		if mergeTxFee > 0 {
-			tx, err = w.decreaseChangeAmount(tx, mergeTxFee+1)
+			tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
 			if err != nil {
 				return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
 			}
@@ -679,9 +683,6 @@ func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxH
 		for _, mergeTxHex := range mergeTxHexes {
 			fee, err := w.mergeTxFee(ctx, mergeTxHex)
 			if err != nil {
-				if strings.Contains(err.Error(), "Transaction not found") {
-					return nil, 0, nil
-				}
 				return nil, 0, fmt.Errorf("failed to get merge tx fee: %w", err)
 			}
 			tx, err = w.decreaseChangeAmount(tx, int64(fee))
@@ -707,7 +708,7 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 		extraBaseSize = 43
 	}
 
-	feeToBePaid, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), 267, extraBaseSize)
+	feeToBePaid, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianChangeSize, extraBaseSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate fee: %w", err)
 	}
@@ -715,7 +716,6 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 	totalOutAmount := w.getTotalOutAmount(tx)
 	previousFee := totalInAmount - totalOutAmount
 	currentFee := feeToBePaid + 1
-
 	if currentFee > int(previousFee) {
 		currentFee -= int(previousFee)
 	} else {
@@ -760,7 +760,7 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 					tx.AddTxIn(txIn)
 				}
 			}
-			newFee, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), 265, 43)
+			newFee, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianChangeSize, GuardianWitnessSize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to estimate fee: %w", err)
 			}
@@ -814,9 +814,6 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 
 	_, totalInAmount, err := w.getInAmounts(ctx, tx)
 	if err != nil {
-		if strings.Contains(err.Error(), "Transaction not found") {
-			return nil, err
-		}
 		return nil, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
@@ -1023,7 +1020,6 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 
 	txCtx, cancel := context.WithTimeout(ctx, 10000*time.Millisecond)
 	defer cancel()
-
 	batchTx, err := w.indexer.GetTx(txCtx, tx.TxHash().String())
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
@@ -1057,4 +1053,121 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 	}
 
 	return nil
+}
+
+// func getDescendants (txId string) {
+// 	connCfg := &rpcclient.ConnConfig{
+// 		Host:         "localhost:18443",
+// 		User:         "admin1",
+// 		Pass:         "123",
+// 		HTTPPostMode: true, // Namecoin core only supports HTTP POST mode
+// 		DisableTLS:   true, // Namecoin core does not provide TLS by default
+// 	}
+// 	client, err := rpcclient.New(connCfg, nil)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	defer client.Shutdown()
+// 	result := client.SendCmd("getdescendants")
+// 	fmt.Println(result)
+// }
+
+type RPCRequest struct {
+	Jsonrpc string        `json:"jsonrpc"`
+	ID      string        `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+type Fees struct {
+	Base       float64 `json:"base"`
+	Modified   float64 `json:"modified"`
+	Ancestor   float64 `json:"ancestor"`
+	Descendant float64 `json:"descendant"`
+}
+
+// Transaction represents a single transaction entry
+type Transaction struct {
+	Vsize             int      `json:"vsize"`
+	Weight            int      `json:"weight"`
+	Time              int64    `json:"time"`
+	Height            int      `json:"height"`
+	DescendantCount   int      `json:"descendantcount"`
+	DescendantSize    int      `json:"descendantsize"`
+	AncestorCount     int      `json:"ancestorcount"`
+	AncestorSize      int      `json:"ancestorsize"`
+	WtxID             string   `json:"wtxid"`
+	Fees              Fees     `json:"fees"`
+	Depends           []string `json:"depends"`
+	SpentBy           []string `json:"spentby"`
+	BIP125Replaceable bool     `json:"bip125-replaceable"`
+	Unbroadcast       bool     `json:"unbroadcast"`
+}
+
+func getDescendantsFee(txId string) int64 {
+	rpcUser := "admin1"
+	rpcPass := "123"
+	rpcURL := "http://0.0.0.0:18443/"
+	verbose := true
+	// Create the JSON-RPC request
+	requestBody := RPCRequest{
+		Jsonrpc: "1.0",
+		ID:      "curltext",
+		Method:  "getmempooldescendants",
+		Params:  []interface{}{txId, verbose}, // Empty params
+	}
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		log.Fatalf("Error marshalling JSON: %v", err)
+	}
+
+	// Create a new HTTP request
+	req, err := http.NewRequest("POST", rpcURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "text/plain")
+	req.SetBasicAuth(rpcUser, rpcPass)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatalf("Error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response: %v", err)
+	}
+
+	var apiResponse struct {
+		Result map[string]Transaction `json:"result"`
+		Error  interface{}            `json:"error"`
+		ID     string                 `json:"id"`
+	}
+
+	if err := json.Unmarshal(body, &apiResponse); err != nil {
+		log.Fatalf("Error unmarshalling JSON: %v", err)
+	}
+
+	if len(apiResponse.Result) == 0 {
+		return 0
+	}
+
+	transactions := make([]Transaction, 0, len(apiResponse.Result))
+	for _, tx := range apiResponse.Result {
+		transactions = append(transactions, tx)
+	}
+
+	var sum float64
+	for _, tx := range transactions {
+		sum += tx.Fees.Base
+	}
+
+	return int64(math.Round(sum * 100000000))
 }
