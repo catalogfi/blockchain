@@ -6,10 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"math"
-	"net/http"
 	"strings"
 	"time"
 
@@ -36,9 +32,10 @@ type Wallet struct {
 	logger         *zap.Logger
 	addr           btcutil.Address
 	pkScript       []byte
+	rpc            btc.BitcoinRPCClient
 }
 
-func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, indexer btc.IndexerClient, chainParams *chaincfg.Params, feeEstimator btc.FeeEstimator, logger *zap.Logger, feeLevel ...btc.FeeLevel) (*Wallet, error) {
+func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, indexer btc.IndexerClient, chainParams *chaincfg.Params, feeEstimator btc.FeeEstimator, logger *zap.Logger, rpcconfig btc.BitcoinRPCClient, feeLevel ...btc.FeeLevel) (*Wallet, error) {
 	defaultFeeLevel := btc.MediumFee
 	if len(feeLevel) > 0 {
 		defaultFeeLevel = feeLevel[0]
@@ -80,6 +77,7 @@ func NewWallet(client *GuardianClient, privKey *btcec.PrivateKey, cache Cache, i
 		logger:         logger,
 		addr:           addr,
 		pkScript:       pkScript,
+		rpc:            rpcconfig,
 	}, nil
 }
 
@@ -244,7 +242,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	fee := getDescendantsFee(onGoingBatch.Tx.TxID)
+	fee := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
 
 	onGoingBatch.MergeTxFee += fee
 
@@ -1065,121 +1063,4 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 	}
 
 	return nil
-}
-
-// func getDescendants (txId string) {
-// 	connCfg := &rpcclient.ConnConfig{
-// 		Host:         "localhost:18443",
-// 		User:         "admin1",
-// 		Pass:         "123",
-// 		HTTPPostMode: true, // Namecoin core only supports HTTP POST mode
-// 		DisableTLS:   true, // Namecoin core does not provide TLS by default
-// 	}
-// 	client, err := rpcclient.New(connCfg, nil)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer client.Shutdown()
-// 	result := client.SendCmd("getdescendants")
-// 	fmt.Println(result)
-// }
-
-type RPCRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	ID      string        `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-}
-
-type Fees struct {
-	Base       float64 `json:"base"`
-	Modified   float64 `json:"modified"`
-	Ancestor   float64 `json:"ancestor"`
-	Descendant float64 `json:"descendant"`
-}
-
-// Transaction represents a single transaction entry
-type Transaction struct {
-	Vsize             int      `json:"vsize"`
-	Weight            int      `json:"weight"`
-	Time              int64    `json:"time"`
-	Height            int      `json:"height"`
-	DescendantCount   int      `json:"descendantcount"`
-	DescendantSize    int      `json:"descendantsize"`
-	AncestorCount     int      `json:"ancestorcount"`
-	AncestorSize      int      `json:"ancestorsize"`
-	WtxID             string   `json:"wtxid"`
-	Fees              Fees     `json:"fees"`
-	Depends           []string `json:"depends"`
-	SpentBy           []string `json:"spentby"`
-	BIP125Replaceable bool     `json:"bip125-replaceable"`
-	Unbroadcast       bool     `json:"unbroadcast"`
-}
-
-func getDescendantsFee(txId string) int64 {
-	rpcUser := "admin1"
-	rpcPass := "123"
-	rpcURL := "http://0.0.0.0:18443/"
-	verbose := true
-	// Create the JSON-RPC request
-	requestBody := RPCRequest{
-		Jsonrpc: "1.0",
-		ID:      "curltext",
-		Method:  "getmempooldescendants",
-		Params:  []interface{}{txId, verbose}, // Empty params
-	}
-	jsonData, err := json.Marshal(requestBody)
-	if err != nil {
-		log.Fatalf("Error marshalling JSON: %v", err)
-	}
-
-	// Create a new HTTP request
-	req, err := http.NewRequest("POST", rpcURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Fatalf("Error creating request: %v", err)
-	}
-
-	// Add headers
-	req.Header.Set("Content-Type", "text/plain")
-	req.SetBasicAuth(rpcUser, rpcPass)
-
-	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Error sending request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("Error reading response: %v", err)
-	}
-
-	var apiResponse struct {
-		Result map[string]Transaction `json:"result"`
-		Error  interface{}            `json:"error"`
-		ID     string                 `json:"id"`
-	}
-
-	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		log.Fatalf("Error unmarshalling JSON: %v", err)
-	}
-
-	if len(apiResponse.Result) == 0 {
-		return 0
-	}
-
-	transactions := make([]Transaction, 0, len(apiResponse.Result))
-	for _, tx := range apiResponse.Result {
-		transactions = append(transactions, tx)
-	}
-
-	var sum float64
-	for _, tx := range transactions {
-		sum += tx.Fees.Base
-	}
-
-	return int64(math.Round(sum * 100000000))
 }

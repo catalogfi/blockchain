@@ -75,8 +75,13 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
+	rpcConfig := btc.BitcoinRPCClient{
+		RpcUser: "admin1",
+		RpcPass: "123",
+		RpcURL:  "http://0.0.0.0:18443",
+	}
 	// Create wallets
-	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger)
+	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, rpcConfig)
 	require.NoError(t, err)
 
 	simpleWallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.MediumFee)
@@ -125,9 +130,13 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
-
-	// Create wallets
-	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger)
+	rpcConfig := btc.BitcoinRPCClient{
+		RpcUser: "admin1",
+		RpcPass: "123",
+		RpcURL:  "http://0.0.0.0:18443",
+	}
+	// Create walletstxfrom
+	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, rpcConfig)
 	require.NoError(t, err)
 
 	simpleWallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.MediumFee)
@@ -157,7 +166,6 @@ func TestGuardianWallet(t *testing.T) {
 
 	setup, ctx := setupTest(t)
 	wallet := setup.guardian
-	// simple := setup.simple
 	amount := int64(100000)
 
 	t.Run("should send funds to a random addresses", func(t *testing.T) {
