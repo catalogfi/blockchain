@@ -245,17 +245,18 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	fee := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
-	onGoingBatch.MergeTxFee = fee
-
 	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
-
 	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.Tx.Fee)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
 
-	tx, onGoingBatch.MergeTxFee, err = w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
+	fee, err := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to get descendants: %w", err)
+	}
+
+	tx, err = w.includeMergeTxFee(tx, fee)
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
 			return w.batchAndBroadcast(ctx, req, onGoingBatch)
@@ -679,34 +680,15 @@ func (w *Wallet) getChangeAmount(tx *wire.MsgTx) int64 {
 	return 0
 }
 
-func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxHexes []string, mergeTxFee int64) (*wire.MsgTx, int64, error) {
+func (w *Wallet) includeMergeTxFee(tx *wire.MsgTx, mergeTxFee int64) (*wire.MsgTx, error) {
 	var err error
-	if len(mergeTxHexes) > 0 {
-		if mergeTxFee > 0 {
-			tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-		}
-		// add the fee from merge txs
-		for _, mergeTxHex := range mergeTxHexes {
-			fee, err := w.mergeTxFee(ctx, mergeTxHex)
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to get merge tx fee: %w", err)
-			}
-			tx, err = w.decreaseChangeAmount(tx, int64(fee))
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-			mergeTxFee += int64(fee)
-		}
-	} else if mergeTxFee > 0 {
+	if mergeTxFee > 0 {
 		tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
+			return nil, fmt.Errorf("failed to decrease change amount: %w", err)
 		}
 	}
-	return tx, mergeTxFee, nil
+	return tx, nil
 }
 
 // adjustFee adds fee output to the tx if it doesn't exist or adjusts the change output if it does for current fee rate

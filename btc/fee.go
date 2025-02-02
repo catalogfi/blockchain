@@ -62,7 +62,7 @@ func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLev
 		totalSize += extraSegwitSizePerInput * len(tx.TxIn)
 	}
 	weight := baseSize*3 + totalSize
-	vSize := weight / blockchain.WitnessScaleFactor
+	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 	fees, err := estimator.FeeSuggestion()
 	if err != nil {
 		return 0, 0, err

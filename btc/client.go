@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -384,7 +383,7 @@ type BitcoinRPCClient struct {
 	RpcURL  string
 }
 
-func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int64 {
+func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) (int64, error) {
 	verbose := true
 	// Create the JSON-RPC request
 	requestBody := RPCRequest{
@@ -395,13 +394,13 @@ func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int6
 	}
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
-		log.Fatalf("Error marshalling JSON: %v", err)
+		return 0, fmt.Errorf("Error marshalling JSON: %w", err)
 	}
 
 	// Create a new HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", b.RpcURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Fatalf("Error creating request: %v", err)
+		return 0, fmt.Errorf("Error creating request: %w", err)
 	}
 
 	// Add headers
@@ -412,14 +411,14 @@ func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int6
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("Error sending request: %v", err)
+		return 0, fmt.Errorf("Error sending request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Error reading response: %v", err)
+		return 0, fmt.Errorf("Error reading response: %w", err)
 	}
 
 	var apiResponse struct {
@@ -429,11 +428,11 @@ func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int6
 	}
 
 	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		log.Fatalf("Error unmarshalling JSON: %v", err)
+		return 0, fmt.Errorf("Error unmarshalling JSON: %w", err)
 	}
 
 	if len(apiResponse.Result) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	transactions := make([]DescendantTransaction, 0, len(apiResponse.Result))
@@ -446,5 +445,5 @@ func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int6
 		sum += tx.Fees.Base
 	}
 
-	return int64(math.Round(sum * 100000000))
+	return int64(math.Round(sum * 100000000)), nil
 }
