@@ -685,7 +685,7 @@ func (w *Wallet) includeMergeTxFee(tx *wire.MsgTx, mergeTxFee int64) (*wire.MsgT
 	if mergeTxFee > 0 {
 		tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decrease change amount: %w", err)
+			return nil, fmt.Errorf("failed to decrease change amount when merging txs: %w", err)
 		}
 	}
 	return tx, nil
