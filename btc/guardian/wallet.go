@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -245,11 +246,11 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	}
 
 	fee := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
-
-	onGoingBatch.MergeTxFee += fee
+	onGoingBatch.MergeTxFee = fee
 
 	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate)
+
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.Tx.Fee)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
@@ -545,7 +546,7 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0)
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0, 0)
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
@@ -604,8 +605,8 @@ func (w *Wallet) getVoutsFromTx(tx *wire.MsgTx, req []btc.SendRequest) (map[stri
 }
 
 func calculateFeeRate(weight, feePaid int64) int64 {
-	vsize := weight / 4
-	return feePaid / vsize
+	vsize := math.Ceil(float64(weight) / 4.0)
+	return int64(math.Ceil(float64(feePaid) / vsize))
 }
 
 func (w *Wallet) addChangeOutput(tx *wire.MsgTx, changeAmt int64) (*wire.MsgTx, error) {
@@ -709,46 +710,47 @@ func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxH
 }
 
 // adjustFee adds fee output to the tx if it doesn't exist or adjusts the change output if it does for current fee rate
-func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64) (*wire.MsgTx, error) {
+func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64, previousFee int64) (*wire.MsgTx, error) {
 
 	extraBaseSize := 0
 	if !w.hasChangeOutput(tx) {
 		extraBaseSize = 43
 	}
 
-	feeToBePaid, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianWitnessSize, extraBaseSize)
+	// this is the fee needed for the current transaction
+	feeToBePaid, vsize, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, extraBaseSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate fee: %w", err)
 	}
 
-	totalOutAmount := w.getTotalOutAmount(tx)
-	previousFee := totalInAmount - totalOutAmount
-	currentFee := feeToBePaid + 1
-	if currentFee > int(previousFee) {
-		currentFee -= int(previousFee)
+	// newFee is basically the fee needed for the current transaction + the previous fee to satisfy the rbf rules
+	newFee := previousFee + feeToBePaid
+
+	// sometimes the new fee is less than the previous fee rate, so we need to adjust it
+	newFeeWithPreviousFeeRate := previousFeeRate*int64(vsize) + 1
+
+	// feeSelected is the fee that we will use for the current transaction
+	feeSelected := int64(0)
+	// we select the max of the two
+	if newFee > newFeeWithPreviousFeeRate {
+		feeSelected = newFee
 	} else {
-		currentFee = int(previousFee) - currentFee
+		feeSelected = newFeeWithPreviousFeeRate
 	}
 
-	if currentFee > btc.DustAmount {
-		if w.hasChangeOutput(tx) {
-			tx, err = w.decreaseChangeAmount(tx, int64(currentFee))
-			if err != nil {
-				return nil, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-		} else {
-			tx, err = w.addChangeOutput(tx, int64(currentFee))
-			if err != nil {
-				return nil, fmt.Errorf("failed to add change output: %w", err)
-			}
-		}
-	} else if currentFee > 0 && w.hasChangeOutput(tx) {
-		tx, err = w.decreaseChangeAmount(tx, int64(currentFee))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrease change amount: %w", err)
-		}
-	} else if currentFee < 0 {
+	// remove the change output if it exists
+	tx = removeChangeOutputs(tx, w.pkScript)
 
+	totalOutAmount := w.getTotalOutAmount(tx)
+	// calculate the change needed
+	changeAmt := totalInAmount - totalOutAmount - feeSelected
+
+	if changeAmt > btc.DustAmount {
+		tx, err = w.addChangeOutput(tx, changeAmt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add change output: %w", err)
+		}
+	} else if changeAmt < 0 {
 		feeToFetch := feeToBePaid
 		for {
 			txIns, amountToBeAdded, err := w.selectUTXOsForAmount(ctx, tx, int64(feeToFetch))
@@ -768,7 +770,7 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 					tx.AddTxIn(txIn)
 				}
 			}
-			newFee, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianWitnessSize, GuardianChangeSize)
+			newFee, _, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, GuardianChangeSize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to estimate fee: %w", err)
 			}
