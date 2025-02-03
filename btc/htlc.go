@@ -3,14 +3,18 @@ package btc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 )
 
@@ -68,9 +72,6 @@ func GenerateGardenNUMS() (*btcec.PublicKey, error) {
 }
 
 var (
-	// MaxInitiationUtxoNumber is the maximum number of utxos that can be used to initiate an HTLC.
-	MaxInitiationUtxoNumber = 1
-
 	BaseSizeHtlcRedeem        = 0
 	BaseSizeHtlcRefund        = 0
 	BaseSizeHtlcInstantRefund = 0
@@ -83,6 +84,73 @@ var (
 	SegwitSizeHtlcInstantRefund = 1 + 4 + 65 + 65 + 70 + 97
 )
 
+type HtlcActionType string
+
+const (
+	HtlcActionInitiate      HtlcActionType = "initiate"
+	HtlcActionRedeem        HtlcActionType = "redeem"
+	HtlcActionRefund        HtlcActionType = "refund"
+	HtlcActionInstantRefund HtlcActionType = "instantRefund"
+)
+
+type HtlcAction interface {
+	ActionType() HtlcActionType
+}
+
+type HtlcInitiate struct {
+	Htlc *HTLC
+}
+
+func (htlcInitiate HtlcInitiate) ActionType() HtlcActionType {
+	return HtlcActionInitiate
+}
+
+type HtlcRedeem struct {
+	Htlc   *HTLC
+	Secret []byte
+}
+
+func (htlcRedeem HtlcRedeem) ActionType() HtlcActionType {
+	return HtlcActionRedeem
+}
+
+type HtlcRefund struct {
+	Htlc *HTLC
+}
+
+func (htlcRefund HtlcRefund) ActionType() HtlcActionType {
+	return HtlcActionRefund
+}
+
+type HtlcInstantRefund struct {
+	Htlc *HTLC
+	Tx   *wire.MsgTx
+}
+
+func (hltcInstantRefund HtlcInstantRefund) ActionType() HtlcActionType {
+	return HtlcActionInstantRefund
+}
+
+func ParseHtlcActions(actions []HtlcAction) ([]HtlcInitiate, []HtlcRedeem, []HtlcRefund, []HtlcInstantRefund) {
+	var hltcInitiates []HtlcInitiate
+	var hltcRedeems []HtlcRedeem
+	var hltcRefunds []HtlcRefund
+	var hltcInstantRefunds []HtlcInstantRefund
+	for _, action := range actions {
+		switch action.ActionType() {
+		case HtlcActionInitiate:
+			hltcInitiates = append(hltcInitiates, action.(HtlcInitiate))
+		case HtlcActionRedeem:
+			hltcRedeems = append(hltcRedeems, action.(HtlcRedeem))
+		case HtlcActionRefund:
+			hltcRefunds = append(hltcRefunds, action.(HtlcRefund))
+		case HtlcActionInstantRefund:
+			hltcInstantRefunds = append(hltcInstantRefunds, action.(HtlcInstantRefund))
+		}
+	}
+	return hltcInitiates, hltcRedeems, hltcRefunds, hltcInstantRefunds
+}
+
 type HTLC struct {
 	InitiatorPubKey []byte
 	RedeemerPubKey  []byte
@@ -94,7 +162,7 @@ type HTLC struct {
 }
 
 func NewHTLC(initiatorPubKey, redeemerPubKey, secretHash []byte, timelock, amount int64) (*HTLC, error) {
-	// todo : validate the input for generate these leafs
+	// todo : validate the input before generating these leafs
 	redeemLeaf, err := RedeemLeaf(redeemerPubKey, secretHash)
 	if err != nil {
 		return nil, err
@@ -135,50 +203,47 @@ func (htlc *HTLC) P2trScript() ([]byte, error) {
 	return txscript.PayToTaprootScript(outputKey)
 }
 
-func (htlc *HTLC) Initiated(utxos []UTXO) (bool, uint64, error) {
-	if len(utxos) > MaxInitiationUtxoNumber {
-		return false, 0, fmt.Errorf("too many utxos for initiation")
-	}
+// func (htlc *HTLC) Initiated(utxos []UTXO) (bool, uint64, error) {
+// 	if len(utxos) > MaxInitiationUtxoNumber {
+// 		return false, 0, fmt.Errorf("too many utxos for initiation")
+// 	}
+//
+// 	total, blockHeight := int64(0), uint64(0)
+// 	for _, utxo := range utxos {
+// 		if utxo.Status != nil && utxo.Status.Confirmed {
+// 			total += utxo.Amount
+// 			if *utxo.Status.BlockHeight > blockHeight {
+// 				blockHeight = *utxo.Status.BlockHeight
+// 			}
+// 		}
+// 	}
+// 	return total >= htlc.Amount, blockHeight, nil
+// }
 
-	total, blockHeight := int64(0), uint64(0)
-	for _, utxo := range utxos {
-		if utxo.Status != nil && utxo.Status.Confirmed {
-			total += utxo.Amount
-			if *utxo.Status.BlockHeight > blockHeight {
-				blockHeight = *utxo.Status.BlockHeight
-			}
-		}
-	}
-	return total >= htlc.Amount, blockHeight, nil
-}
-
+// Redeemable checks the utxos to see if the htlc is redeemable. This means there's a single confirmed utxo which has
+// enough amount to cover the htlc amount. We currently don't allow initiation of HTLCs with multiple utxos. The given
+// utxos must be associated with the htlc address.
 func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
-	if len(utxos) > MaxInitiationUtxoNumber {
-		return false, 0, fmt.Errorf("too many utxos for initiation")
-	}
-
-	total, blockHeight := int64(0), uint64(0)
 	for _, utxo := range utxos {
-		if utxo.Status != nil && utxo.Status.Confirmed {
-			total += utxo.Amount
-			if *utxo.Status.BlockHeight > blockHeight {
-				blockHeight = *utxo.Status.BlockHeight
-			}
+		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
+			return true, *utxo.Status.BlockHeight, nil
 		}
 	}
-	return total >= htlc.Amount, blockHeight, nil
+
+	return false, 0, nil
 }
 
+// Refundable checks if the htlc is refundable. It takes the utxos and the latest block height as input. It finds the
+// utxo with enough amount first and then check if it's expired for refunding.
 func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
-	// TODO : should not consider scam/dust utxos
 	for _, utxo := range utxos {
-		if utxo.Status != nil && utxo.Status.Confirmed {
-			if latest-*utxo.Status.BlockHeight >= uint64(htlc.Timelock) {
-				return false
+		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
+			if latest-*utxo.Status.BlockHeight+1 >= uint64(htlc.Timelock) {
+				return true
 			}
 		}
 	}
-	return true
+	return false
 }
 
 func (htlc *HTLC) Expired(utxos []UTXO, latest uint64) bool {
@@ -371,6 +436,101 @@ func IsMultiSigLeaf(script []byte) (bool, string) {
 		}
 	}
 	return tokenizer.Done(), refunderPubkey
+}
+
+// NewInstantRefundTx builds a new tx to redeem an HTLC instantly using the instantRefund branch. The instant refund tx
+// will contain only one input and one output, the input amount should be equal or slightly more than the output amount.
+// The output will be sent to the target address. Initiator's signature will be added to the witness.
+func NewInstantRefundTx(network *chaincfg.Params, key *btcec.PrivateKey, htlc *HTLC, utxo UTXO, recipient Recipient) (*wire.MsgTx, error) {
+	tx := wire.NewMsgTx(DefaultTxVersion)
+
+	// Build tx
+	hash, err := chainhash.NewHashFromStr(utxo.TxID)
+	if err != nil {
+		return nil, err
+	}
+	txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
+	tx.AddTxIn(txIn)
+
+	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
+	if err != nil {
+		return nil, err
+	}
+	toScript, err := txscript.PayToAddrScript(toAddress)
+	if err != nil {
+		return nil, err
+	}
+	tx.AddTxOut(wire.NewTxOut(utxo.Amount, toScript))
+
+	// Sign the tx
+	leaf, _ := htlc.InstantRefundLeaf()
+	script, err := htlc.P2trScript()
+	if err != nil {
+		return nil, err
+	}
+
+	fetcher, err := InitFetcher(UTXOs{utxo}, script)
+	if err != nil {
+		return nil, err
+	}
+	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+	for i, input := range tx.TxIn {
+		out := fetcher.FetchPrevOutput(input.PreviousOutPoint)
+		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, SigHashSingleAnyoneCanPay, key)
+		if err != nil {
+			return nil, err
+		}
+
+		tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig)
+	}
+
+	return tx, nil
+}
+
+func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx) error {
+	if len(tx.TxIn) != 1 {
+		return errors.New("invalid number of inputs")
+	}
+	if len(tx.TxOut) != 1 {
+		return errors.New("invalid number of outputs")
+	}
+	if len(tx.TxIn[0].Witness) != 1 {
+		return errors.New("invalid witness length")
+	}
+	if tx.TxOut[0].Value > htlc.Amount {
+		return errors.New("invalid output amount")
+	}
+
+	// Verify signature
+	script, err := htlc.P2trScript()
+	if err != nil {
+		return err
+	}
+	fetcher := txscript.NewCannedPrevOutputFetcher(script, htlc.Amount)
+	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+	leaf, _ := htlc.InstantRefundLeaf()
+	tapSigHashes, err := txscript.CalcTapscriptSignaturehash(sigHashes, SigHashSingleAnyoneCanPay, tx, 0, fetcher, leaf)
+	if err != nil {
+		return err
+	}
+
+	sigBytes := tx.TxIn[0].Witness[0]
+	if len(sigBytes) == schnorr.SignatureSize+1 {
+		sigBytes = sigBytes[:len(sigBytes)-1]
+	}
+
+	signature, err := schnorr.ParseSignature(sigBytes)
+	if err != nil {
+		return err
+	}
+	pub, err := schnorr.ParsePubKey(htlc.InitiatorPubKey)
+	if err != nil {
+		return err
+	}
+	if ok := signature.Verify(tapSigHashes, pub); !ok {
+		return errors.New("invalid signature")
+	}
+	return nil
 }
 
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.

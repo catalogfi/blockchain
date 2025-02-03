@@ -3,7 +3,6 @@ package btc
 import (
 	"bytes"
 	"fmt"
-	"log"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
