@@ -45,7 +45,7 @@ func NewClient(url string) *Client {
 func (c *Client) CreateAccountIfNotExists(ctx context.Context, publicKey *btcec.PublicKey) (*Account, error) {
 	account, err := c.GetAccount(ctx, publicKey)
 	if err != nil {
-		if strings.Contains(err.Error(), "Account not found") {
+		if strings.Contains(err.Error(), "account not found") {
 			return c.CreateAccount(ctx, publicKey)
 		}
 		return nil, err
