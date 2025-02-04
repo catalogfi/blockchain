@@ -7,11 +7,12 @@ import (
 )
 
 type Batch struct {
-	Tx              btc.Transaction
+	Tx btc.Transaction
 	// maps RequestId to Vouts in Tx
-	RequestIds      map[string]int
-	PreviousBatchID string
-	MergeTxFee      int64
+	RequestIds       map[string]int
+	PreviousBatchID  string
+	MergeTxFee       int64
+	LastFailedTxHash string
 }
 
 const CoinbaseBatchID = "coinbase"

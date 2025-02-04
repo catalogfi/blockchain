@@ -563,13 +563,35 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 	}
 	fmt.Println(hex.EncodeToString(txHex))
 
-	err = w.client.SignTransaction(ctx, tx, inValues, []string{})
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)
+	currentTxHash := tx.TxHash().String()
+
+	//  check to verify if  sign or update based on the LastFailedTxHash in previousBatch
+	if previousBatch != nil && previousBatch.LastFailedTxHash != "" && previousBatch.LastFailedTxHash != currentTxHash {
+		prevFailedTxHash, err := chainhash.NewHashFromStr(previousBatch.LastFailedTxHash)
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to parse prevFailedTxHash: %w", err)
+		}
+		err = w.client.UpdateTransaction(ctx, *prevFailedTxHash, tx, []string{}, inValues)
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to update tx: %w", err)
+		}
+	} else {
+		err = w.client.SignTransaction(ctx, tx, inValues, []string{})
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)
+		}
 	}
 
 	err = w.submitTx(ctx, tx)
 	if err != nil {
+		if previousBatch != nil {
+			previousBatch.LastFailedTxHash = tx.TxHash().String()
+			UpdateErr := w.cache.SaveLatestBatch(ctx, previousBatch)
+			fmt.Println(w.cache.ReadLatestBatch(ctx))
+			if UpdateErr != nil {
+				return chainhash.Hash{}, fmt.Errorf("failed to update failed tx id: %w", UpdateErr)
+			}
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
