@@ -11,7 +11,7 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
-	wallet "github.com/catalogfi/blockchain/btc/wal"
+	"github.com/catalogfi/blockchain/btc/wallet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -143,12 +143,7 @@ var _ = Describe("Wallet", func() {
 			// Construct the transaction
 			sizer := btc.NewSizeEstimator(utxos1, btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH)
 			sizer.AddUtxos(htlcUtxos, btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH)
-			recipients := []btc.Recipient{
-				{
-					To:     addr1.EncodeAddress(),
-					Amount: 1e7,
-				},
-			}
+			recipients := btc.SingleRecipient(addr1.EncodeAddress(), 1e7)
 			tx1, err := btc.BuildTransaction(network, 100, htlcUtxos, utxos1, sizer, recipients, wal1.Address())
 			Expect(err).Should(BeNil())
 

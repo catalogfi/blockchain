@@ -63,12 +63,7 @@ var _ = Describe("Indexer client", func() {
 
 			By("SubmitTx()")
 			amount, feeRate := int64(1e6), 10
-			recipients := []btc.Recipient{
-				{
-					To:     addr.String(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(addr.EncodeAddress(), amount)
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			rawTx, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, addr)
 			Expect(err).To(BeNil())
@@ -98,12 +93,7 @@ var _ = Describe("Indexer client", func() {
 			utxos, err := indexer.GetUTXOs(context.Background(), pkAddr)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e6), 10
-			recipients := []btc.Recipient{
-				{
-					To:     pkAddr.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(pkAddr.EncodeAddress(), amount)
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr)
 			Expect(err).To(BeNil())

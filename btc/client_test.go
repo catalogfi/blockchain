@@ -116,12 +116,7 @@ var _ = Describe("bitcoin client", func() {
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), 5
-			recipients := []btc.Recipient{
-				{
-					To:     pkAddr.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(pkAddr.EncodeAddress(), amount)
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr)
 			Expect(err).To(BeNil())
@@ -180,12 +175,7 @@ var _ = Describe("bitcoin client", func() {
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), 5
-			recipients := []btc.Recipient{
-				{
-					To:     pkAddr2.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(pkAddr2.EncodeAddress(), amount)
 			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr1)
 			Expect(err).To(BeNil())

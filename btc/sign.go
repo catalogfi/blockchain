@@ -123,6 +123,19 @@ func SignUtxos(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *bt
 	return nil
 }
 
+func PkScript(addrType waddrmgr.AddressType, key *btcec.PublicKey) ([]byte, error) {
+	switch addrType {
+	case waddrmgr.PubKeyHash:
+		return PayToPubKeyHashScript(btcutil.Hash160(key.SerializeCompressed()))
+	case waddrmgr.WitnessPubKey:
+		return PayToWitnessPubKeyHashScript(btcutil.Hash160(key.SerializeCompressed()))
+	case waddrmgr.TaprootPubKey:
+		return PayToWitnessTaprootScript(schnorr.SerializePubKey(key))
+	default:
+		return nil, fmt.Errorf("unknown address type: %v", addrType)
+	}
+}
+
 func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey, utxos UTXOs, sigOpts ...SigOptions) error {
 	opts := defaultSigOptions()
 	for _, sigOpt := range sigOpts {
@@ -133,13 +146,11 @@ func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey
 	var pkScript []byte
 	var err error
 	switch addrType {
-	case waddrmgr.PubKeyHash:
-		pkScript, err = PayToPubKeyHashScript(btcutil.Hash160(key.PubKey().SerializeCompressed()))
-	case waddrmgr.WitnessPubKey:
-		pkScript, err = PayToWitnessPubKeyHashScript(btcutil.Hash160(key.PubKey().SerializeCompressed()))
 	case waddrmgr.TaprootPubKey:
 		tapKey := txscript.ComputeTaprootOutputKey(key.PubKey(), opts.tapScriptRootHash)
-		pkScript, err = PayToWitnessTaprootScript(schnorr.SerializePubKey(tapKey))
+		pkScript, err = PkScript(addrType, tapKey)
+	case waddrmgr.PubKeyHash, waddrmgr.WitnessPubKey:
+		pkScript, err = PkScript(addrType, key.PubKey())
 	default:
 		return fmt.Errorf("unknown address type: %v", addrType)
 	}

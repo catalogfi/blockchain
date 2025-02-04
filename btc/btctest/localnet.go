@@ -43,6 +43,7 @@ func NewBlockWaitMined(indexer btc.IndexerClient) error {
 	if err != nil {
 		return err
 	}
+	// todo : maybe it's better to use a regex to parse it. we might configure the node in a different port.
 	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

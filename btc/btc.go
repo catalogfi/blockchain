@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
@@ -23,6 +22,15 @@ const (
 
 	// DustAmount is the minimum transaction amount accepted by Bitcoin miners.
 	DustAmount = 546
+
+	// MinRelayFeeRate is the minimum fee rate (in sat/vb) a transaction must meet in order to be broadcast by the node.
+	// This is default value used by Bitcore Core. Different node may have different setting for this.
+	MinRelayFeeRate = 1
+
+	// MaxRelayFeeRate is not something in the bitcoin protocol, but more of a defensive check to make sure we're not
+	// using an unreasonable value. (i.e. third-party api) If the fee rate we choose is greater than this value, this
+	// usually means something is wrong.
+	MaxRelayFeeRate = 1000
 
 	// SigHashSingleAnyoneCanPay is an alias for the signature hash types: `txscript.SigHashSingle |
 	// txscript.SigHashAnyOneCanPay`.
@@ -75,19 +83,25 @@ func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, p
 		// We assume the key is already tweaked. You'll need to tweak the key first if it's the internal key.
 		return btcutil.NewAddressTaproot(schnorr.SerializePubKey(pub), network)
 	default:
-		return nil, fmt.Errorf("unsupported address type")
+		return nil, fmt.Errorf("unsupported address type = %v", addrType)
 	}
 }
 
 // BuildTransaction is a helper function for building a bitcoin transaction. It uses the given `feeRate` to calculate
-// fees. `inputs` will be a list of utxos that required to be included in the transaction, it comes with the base and
-// segwit size of the signature for fee-estimation purpose. `utxos` is a list of transaction will be picked
-// to cover the output amount and fees. We assume the utxos all comes from a single address. The `sizeUpdater` function
-// returns the base and segwit size of each utxo from the `utxos`. If there's any change, it will be sent back to the
-// `changeAddr`.
+// fees. `inputs` will be a list of utxos that required to be included in the transaction. `utxos` is a list of
+// transaction will be picked to cover the output amount and fees. The size estimator is to estimate the size of the
+// signed tx for fee purpose. The `recipients` includes a list of target addresses and the associated amounts to be
+// sent.  If there's any change, it will be sent back to the `changeAddr`.
 func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	totalIn, totalOut := int64(0), int64(0)
+
+	if feeRate < MinRelayFeeRate {
+		return nil, fmt.Errorf("fee rate too low, expect %v got %v", MinRelayFeeRate, feeRate)
+	}
+	if feeRate > MaxRelayFeeRate {
+		return nil, fmt.Errorf("fee rate too high, expect %v got %v", MaxRelayFeeRate, feeRate)
+	}
 
 	// Adding required inputs and output
 	for _, utxo := range inputs {
@@ -171,14 +185,14 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTX
 
 	// Keep adding utxos until we have enough funds to cover the output amount
 	for _, utxo := range utxos {
-		// Ignore tx which isn't worth to add to the tx
-		base, segwit, err := sizeEstimator.FetchSize(utxo)
-		if err != nil {
-			return nil, err
-		}
-		// +2 for segwit marker + flag if previous tx not has segwit, +3 to round up the value
-		worstVS := base + (segwit+2+3)/blockchain.WitnessScaleFactor
-		cost := worstVS * feeRate
+
+		// Check if it's worth to add the tx by calculating the cost
+		// (The utxos need to be confirmed in this case as we don't do package calculation)
+		// We use a hard coded value (200) for the size of adding this utxo, this is close to the tx size
+		// of spending a P2PKH utxo. If we really want, we can do a more precise estimation, which is
+		// base = outpoint(36) + sigscript(1)+ sequence(4) | segwit = marker(1) + flag(1) + witness(x)
+		// worstVS := (base + 36 + 1 + 4) + (segwit+2+3)/blockchain.WitnessScaleFactor
+		cost := 200 * feeRate
 		if int64(cost) > utxo.Amount {
 			continue
 		}

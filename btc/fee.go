@@ -141,6 +141,9 @@ func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 	return base, segwit, nil
 }
 
+// EstimateTxVirtualSize returns the estimated size of the given transaction. It would be an upperbound, and usually the
+// fees might be a few bytes less. It assumes the tx is not signed at all. It would return an error if one of the utxo
+// is unknown in terms of signature size.
 func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
 	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
 	for _, input := range tx.TxIn {

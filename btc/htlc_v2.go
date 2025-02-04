@@ -1,6 +1,7 @@
 package btc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -93,62 +94,11 @@ const (
 	HtlcActionInstantRefund HtlcActionType = "instantRefund"
 )
 
-type HtlcAction interface {
-	ActionType() HtlcActionType
-}
-
-type HtlcInitiate struct {
-	Htlc *HTLC
-}
-
-func (htlcInitiate HtlcInitiate) ActionType() HtlcActionType {
-	return HtlcActionInitiate
-}
-
-type HtlcRedeem struct {
-	Htlc   *HTLC
-	Secret []byte
-}
-
-func (htlcRedeem HtlcRedeem) ActionType() HtlcActionType {
-	return HtlcActionRedeem
-}
-
-type HtlcRefund struct {
-	Htlc *HTLC
-}
-
-func (htlcRefund HtlcRefund) ActionType() HtlcActionType {
-	return HtlcActionRefund
-}
-
-type HtlcInstantRefund struct {
-	Htlc *HTLC
-	Tx   *wire.MsgTx
-}
-
-func (hltcInstantRefund HtlcInstantRefund) ActionType() HtlcActionType {
-	return HtlcActionInstantRefund
-}
-
-func ParseHtlcActions(actions []HtlcAction) ([]HtlcInitiate, []HtlcRedeem, []HtlcRefund, []HtlcInstantRefund) {
-	var hltcInitiates []HtlcInitiate
-	var hltcRedeems []HtlcRedeem
-	var hltcRefunds []HtlcRefund
-	var hltcInstantRefunds []HtlcInstantRefund
-	for _, action := range actions {
-		switch action.ActionType() {
-		case HtlcActionInitiate:
-			hltcInitiates = append(hltcInitiates, action.(HtlcInitiate))
-		case HtlcActionRedeem:
-			hltcRedeems = append(hltcRedeems, action.(HtlcRedeem))
-		case HtlcActionRefund:
-			hltcRefunds = append(hltcRefunds, action.(HtlcRefund))
-		case HtlcActionInstantRefund:
-			hltcInstantRefunds = append(hltcInstantRefunds, action.(HtlcInstantRefund))
-		}
-	}
-	return hltcInitiates, hltcRedeems, hltcRefunds, hltcInstantRefunds
+type HtlcAction struct {
+	ActionType      HtlcActionType
+	Htlc            *HTLC
+	Secret          []byte
+	InstantRefundTx *wire.MsgTx
 }
 
 type HTLC struct {
@@ -231,6 +181,24 @@ func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
 	}
 
 	return false, 0, nil
+}
+
+func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
+	addr, err := htlc.Address(network)
+	if err != nil {
+		return UTXO{}, err
+	}
+	utxos, err := indexer.GetUTXOs(ctx, addr)
+	if err != nil {
+		return UTXO{}, err
+	}
+	for _, utxo := range utxos {
+		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
+			return utxo, nil
+		}
+	}
+
+	return UTXO{}, fmt.Errorf("not initiated")
 }
 
 // Refundable checks if the htlc is refundable. It takes the utxos and the latest block height as input. It finds the

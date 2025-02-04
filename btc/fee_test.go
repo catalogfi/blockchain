@@ -143,12 +143,7 @@ var _ = Describe("bitcoin fees", func() {
 			utxos, err := indexer.GetUTXOs(ctx, addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), 10
-			recipients := []btc.Recipient{
-				{
-					To:     addr2.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(addr2.EncodeAddress(), amount)
 			sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizeEstimator, recipients, addr1)
 			Expect(err).To(BeNil())
@@ -175,12 +170,7 @@ var _ = Describe("bitcoin fees", func() {
 			utxos, err := indexer.GetUTXOs(ctx, addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), 10
-			recipients := []btc.Recipient{
-				{
-					To:     addr2.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(addr2.EncodeAddress(), amount)
 			sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizeEstimator, recipients, addr1)
 			Expect(err).To(BeNil())
@@ -207,12 +197,7 @@ var _ = Describe("bitcoin fees", func() {
 			utxos, err := indexer.GetUTXOs(ctx, addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), 10
-			recipients := []btc.Recipient{
-				{
-					To:     addr2.EncodeAddress(),
-					Amount: amount,
-				},
-			}
+			recipients := btc.SingleRecipient(addr2.EncodeAddress(), amount)
 			sizeEstimator := btc.NewSizeEstimator(utxos, btc.BaseSizeP2TR, btc.SegwitSizeP2TR)
 			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizeEstimator, recipients, addr1)
 			Expect(err).To(BeNil())
