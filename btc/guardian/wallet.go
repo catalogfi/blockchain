@@ -563,31 +563,18 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 	}
 	fmt.Println(hex.EncodeToString(txHex))
 
-	// implement check to verify if there should sign or update based on the LastFailedTxHash in ongoing batch
-	var prevFailedTxHash string
-	if previousBatch != nil {
-		fmt.Println("last failed tx hash")
-		fmt.Println(previousBatch.LastFailedTxHash)
-		fmt.Println("current tx hash")
-		fmt.Println(tx.TxHash().String())
-		prevFailedTxHash = previousBatch.LastFailedTxHash
-	}
 	currentTxHash := tx.TxHash().String()
 
-	if previousBatch != nil && prevFailedTxHash != "" && prevFailedTxHash != currentTxHash {
-		prevFailedTxHash, err := chainhash.NewHashFromStr(prevFailedTxHash)
+	//  check to verify if  sign or update based on the LastFailedTxHash in previousBatch
+	if previousBatch != nil && previousBatch.LastFailedTxHash != "" && previousBatch.LastFailedTxHash != currentTxHash {
+		prevFailedTxHash, err := chainhash.NewHashFromStr(previousBatch.LastFailedTxHash)
 		if err != nil {
 			return chainhash.Hash{}, fmt.Errorf("failed to parse prevFailedTxHash: %w", err)
 		}
-		// prevTxID, err := chainhash.NewHashFromStr(previousBatch.Tx.TxID)
-		// if err != nil {
-		// 	return chainhash.Hash{}, fmt.Errorf("failed to parse prevTxID: %w", err)
-		// }
 		err = w.client.UpdateTransaction(ctx, *prevFailedTxHash, tx, []string{}, inValues)
 		if err != nil {
 			return chainhash.Hash{}, fmt.Errorf("failed to update tx: %w", err)
 		}
-
 	} else {
 		err = w.client.SignTransaction(ctx, tx, inValues, []string{})
 		if err != nil {
@@ -595,15 +582,11 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		}
 	}
 
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)
-	}
-
 	err = w.submitTx(ctx, tx)
 	if err != nil {
 		if previousBatch != nil {
-			fmt.Println("---- failed to submit tx updating failed tx id")
-			UpdateErr := w.cache.UpdateFailedTxId(ctx, tx.TxHash().String(), previousBatch)
+			previousBatch.LastFailedTxHash = tx.TxHash().String()
+			UpdateErr := w.cache.SaveLatestBatch(ctx, previousBatch)
 			fmt.Println(w.cache.ReadLatestBatch(ctx))
 			if UpdateErr != nil {
 				return chainhash.Hash{}, fmt.Errorf("failed to update failed tx id: %w", UpdateErr)

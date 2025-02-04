@@ -16,7 +16,6 @@ type Cache interface {
 	SaveRequestVOUT(ctx context.Context, reqID string, vout int) error
 	ReadRequestVOUT(ctx context.Context, reqID string) (int, error)
 	ReadBatchByTxID(ctx context.Context, txID string) (Batch, error)
-	UpdateFailedTxId(ctx context.Context, txID string, batch *Batch) error
 }
 
 const (
@@ -100,22 +99,4 @@ func (c *cache) ReadRequestVOUT(ctx context.Context, reqID string) (int, error) 
 		return 0, fmt.Errorf("failed to get request vout: %w", err)
 	}
 	return strconv.Atoi(string(voutBytes))
-}
-
-func (c *cache) UpdateFailedTxId(ctx context.Context, txID string, batch *Batch) error {
-	// update LastFailedTxHash in the batch with the txID
-	batch.LastFailedTxHash = txID
-	batchBytes, err := batch.Marshal()
-	if err != nil {
-		return fmt.Errorf("failed to marshal batch: %w", err)
-	}
-	// use leveldb batch to save both the latest batch and the batch txid
-	levelBatch := leveldb.Batch{}
-	levelBatch.Put([]byte(latestBatchKey), batchBytes)
-	levelBatch.Put([]byte(fmt.Sprintf("%s_%s", batchTxIDKey, batch.Tx.TxID)), batchBytes)
-	err = c.db.Write(&levelBatch, nil)
-	if err != nil {
-		return fmt.Errorf("failed to save latest batch: %w", err)
-	}
-	return nil
 }
