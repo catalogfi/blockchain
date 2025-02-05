@@ -455,50 +455,69 @@ func NewInstantRefundTx(network *chaincfg.Params, key *btcec.PrivateKey, htlc *H
 	return tx, nil
 }
 
-func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx) error {
+func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Params) (UTXO, Recipient, error) {
 	if len(tx.TxIn) != 1 {
-		return errors.New("invalid number of inputs")
+		return UTXO{}, Recipient{}, errors.New("invalid number of inputs")
 	}
 	if len(tx.TxOut) != 1 {
-		return errors.New("invalid number of outputs")
+		return UTXO{}, Recipient{}, errors.New("invalid number of outputs")
 	}
+	// todo : we assume the witness only has one element which is the user's signature
 	if len(tx.TxIn[0].Witness) != 1 {
-		return errors.New("invalid witness length")
+		return UTXO{}, Recipient{}, errors.New("invalid witness length")
 	}
 	if tx.TxOut[0].Value > htlc.Amount {
-		return errors.New("invalid output amount")
+		return UTXO{}, Recipient{}, errors.New("invalid output amount")
 	}
 
 	// Verify signature
 	script, err := htlc.P2trScript()
 	if err != nil {
-		return err
+		return UTXO{}, Recipient{}, err
 	}
 	fetcher := txscript.NewCannedPrevOutputFetcher(script, htlc.Amount)
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 	leaf, _ := htlc.InstantRefundLeaf()
 	tapSigHashes, err := txscript.CalcTapscriptSignaturehash(sigHashes, SigHashSingleAnyoneCanPay, tx, 0, fetcher, leaf)
 	if err != nil {
-		return err
+		return UTXO{}, Recipient{}, err
 	}
-
 	sigBytes := tx.TxIn[0].Witness[0]
 	if len(sigBytes) == schnorr.SignatureSize+1 {
 		sigBytes = sigBytes[:len(sigBytes)-1]
 	}
-
 	signature, err := schnorr.ParseSignature(sigBytes)
 	if err != nil {
-		return err
+		return UTXO{}, Recipient{}, err
 	}
 	pub, err := schnorr.ParsePubKey(htlc.InitiatorPubKey)
 	if err != nil {
-		return err
+		return UTXO{}, Recipient{}, err
 	}
 	if ok := signature.Verify(tapSigHashes, pub); !ok {
-		return errors.New("invalid signature")
+		return UTXO{}, Recipient{}, errors.New("invalid signature")
 	}
-	return nil
+
+	// Parse input and output
+	// todo : we assume the instant refund tx is the same as htlc amount, watcher ?
+	utxo := UTXO{
+		TxID:   tx.TxIn[0].PreviousOutPoint.Hash.String(),
+		Vout:   tx.TxIn[0].PreviousOutPoint.Index,
+		Amount: htlc.Amount,
+	}
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(tx.TxOut[0].PkScript, network)
+	if err != nil {
+		return UTXO{}, Recipient{}, err
+	}
+	if len(addrs) != 1 {
+		return UTXO{}, Recipient{}, errors.New("invalid output address")
+	}
+	recipient := Recipient{
+		To:     addrs[0].EncodeAddress(),
+		Amount: tx.TxOut[0].Value,
+	}
+
+	return utxo, recipient, nil
 }
 
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.

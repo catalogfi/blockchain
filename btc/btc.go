@@ -3,6 +3,7 @@ package btc
 import (
 	"bytes"
 	"fmt"
+	"log"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -212,6 +213,11 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTX
 		if enough {
 			return tx, nil
 		}
+	}
+
+	// todo: debug logs
+	for _, utxo := range utxos {
+		log.Print(utxo.String())
 	}
 
 	return nil, fmt.Errorf("funds not enough")

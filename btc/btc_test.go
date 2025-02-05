@@ -5,6 +5,9 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
@@ -148,6 +151,56 @@ var _ = Describe("Bitcoin", func() {
 			Expect(btc.SignTx(addrType, replaceTx, privKey, utxos)).Should(Succeed())
 			err = indexer.SubmitTx(ctx, replaceTx)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
+		})
+	})
+
+	Context("Single Anyone Can Pay flag", func() {
+		It("should allow us to reuse the signature", func(ctx context.Context) {
+			By("Initialize keys and addresses")
+			addrType := waddrmgr.WitnessPubKey
+			pk1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+			Expect(err).To(BeNil())
+			txid, err := btctest.Faucet(addr1.EncodeAddress())
+			Expect(err).To(BeNil())
+			Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(txid.String()))).Should(Succeed())
+			_, addr2, err := btctest.NewBtcKey(network, addrType)
+			Expect(err).To(BeNil())
+
+			By("Construct a transaction which sends money from addr1 to addr2")
+			utxos, err := indexer.GetUTXOs(ctx, addr1)
+			Expect(err).To(BeNil())
+			amount, feeRate := int64(1e8-500), 2
+			recipients := btc.SingleRecipient(addr2.EncodeAddress(), amount)
+			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH)
+			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, addr1)
+			Expect(err).To(BeNil())
+
+			By("Sign the transaction")
+			pkScript, err := txscript.PayToAddrScript(addr1)
+			Expect(err).Should(BeNil())
+			fetcher, err := btc.InitFetcher(utxos, pkScript)
+			sighashes := txscript.NewTxSigHashes(transaction, fetcher)
+			err = btc.SignUtxos(waddrmgr.WitnessPubKey, transaction, 0, pk1, fetcher, sighashes, btc.WithSighashType(btc.SigHashSingleAnyoneCanPay))
+			Expect(err).Should(BeNil())
+
+			By("Add extra input and output to the transaction")
+			extraUtxo := utxos[0]
+			if utxos[0].String() == transaction.TxIn[0].PreviousOutPoint.String() {
+				extraUtxo = utxos[1]
+			}
+			hash, err := chainhash.NewHashFromStr(extraUtxo.TxID)
+			Expect(err).Should(BeNil())
+			txIn := wire.NewTxIn(wire.NewOutPoint(hash, extraUtxo.Vout), nil, nil)
+			transaction.TxIn = append([]*wire.TxIn{txIn}, transaction.TxIn...)
+			toScript, err := txscript.PayToAddrScript(addr2)
+			Expect(err).Should(BeNil())
+			transaction.TxOut = append([]*wire.TxOut{wire.NewTxOut(extraUtxo.Amount, toScript)}, transaction.TxOut...)
+
+			By("Sign and submit the transaction")
+			sighashes = txscript.NewTxSigHashes(transaction, fetcher)
+			err = btc.SignUtxos(waddrmgr.WitnessPubKey, transaction, 0, pk1, fetcher, sighashes)
+			Expect(err).Should(BeNil())
+			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 		})
 	})
 })
