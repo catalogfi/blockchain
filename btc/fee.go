@@ -55,17 +55,17 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
 }
 
-func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel, targetFeeRate int, extraSegwitSizePerInput int, extraChangeSize int) (int, error) {
+func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel, extraSegwitSizePerInput int, extraChangeSize int) (int64, int, error) {
 	baseSize := tx.SerializeSizeStripped() + extraChangeSize
 	totalSize := tx.SerializeSize() + extraChangeSize
 	if !tx.HasWitness() {
 		totalSize += extraSegwitSizePerInput * len(tx.TxIn)
 	}
 	weight := baseSize*3 + totalSize
-	vSize := weight / blockchain.WitnessScaleFactor
+	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 	fees, err := estimator.FeeSuggestion()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	feeRate := fees.Medium
 	switch feeLevel {
@@ -77,11 +77,7 @@ func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLev
 		feeRate = fees.Low
 	}
 
-	if feeRate <= targetFeeRate {
-		return vSize * (targetFeeRate + 1), nil
-	}
-
-	return vSize * feeRate, nil
+	return int64(vSize * feeRate), vSize, nil
 }
 
 // EstimateFee will return the estimated fee for the given transaction.

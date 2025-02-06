@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"math"
 	"strings"
 	"time"
 
@@ -170,6 +170,7 @@ func (w *Wallet) getVoutIndicesForMergeRequests(mergeRequestIDs []string, onGoin
 	return indices, nil
 }
 
+
 func (w *Wallet) checkInvalidMergeRequests(req []btc.SendRequest, onGoingBatch *Batch) error {
 
 	for _, request := range req {
@@ -213,6 +214,9 @@ func (w *Wallet) handleMergeRequests(tx *wire.MsgTx, req []btc.SendRequest, onGo
 }
 
 func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Hash, error) {
+	if len(req) == 0 {
+		return chainhash.Hash{}, fmt.Errorf("no request found")
+	}
 
 	if err := validateRequests(req, w.addr); err != nil {
 		return chainhash.Hash{}, err
@@ -269,17 +273,22 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	fee := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
-
-	onGoingBatch.MergeTxFee += fee
+	fee, err := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
+	
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to get descendants: %w", err)
+	}
 
 	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.PreviousBatchID)
+
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.Tx.Fee)
+
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
 
-	tx, onGoingBatch.MergeTxFee, err = w.includeMergeTxFee(ctx, tx, mergeTxHexes, onGoingBatch.MergeTxFee)
+
+	tx, err = w.includeMergeTxFee(tx, fee)
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
 			return w.batchAndBroadcast(ctx, req, onGoingBatch)
@@ -575,7 +584,9 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0, "") // "" is the previousTxId which doesnt exist in this scenario
+
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0, 0)
+
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
@@ -591,13 +602,35 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 	}
 	fmt.Println(hex.EncodeToString(txHex))
 
-	err = w.client.SignTransaction(ctx, tx, inValues, []string{})
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)
+	currentTxHash := tx.TxHash().String()
+
+	//  check to verify if  sign or update based on the LastFailedTxHash in previousBatch
+	if previousBatch != nil && previousBatch.LastFailedTxHash != "" && previousBatch.LastFailedTxHash != currentTxHash {
+		prevFailedTxHash, err := chainhash.NewHashFromStr(previousBatch.LastFailedTxHash)
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to parse prevFailedTxHash: %w", err)
+		}
+		err = w.client.UpdateTransaction(ctx, *prevFailedTxHash, tx, []string{}, inValues)
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to update tx: %w", err)
+		}
+	} else {
+		err = w.client.SignTransaction(ctx, tx, inValues, []string{})
+		if err != nil {
+			return chainhash.Hash{}, fmt.Errorf("failed to sign tx: %w", err)
+		}
 	}
 
 	err = w.submitTx(ctx, tx)
 	if err != nil {
+		if previousBatch != nil {
+			previousBatch.LastFailedTxHash = tx.TxHash().String()
+			UpdateErr := w.cache.SaveLatestBatch(ctx, previousBatch)
+			fmt.Println(w.cache.ReadLatestBatch(ctx))
+			if UpdateErr != nil {
+				return chainhash.Hash{}, fmt.Errorf("failed to update failed tx id: %w", UpdateErr)
+			}
+		}
 		return chainhash.Hash{}, fmt.Errorf("failed to submit tx: %w", err)
 	}
 
@@ -634,8 +667,8 @@ func (w *Wallet) getVoutsFromTx(tx *wire.MsgTx, req []btc.SendRequest) (map[stri
 }
 
 func calculateFeeRate(weight, feePaid int64) int64 {
-	vsize := weight / 4
-	return feePaid / vsize
+	vsize := math.Ceil(float64(weight) / 4.0)
+	return int64(math.Ceil(float64(feePaid) / vsize))
 }
 
 func (w *Wallet) addChangeOutput(tx *wire.MsgTx, changeAmt int64) (*wire.MsgTx, error) {
@@ -708,87 +741,58 @@ func (w *Wallet) getChangeAmount(tx *wire.MsgTx) int64 {
 	return 0
 }
 
-func (w *Wallet) includeMergeTxFee(ctx context.Context, tx *wire.MsgTx, mergeTxHexes []string, mergeTxFee int64) (*wire.MsgTx, int64, error) {
+func (w *Wallet) includeMergeTxFee(tx *wire.MsgTx, mergeTxFee int64) (*wire.MsgTx, error) {
 	var err error
-	if len(mergeTxHexes) > 0 {
-		if mergeTxFee > 0 {
-			tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-		}
-		// add the fee from merge txs
-		for _, mergeTxHex := range mergeTxHexes {
-			fee, err := w.mergeTxFee(ctx, mergeTxHex)
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to get merge tx fee: %w", err)
-			}
-			tx, err = w.decreaseChangeAmount(tx, int64(fee))
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-			mergeTxFee += int64(fee)
-		}
-	} else if mergeTxFee > 0 {
+	if mergeTxFee > 0 {
 		tx, err = w.decreaseChangeAmount(tx, mergeTxFee)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to decrease change amount: %w", err)
+			return nil, fmt.Errorf("failed to decrease change amount when merging txs: %w", err)
 		}
 	}
-	return tx, mergeTxFee, nil
+	return tx, nil
 }
 
 // adjustFee adds fee output to the tx if it doesn't exist or adjusts the change output if it does for current fee rate
-func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64, prevTxId string) (*wire.MsgTx, error) {
 
+func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64, previousFee int64) (*wire.MsgTx, error) {
 	extraBaseSize := 0
 	if !w.hasChangeOutput(tx) {
 		extraBaseSize = 43
 	}
 
-	feeToBePaid, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianWitnessSize, extraBaseSize)
+	// this is the fee needed for the current transaction
+	feeToBePaid, vsize, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, extraBaseSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to estimate fee: %w", err)
 	}
 
-	totalOutAmount := w.getTotalOutAmount(tx)
-	fmt.Println("totalOutAmount ", totalOutAmount)
-	fmt.Println("totalInAmount ", totalInAmount)
-	previousFee := totalInAmount - totalOutAmount
-	currentFee := feeToBePaid + 1
-	fmt.Println("current fee ", currentFee)
-	fmt.Println("previous fee ", previousFee)
-	if currentFee > int(previousFee) {
-		currentFee -= int(previousFee)
-	} else {
-		currentFee = int(previousFee) - currentFee
-	}
-	fmt.Println("current fee ", currentFee)
-	fmt.Println("dust ", btc.DustAmount)
-	if currentFee > btc.DustAmount {
-		if w.hasChangeOutput(tx) {
-			tx, err = w.decreaseChangeAmount(tx, int64(currentFee))
-			if err != nil {
-				return nil, fmt.Errorf("failed to decrease change amount: %w", err)
-			}
-		} else {
-			tx, err = w.addChangeOutput(tx, int64(currentFee))
-			if err != nil {
-				return nil, fmt.Errorf("failed to add change output: %w", err)
-			}
-		}
-	} else if currentFee > 0 && w.hasChangeOutput(tx) {
-		tx, err = w.decreaseChangeAmount(tx, int64(currentFee))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrease change amount: %w", err)
-		}
-		for _, out := range tx.TxOut {
-			fmt.Println(out.Value)
-		}
-	} else if currentFee > 0 && !w.hasChangeOutput(tx) {
-		// what to do
-	} else if currentFee < 0 {
+	// newFee is basically the fee needed for the current transaction + the previous fee to satisfy the rbf rules
+	newFee := previousFee + feeToBePaid
 
+	// sometimes the new fee is less than the previous fee rate, so we need to adjust it
+	newFeeWithPreviousFeeRate := previousFeeRate*int64(vsize) + 1
+
+	// feeSelected is the fee that we will use for the current transaction
+	feeSelected := int64(0)
+	// we select the max of the two
+	if newFee > newFeeWithPreviousFeeRate {
+		feeSelected = newFee
+	} else {
+		feeSelected = newFeeWithPreviousFeeRate
+	}
+	// remove the change output if it exists
+	tx = removeChangeOutputs(tx, w.pkScript)
+
+	totalOutAmount := w.getTotalOutAmount(tx)
+	// calculate the change needed
+	changeAmt := totalInAmount - totalOutAmount - feeSelected
+
+	if changeAmt > btc.DustAmount {
+		tx, err = w.addChangeOutput(tx, changeAmt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add change output: %w", err)
+		}
+	} else if changeAmt < 0 {
 		feeToFetch := feeToBePaid
 		for {
 			txIns, amountToBeAdded, err := w.selectUTXOsForAmount(ctx, tx, int64(feeToFetch))
@@ -799,9 +803,6 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 			for _, txIn := range txIns {
 				found := false
 				for _, in := range tx.TxIn {
-					if in.PreviousOutPoint.Hash.String() == prevTxId {
-						continue
-					}
 					if in.PreviousOutPoint.Hash.String() == txIn.PreviousOutPoint.Hash.String() && in.PreviousOutPoint.Index == txIn.PreviousOutPoint.Index {
 						found = true
 						break
@@ -811,7 +812,8 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 					tx.AddTxIn(txIn)
 				}
 			}
-			newFee, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, int(previousFeeRate), GuardianWitnessSize, GuardianChangeSize)
+
+			newFee, _, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, GuardianChangeSize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to estimate fee: %w", err)
 			}
@@ -1026,18 +1028,15 @@ func parseIntoTxOutputs(req []btc.SendRequest) ([]*TxOutput, error) {
 
 func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amount int64) ([]*wire.TxIn, int64, error) {
 
-	utxos, err := w.indexer.GetUTXOs(ctx, w.addr)
+	utxos, _, err := w.indexer.GetUTXOsForAmount(ctx, w.addr, amount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get utxos: %w", err)
 	}
-	sort.Slice(utxos, func(i, j int) bool {
-		return utxos[i].Amount < utxos[j].Amount
-	})
-	
-	fmt.Println("the fetched utxos are ")
-	for _, utxo := range utxos {
-		fmt.Println(utxo.Amount)
+
+	if len(utxos) == 0 {
+		return nil, 0, fmt.Errorf("no utxos found")
 	}
+
 	utxosToBeSelected := []btc.UTXO{}
 	amountToBeAdded := int64(0)
 	for _, utxo := range utxos {

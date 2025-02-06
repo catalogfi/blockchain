@@ -125,7 +125,9 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
+
 	bitcoinRPC := btc.CreateBitcoinRPCClient("admin1", "123", "http://localhost:18443")
+
 	// Create walletstxfrom
 	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
@@ -249,7 +251,6 @@ func TestGuardianWallet(t *testing.T) {
 					fmt.Println("no remaining requests to process")
 					continue
 				}
-
 				require.NoError(t, err)
 				require.NotEmpty(t, tx)
 
@@ -299,7 +300,6 @@ func TestGuardianWallet(t *testing.T) {
 		require.Empty(t, tx)
 		require.Error(t, fmt.Errorf("no request found"), err)
 	})
-
 }
 
 func TestPossibleFailure(t *testing.T) {
@@ -475,6 +475,41 @@ func TestPossibleFailure(t *testing.T) {
 	})
 }
 
+func TestUtxoUtilization(t *testing.T) {
+	setup,ctx := setupSimpleFunded(t)
+	gWallet := setup.guardian
+	simple := setup.simple
+
+	tx,err := simple.Send(ctx, []btc.SendRequest{
+		btc.NewSendRequest("1_0", 10000, gWallet.Address()),
+	}, nil,nil)
+
+	require.NotEmpty(t, tx)
+	require.NoError(t, err)
+
+	tx,err = simple.Send(ctx, []btc.SendRequest{
+		btc.NewSendRequest("2_0", 20000, gWallet.Address()),
+	}, nil,nil)
+
+	require.NotEmpty(t, tx)
+	require.NoError(t, err)
+
+	randomAddr := randomP2PKHAddr()
+	tx1,err := gWallet.Send(ctx, []btc.SendRequest{
+		btc.NewSendRequest("1_0", 5000, randomAddr),
+	})
+	
+	require.NotEmpty(t, tx1)
+	require.NoError(t, err)
+	
+	tx1,err = gWallet.Send(ctx, []btc.SendRequest{
+		btc.NewSendRequest("2_0", 15000, randomAddr),
+	})
+	
+	require.NotEmpty(t, tx1)
+	require.NoError(t, err)
+}
+
 func randomPrivKey() (*btcec.PrivateKey, *btcec.PublicKey) {
 	privKey, err := btcec.NewPrivateKey()
 	if err != nil {
@@ -499,66 +534,4 @@ func indexerClient() btc.IndexerClient {
 		panic(err)
 	}
 	return btc.NewElectrsIndexerClient(logger, "http://localhost:30000", 2*time.Second)
-}
-
-func TestUtxoUtilization(t *testing.T) {
-	setup, ctx := setupSimpleFunded(t)
-	simple := setup.simple
-	gWallet := setup.guardian
-	fmt.Println("The Simple Address is ", simple.Address())
-	fmt.Println("The Guardian Address is ", gWallet.Address())
-
-	tx, err := simple.Send(ctx, []btc.SendRequest{
-		btc.NewSendRequest("1_0", 10000, gWallet.Address()),
-	}, nil, nil)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("after sending from Simple to Gwallet firsst: ")
-	fmt.Println("txHash is ", tx)
-
-	txHex, err := setup.indexer.GetTxHex(ctx, tx)
-	fmt.Println("theTxHex is ", txHex)
-	
-	
-	tx11, err := simple.Send(ctx, []btc.SendRequest{
-		btc.NewSendRequest("1_0", 20000, gWallet.Address()),
-	}, nil, nil)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("after sending from Simple to  Gwallet second: ")
-	fmt.Println("txHash is ", tx11)
-	txHex, err = setup.indexer.GetTxHex(ctx, tx11)
-	fmt.Println("theTxHex is ", txHex)
-	
-
-	
-	randomAddr := randomP2PKHAddr()
-	tx1, err := gWallet.Send(ctx, []btc.SendRequest{
-		btc.NewSendRequest("2_0", 5000, randomAddr),
-	})
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Println("after sending from Gwallet to Random: ")
-	fmt.Println("the tx hash is ", tx1.String())
-	
-	
-
-	randomAddr = randomP2PKHAddr()
-
-	tx1, err = gWallet.Send(ctx, []btc.SendRequest{
-		btc.NewSendRequest("2_0", 15000, randomAddr),
-	})
-
-	fmt.Println("after sending from gwallet to random 2nd time")
-	fmt.Println(tx1.String())
-	if err != nil {
-		fmt.Println(err)
-	}
 }
