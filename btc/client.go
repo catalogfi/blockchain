@@ -384,6 +384,14 @@ type BitcoinRPCClient struct {
 	RpcURL  string
 }
 
+func CreateBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinRPCClient {
+	return BitcoinRPCClient{
+		RpcUser: rpcUser,
+		RpcPass: rpcPass,
+		RpcURL:  rpcURL,
+	}
+}
+
 func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) int64 {
 	verbose := true
 	// Create the JSON-RPC request
