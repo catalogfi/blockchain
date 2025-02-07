@@ -102,6 +102,9 @@ func checkForDups(req []btc.SendRequest) error {
 
 func validateRequests(req []btc.SendRequest, blacklistedAddrs ...btcutil.Address) error {
 
+	if len(req) == 0 {
+		return fmt.Errorf("no request found")
+	}
 	// lets make sure reqs contain no duplicates
 	if err := checkForDups(req); err != nil {
 		return fmt.Errorf("request ids contain duplicates: %w", err)
@@ -127,7 +130,6 @@ func (w *Wallet) submitTx(ctx context.Context, tx *wire.MsgTx) error {
 		return fmt.Errorf("failed to get tx raw bytes: %w", err)
 	}
 	w.logger.Info("Submitting tx", zap.String("txHex", hex.EncodeToString(txHex)))
-
 	err = w.indexer.SubmitTx(ctx, tx)
 	if err != nil {
 		return fmt.Errorf("failed to submit tx: %w", err)
@@ -166,6 +168,17 @@ func (w *Wallet) getVoutIndicesForMergeRequests(mergeRequestIDs []string, onGoin
 		indices = append(indices, vout)
 	}
 	return indices, nil
+}
+
+func (w *Wallet) checkInvalidMergeRequests(req []btc.SendRequest, onGoingBatch *Batch) error {
+
+	for _, request := range req {
+		_, invalidateID := request.InvalidateTxID()
+		if len(onGoingBatch.MergeMap[invalidateID]) > 0 {
+			return fmt.Errorf("invalid merge request found")
+		}
+	}
+	return nil
 }
 
 func (w *Wallet) handleMergeRequests(tx *wire.MsgTx, req []btc.SendRequest, onGoingBatch *Batch) (*wire.MsgTx, []*TxOutput, []string, error) {
@@ -216,6 +229,11 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return w.batchAndBroadcast(ctx, req, onGoingBatch)
 	}
 
+	err = w.checkInvalidMergeRequests(req, onGoingBatch)
+	if err != nil {
+		return chainhash.Hash{}, err
+	}
+
 	tx, err := w.txFromBatch(ctx, onGoingBatch)
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
@@ -238,6 +256,7 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 	}
 
 	values, totalInAmount, err := w.getInAmounts(ctx, tx)
+
 	if err != nil {
 		if strings.Contains(err.Error(), "Transaction not found") {
 			return w.batchAndBroadcast(ctx, req, onGoingBatch)
@@ -245,16 +264,20 @@ func (w *Wallet) Send(ctx context.Context, req []btc.SendRequest) (chainhash.Has
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.Tx.Fee)
-	if err != nil {
-		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
-	}
-
 	fee, err := w.rpc.GetDescendants(ctx, onGoingBatch.Tx.TxID)
+
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to get descendants: %w", err)
 	}
+
+	previousFeeRate := calculateFeeRate(int64(onGoingBatch.Tx.Weight), onGoingBatch.Tx.Fee)
+
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, previousFeeRate, onGoingBatch.Tx.Fee, onGoingBatch.Tx.TxID)
+
+	if err != nil {
+		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
+	}
+	values, _, err = w.getInAmounts(ctx, tx)
 
 	tx, err = w.includeMergeTxFee(tx, fee)
 	if err != nil {
@@ -335,8 +358,12 @@ func extractMergeIDs(req []btc.SendRequest, batch *Batch) ([]btc.SendRequest, []
 	mergeIDs := []string{}
 	mergeTxHexes := []string{}
 	remainingRequests := []btc.SendRequest{}
+	if batch.MergeMap == nil {
+		batch.MergeMap = make(map[string]string)
+	}
 
 	for _, r := range req {
+		_, reqid := r.ID()
 		exits, id := r.InvalidateTxID()
 		if !exits {
 			remainingRequests = append(remainingRequests, r)
@@ -351,6 +378,7 @@ func extractMergeIDs(req []btc.SendRequest, batch *Batch) ([]btc.SendRequest, []
 					return nil, nil, nil, fmt.Errorf("merge tx hex not found")
 				}
 				mergeTxHexes = append(mergeTxHexes, mergeTxHex)
+				batch.MergeMap[id] = reqid
 				remainingRequests = append(remainingRequests, r)
 				continue
 			}
@@ -547,7 +575,8 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 		return chainhash.Hash{}, fmt.Errorf("failed to get in amounts: %w", err)
 	}
 
-	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0, 0)
+	tx, err = w.adjustFee(ctx, tx, totalInAmount, 0, 0, CoinbaseBatchID)
+
 	if err != nil {
 		return chainhash.Hash{}, fmt.Errorf("failed to adjust fee: %w", err)
 	}
@@ -596,7 +625,6 @@ func (w *Wallet) batchAndBroadcast(ctx context.Context, req []btc.SendRequest, p
 	}
 
 	if previousBatch != nil {
-		fmt.Println(previousBatch.RequestIds)
 		previousBatch.RequestIds = map[string]int{}
 	}
 
@@ -714,8 +742,8 @@ func (w *Wallet) includeMergeTxFee(tx *wire.MsgTx, mergeTxFee int64) (*wire.MsgT
 }
 
 // adjustFee adds fee output to the tx if it doesn't exist or adjusts the change output if it does for current fee rate
-func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64, previousFee int64) (*wire.MsgTx, error) {
 
+func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount int64, previousFeeRate int64, previousFee int64, prevTxId string) (*wire.MsgTx, error) {
 	extraBaseSize := 0
 	if !w.hasChangeOutput(tx) {
 		extraBaseSize = 43
@@ -741,10 +769,8 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 	} else {
 		feeSelected = newFeeWithPreviousFeeRate
 	}
-
 	// remove the change output if it exists
 	tx = removeChangeOutputs(tx, w.pkScript)
-
 	totalOutAmount := w.getTotalOutAmount(tx)
 	// calculate the change needed
 	changeAmt := totalInAmount - totalOutAmount - feeSelected
@@ -763,6 +789,9 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 			}
 			txCopy := tx.Copy()
 			for _, txIn := range txIns {
+				if txIn.PreviousOutPoint.Hash.String() == prevTxId {
+					continue
+				}
 				found := false
 				for _, in := range tx.TxIn {
 					if in.PreviousOutPoint.Hash.String() == txIn.PreviousOutPoint.Hash.String() && in.PreviousOutPoint.Index == txIn.PreviousOutPoint.Index {
@@ -774,13 +803,28 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 					tx.AddTxIn(txIn)
 				}
 			}
-			newFee, _, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, GuardianChangeSize)
+
+			newfeeToBePaid, vsize, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, extraBaseSize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to estimate fee: %w", err)
 			}
 
-			changeAmt := totalInAmount + amountToBeAdded - int64(newFee)
+			// newFee is basically the fee needed for the current transaction + the previous fee to satisfy the rbf rules
+			newFee := previousFee + newfeeToBePaid
 
+			// sometimes the new fee is less than the previous fee rate, so we need to adjust it
+			newFeeWithPreviousFeeRate := previousFeeRate*int64(vsize) + 1
+
+			// feeSelected is the fee that we will use for the current transaction
+			feeSelected := int64(0)
+			// we select the max of the two
+			if newFee > newFeeWithPreviousFeeRate {
+				feeSelected = newFee
+			} else {
+				feeSelected = newFeeWithPreviousFeeRate
+			}
+
+			changeAmt := totalInAmount + amountToBeAdded - totalOutAmount - int64(feeSelected)
 			if changeAmt > btc.DustAmount {
 				tx, err = w.addChangeOutput(tx, changeAmt)
 				if err != nil {
@@ -792,7 +836,7 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 				break
 			} else {
 				// there negative change, so we need utxos to fetch for the fee
-				feeToFetch = newFee
+				feeToFetch = feeSelected
 				// revert the tx to the previous state
 				tx = txCopy
 			}
@@ -839,7 +883,6 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 	}
 	neededAmount := calculateTxOutputAmount(outs)
 	availableAmount := totalInAmount - totalOutAmount
-
 	if availableAmount < neededAmount {
 		tx, err = w.selectAndAddUTXOsForNewOuts(ctx, tx, outs)
 		if err != nil {
@@ -852,12 +895,6 @@ func (w *Wallet) tryAdjustingAmountsForNewOuts(ctx context.Context, tx *wire.Msg
 		tx.AddTxOut(out.TxOut)
 		if !out.isMergeOutput {
 			newOutTotalAmount += out.Value
-		}
-	}
-
-	for i, out := range tx.TxOut {
-		if bytes.Equal(out.PkScript, w.pkScript) {
-			tx.TxOut[i].Value -= newOutTotalAmount
 		}
 	}
 
@@ -976,7 +1013,7 @@ func parseIntoTxOutputs(req []btc.SendRequest) ([]*TxOutput, error) {
 
 func (w *Wallet) selectUTXOsForAmount(ctx context.Context, tx *wire.MsgTx, amount int64) ([]*wire.TxIn, int64, error) {
 
-	utxos, _, err := w.indexer.GetUTXOsForAmount(ctx, w.addr, amount)
+	utxos, err := w.indexer.GetUTXOs(ctx, w.addr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get utxos: %w", err)
 	}
@@ -1036,6 +1073,9 @@ func (w *Wallet) selectAndAddUTXOsForNewOuts(ctx context.Context, tx *wire.MsgTx
 		return nil, fmt.Errorf("failed to select utxos for amount: %w", err)
 	}
 	for _, txIn := range txIns {
+		if txIn.PreviousOutPoint.Hash.String() == tx.TxHash().String() {
+			continue
+		}
 		tx.AddTxIn(txIn)
 	}
 
@@ -1063,7 +1103,7 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 	// Creating A New Batch
 
 	if workingBatch == nil {
-		finalBatch = NewBatch(batchTx, reqIDs, CoinbaseBatchID, 0)
+		finalBatch = NewBatch(batchTx, reqIDs, CoinbaseBatchID)
 	} else {
 		workingBatch.PreviousBatchID = workingBatch.Tx.TxID
 		workingBatch.Tx = batchTx

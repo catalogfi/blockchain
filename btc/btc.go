@@ -65,7 +65,7 @@ type UTXO struct {
 	Amount int64   `json:"value"`
 	Status *Status `json:"status"`
 }
-
+	
 type Recipient struct {
 	To     string `json:"to"`
 	Amount int64  `json:"amount"`

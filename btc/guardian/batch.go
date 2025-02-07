@@ -11,7 +11,8 @@ type Batch struct {
 	// maps RequestId to Vouts in Tx
 	RequestIds       map[string]int
 	PreviousBatchID  string
-	MergeTxFee       int64
+	// maps invalidateTxId to the mergeRequestID that invalidates it
+	MergeMap	map[string]string
 	LastFailedTxHash string
 }
 
@@ -19,12 +20,11 @@ const CoinbaseBatchID = "coinbase"
 const GuardianWitnessSize = 267
 const GuardianChangeSize = 43
 
-func NewBatch(tx btc.Transaction, requestIds map[string]int, previousBatchID string, mergeTxFee int64) *Batch {
+func NewBatch(tx btc.Transaction, requestIds map[string]int, previousBatchID string) *Batch {
 	return &Batch{
 		Tx:              tx,
 		RequestIds:      requestIds,
 		PreviousBatchID: previousBatchID,
-		MergeTxFee:      mergeTxFee,
 	}
 }
 

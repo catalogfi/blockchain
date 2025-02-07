@@ -74,11 +74,7 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	bitcoinRPC := btc.BitcoinRPCClient{
-		RpcUser: "admin1",
-		RpcPass: "123",
-		RpcURL:  "http://0.0.0.0:18443",
-	}
+	bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
 	// Create wallets
 	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
@@ -129,11 +125,9 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
-	bitcoinRPC := btc.BitcoinRPCClient{
-		RpcUser: "admin1",
-		RpcPass: "123",
-		RpcURL:  "http://0.0.0.0:18443",
-	}
+
+	bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://localhost:18443")
+
 	// Create walletstxfrom
 	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
@@ -229,7 +223,6 @@ func TestGuardianWallet(t *testing.T) {
 					btc.NewSendRequest(fmt.Sprintf("1_%d", k), amount-fee, randomP2PKHAddr2),
 				}, nil, nil)
 
-
 				require.NoError(t, err)
 				require.NotEmpty(t, txString)
 				txHex, err := setup.indexer.GetTxHex(ctx, txString)
@@ -258,7 +251,6 @@ func TestGuardianWallet(t *testing.T) {
 					fmt.Println("no remaining requests to process")
 					continue
 				}
-				
 				require.NoError(t, err)
 				require.NotEmpty(t, tx)
 
@@ -308,7 +300,322 @@ func TestGuardianWallet(t *testing.T) {
 		require.Empty(t, tx)
 		require.Error(t, fmt.Errorf("no request found"), err)
 	})
+}
 
+func TestPossibleFailure(t *testing.T) {
+	setup, ctx := setupTest(t)
+	gWallet := setup.guardian
+	simple := setup.simple
+
+	t.Run("duplicate_request", func(t *testing.T) {
+		tx, err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 10000, randomP2PKHAddr()),
+		})
+		fmt.Println("first :", tx.String())
+		require.NoError(t, err)
+
+		tx, err = gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 78942, randomP2PKHAddr()),
+		})
+		fmt.Println("second :", tx.String())
+
+		require.NoError(t, err)
+	})
+	t.Run("unconfirmed descendanant", func(t *testing.T) {
+		tx, err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 10000, simple.Address()),
+		})
+
+		fmt.Println("first :", tx.String())
+		require.NoError(t, err)
+
+		randomaddr := randomP2PKHAddr()
+		txString, err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 10000-1000, randomaddr),
+		}, nil, nil)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Printf("Sending from %s to %s\n", simple.Address().String(), randomaddr.String())
+		fmt.Println("after simple to randomaddr", txString)
+		// ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		// defer cancel()
+		txx, err := setup.indexer.GetTx(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		txHex, err := setup.indexer.GetTxHex(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		mergeRe := []btc.SendRequest{}
+		for _, out := range txx.VOUTs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_0", int64(out.Value), addr, "3_0", txHex))
+		}
+
+		tx1, err := gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Printf("Sending from %s to %s\n", gWallet.Address().String(), randomaddr.String())
+		fmt.Println("after merge :", tx1.String())
+		require.NoError(t, err)
+	})
+	t.Run("invalidate_nonexistent_request", func(t *testing.T) {
+		tx, err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 10000, simple.Address()),
+		})
+
+		fmt.Println("first :", tx.String())
+		require.NoError(t, err)
+
+		randomaddr := randomP2PKHAddr()
+		txString, err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 10000-1000, randomaddr),
+		}, nil, nil)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Printf("Sending from %s to %s\n", simple.Address().String(), randomaddr.String())
+		fmt.Println("after simple to randomaddr", txString)
+		// ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		// defer cancel()
+		txx, err := setup.indexer.GetTx(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		txHex, err := setup.indexer.GetTxHex(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		mergeRe := []btc.SendRequest{}
+		for _, out := range txx.VOUTs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_0", int64(out.Value), addr, "3_1", txHex))
+		}
+
+		tx1, err := gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Printf("Sending from %s to %s\n", gWallet.Address().String(), randomaddr.String())
+		fmt.Println("after merge :", tx1.String())
+		require.NoError(t, err)
+	})
+	t.Run("invalidate_the_same_request_twice", func(t *testing.T) {
+		tx, err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 10000, simple.Address()),
+		})
+
+		fmt.Println("first :", tx.String())
+		require.NoError(t, err)
+
+		randomaddr := randomP2PKHAddr()
+		txString, err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 10000-1000, randomaddr),
+		}, nil, nil)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Printf("Sending from %s to %s\n", simple.Address().String(), randomaddr.String())
+		fmt.Println("after simple to randomaddr", txString)
+		// ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		// defer cancel()
+		txx, err := setup.indexer.GetTx(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		txHex, err := setup.indexer.GetTxHex(ctx, txString)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		mergeRe := []btc.SendRequest{}
+		for _, out := range txx.VOUTs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_0", int64(out.Value), addr, "3_0", txHex))
+		}
+		tx1, err := gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Println("after 1st merge4_0: ", tx1.String())
+
+		mergeRe = []btc.SendRequest{}
+		for _, out := range txx.VOUTs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_1", int64(out.Value), addr, "3_0", txHex))
+		}
+
+		tx1, err = gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		fmt.Printf("Sending from %s to %s\n", gWallet.Address().String(), randomaddr.String())
+		fmt.Println("after merge :", tx1.String())
+		require.Error(t, fmt.Errorf("invalid merge request found"), err)
+	})
+}
+
+func TestFundedBySimpleWallet(t *testing.T) {
+	setup,ctx := setupSimpleFunded(t)
+	gWallet := setup.guardian
+	simple := setup.simple
+
+	t.Run("normal requests", func(t *testing.T) {
+		tx,err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 10000, gWallet.Address()),
+		}, nil,nil)
+
+		require.NotEmpty(t, tx)
+		require.NoError(t, err)
+
+		tx,err = simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("2_0", 20000, gWallet.Address()),
+		}, nil,nil)
+
+		require.NotEmpty(t, tx)
+		require.NoError(t, err)
+		time.Sleep(10*time.Second)
+		
+		randomAddr := randomP2PKHAddr()
+		tx1,err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 5000, randomAddr),
+		})
+		
+		fmt.Println("the first txn is ", tx1)
+		require.NotEmpty(t, tx1)
+		require.NoError(t, err)
+		
+		randomAddr2 := randomP2PKHAddr()
+		tx1,err = gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("4_0", 15000, randomAddr2),
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, tx1)
+	})
+	
+	t.Run("invalidate_and_merge", func(t *testing.T) {
+		setup2,ctx:= setupTest(t)
+		simple2 := setup2.simple
+		tx,err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 20000, gWallet.Address()),
+		}, nil,nil)
+
+		require.NotEmpty(t, tx)
+		require.NoError(t, err)
+		time.Sleep(10*time.Second)
+		
+		
+		tx1,err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 10000, simple2.Address()),
+		})
+		
+		fmt.Println("the first txn is ", tx1)
+		require.NoError(t, err)
+		require.NotEmpty(t, tx1)
+		
+		randomAddr := randomP2PKHAddr()
+		
+		tx,err = simple2.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("2_0", 10000-1000, randomAddr),
+		}, nil,nil)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, tx)
+		
+		txn,err := setup.indexer.GetTx(ctx, tx)
+		outs := txn.VOUTs
+		txHex, err := setup.indexer.GetTxHex(ctx, tx)
+		
+		
+		mergeRe := []btc.SendRequest{}
+		for _, out := range outs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_0", int64(out.Value), addr, "3_0", txHex))
+		}
+
+		tx1, err = gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+		require.NoError(t, err)
+		require.NotEmpty(t, tx1)
+		fmt.Println(tx1)
+	})
+	t.Run("invalidate_and_merge_with_normal_req", func(t *testing.T) {
+		setup2,ctx:= setupTest(t)
+		simple2 := setup2.simple
+		tx,err := simple.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("1_0", 30000, gWallet.Address()),
+		}, nil,nil)
+
+		require.NotEmpty(t, tx)
+		require.NoError(t, err)
+		time.Sleep(10*time.Second)
+		
+		
+		tx1,err := gWallet.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("3_0", 10000, simple2.Address()),
+		})
+		
+		fmt.Println("the first txn is ", tx1)
+		require.NoError(t, err)
+		require.NotEmpty(t, tx1)
+		
+		randomAddr := randomP2PKHAddr()
+		
+		tx,err = simple2.Send(ctx, []btc.SendRequest{
+			btc.NewSendRequest("2_0", 10000-1000, randomAddr),
+		}, nil,nil)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, tx)
+		
+		txn,err := setup.indexer.GetTx(ctx, tx)
+		outs := txn.VOUTs
+		txHex, err := setup.indexer.GetTxHex(ctx, tx)
+		
+		
+		mergeRe := []btc.SendRequest{}
+		for _, out := range outs {
+			addr, err := btcutil.DecodeAddress(out.ScriptPubKeyAddress, setup.chainParams)
+			require.NoError(t, err)
+			mergeRe = append(mergeRe, btc.NewSendRequestWithInvalidateID("4_0", int64(out.Value), addr, "3_0", txHex))
+		}
+		
+		// A normal request alongside merge
+		randomAddr2 := randomP2PKHAddr()
+		mergeRe = append(mergeRe, btc.NewSendRequest("5_0", 3000, randomAddr2))
+		
+		tx1, err = gWallet.Send(ctx, mergeRe)
+		if err != nil {
+			fmt.Println(err)
+		}
+		require.NoError(t, err)
+		require.NotEmpty(t, tx1)
+		fmt.Println(tx1)
+	})
+	
 }
 
 func randomPrivKey() (*btcec.PrivateKey, *btcec.PublicKey) {
