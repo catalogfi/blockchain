@@ -58,8 +58,10 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel, extraSegwitSizePerInput int, extraChangeSize int) (int64, int, error) {
 	baseSize := tx.SerializeSizeStripped() + extraChangeSize
 	totalSize := tx.SerializeSize() + extraChangeSize
-	if !tx.HasWitness() {
-		totalSize += extraSegwitSizePerInput * len(tx.TxIn)
+	for _, txIn := range tx.TxIn {
+		if len(txIn.Witness) == 0 {
+			totalSize += extraSegwitSizePerInput
+		}
 	}
 	weight := baseSize*3 + totalSize
 	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
