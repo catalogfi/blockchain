@@ -384,7 +384,7 @@ type BitcoinRPCClient struct {
 }
 
 
-func CreateBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinRPCClient {
+func NewBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinRPCClient {
 	return BitcoinRPCClient{
 		RpcUser: rpcUser,
 		RpcPass: rpcPass,

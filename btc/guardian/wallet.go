@@ -1103,7 +1103,7 @@ func (w *Wallet) saveLatestBatch(ctx context.Context, req []btc.SendRequest, tx 
 	// Creating A New Batch
 
 	if workingBatch == nil {
-		finalBatch = NewBatch(batchTx, reqIDs, CoinbaseBatchID, 0)
+		finalBatch = NewBatch(batchTx, reqIDs, CoinbaseBatchID)
 	} else {
 		workingBatch.PreviousBatchID = workingBatch.Tx.TxID
 		workingBatch.Tx = batchTx

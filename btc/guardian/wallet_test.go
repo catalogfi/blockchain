@@ -74,7 +74,7 @@ func setupTest(t *testing.T) (*testWallets, context.Context) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	bitcoinRPC := btc.CreateBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
+	bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
 	// Create wallets
 	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func setupSimpleFunded(t *testing.T) (*testWallets, context.Context) {
 	logger, err := zap.NewDevelopment()
 	require.NoError(t, err)
 
-	bitcoinRPC := btc.CreateBitcoinRPCClient("admin1", "123", "http://localhost:18443")
+	bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://localhost:18443")
 
 	// Create walletstxfrom
 	guardianWallet, err := guardian.NewWallet(guardianClient, privKey, cache, indexer, &chainParams, feeEstimator, logger, bitcoinRPC)
