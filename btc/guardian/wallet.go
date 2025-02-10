@@ -803,7 +803,11 @@ func (w *Wallet) adjustFee(ctx context.Context, tx *wire.MsgTx, totalInAmount in
 					tx.AddTxIn(txIn)
 				}
 			}
-
+			
+			if !w.hasChangeOutput(tx) {
+				extraBaseSize = 43
+			}
+		
 			newfeeToBePaid, vsize, err := btc.EstimateGuardianFee(tx, w.feeEstimator, w.feeLevel, GuardianWitnessSize, extraBaseSize)
 			if err != nil {
 				return nil, fmt.Errorf("failed to estimate fee: %w", err)
