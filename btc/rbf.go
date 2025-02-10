@@ -118,12 +118,14 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 		if err != nil {
 			return fmt.Errorf("failed to get utxo tx: %w", err)
 		}
-
-		previousUTXOs = append(previousUTXOs, UTXO{
-			TxID:   vin.TxID,
-			Vout:   uint32(vin.Vout),
-			Amount: int64(utxoTx.VOUTs[vin.Vout].Value),
-		})
+		if !utxoTx.Status.Confirmed {
+			previousUTXOs = append(previousUTXOs, UTXO{
+				TxID:   vin.TxID,
+				Vout:   uint32(vin.Vout),
+				Amount: int64(utxoTx.VOUTs[vin.Vout].Value),
+				Status: &utxoTx.Status,
+			})
+		}
 	}
 
 	// Attempt to create a new RBF batch with combined requests.
