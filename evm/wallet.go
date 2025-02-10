@@ -5,119 +5,298 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"strings"
+	"sync"
 
-	"github.com/catalogfi/blockchain"
-	"github.com/catalogfi/blockchain/evm/bindings/openzeppelin/contracts/token/ERC20/erc20"
-	"github.com/catalogfi/blockchain/evm/bindings/openzeppelin/contracts/token/ERC721/erc721"
+	"github.com/catalogfi/blockchain/evm/bindings/contracts/htlc/gardenhtlc"
+	"github.com/catalogfi/blockchain/evm/bindings/openzeppelin/contracts/token/ERC20/ierc20"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
-var MaxETHAmount, _ = new(big.Int).SetString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
-
-type wallet struct {
-	Client
-	privateKey *ecdsa.PrivateKey
-}
+type TransactFunc func(*bind.TransactOpts) (*types.Transaction, error)
 
 type Wallet interface {
-	Client
 
+	// Address returns the address of the wallet
 	Address() common.Address
-	Send(ctx context.Context, asset blockchain.EVMAsset, to common.Address, amount *big.Int) (*types.Transaction, error)
-	SendAll(ctx context.Context, asset blockchain.EVMAsset, to common.Address) (*types.Transaction, error)
+
+	// Client returns the blockchain client.
+	Client() *ethclient.Client
+
+	// Balance returns the ETH balance of the wallet address
+	Balance(ctx context.Context, pending bool) (*big.Int, error)
+
+	// TokenBalance returns the token balance of the wallet address. Token is assumed an ERC-20 token and retrieved from
+	// the HTLC contract.
+	TokenBalance(ctx context.Context, pending bool) (*big.Int, error)
+
+	// Initiate an atomic swap.
+	Initiate(ctx context.Context, htlc Htlc) (*types.Transaction, error)
+
+	// Redeem an atomic swap.
+	Redeem(ctx context.Context, htlc Htlc, secret []byte) (*types.Transaction, error)
+
+	// Refund an atomic swap.
+	Refund(ctx context.Context, htlc Htlc) (*types.Transaction, error)
+
+	// InstantRefund an atomic swap
+	InstantRefund(ctx context.Context, htlc Htlc, sig []byte) (*types.Transaction, error)
 }
 
-type GardenWallet interface {
-	HTLCWallet
+type wallet struct {
+	options Options
+	key     *ecdsa.PrivateKey
+	client  *ethclient.Client
+
+	mu           *sync.Mutex
+	addr         common.Address
+	htlc         *gardenhtlc.GardenHTLC
+	token        *ierc20.IERC20
+	transactOpts *bind.TransactOpts
 }
 
-func NewWallet(client Client, key *ecdsa.PrivateKey) Wallet {
-	return &wallet{Client: client, privateKey: key}
-}
+func New(options Options, key *ecdsa.PrivateKey, client *ethclient.Client) (Wallet, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), options.Timeout)
+	defer cancel()
+	callOpts := &bind.CallOpts{Context: ctx}
+	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-func NewGardenWallet(client Client, key *ecdsa.PrivateKey) GardenWallet {
-	return &wallet{Client: client, privateKey: key}
-}
-
-func (w *wallet) Address() common.Address {
-	return crypto.PubkeyToAddress(w.privateKey.PublicKey)
-}
-
-func (w *wallet) Send(ctx context.Context, asset blockchain.EVMAsset, to common.Address, amount *big.Int) (*types.Transaction, error) {
-	evmChain, ok := asset.Chain().(blockchain.EvmChain)
-	if !ok {
-		return nil, fmt.Errorf("%v is not a btc chain", asset.Chain().Name())
-	}
-
-	client, tops, err := w.transactor(ctx, asset.Chain())
+	// Initialise bindings.
+	htlc, err := gardenhtlc.NewGardenHTLC(options.SwapAddr, client)
 	if err != nil {
 		return nil, err
 	}
-	switch asset := asset.(type) {
-	case blockchain.ERC20:
-		token, err := erc20.NewERC20(asset.Token, client)
-		if err != nil {
-			return nil, err
-		}
-		return token.Transfer(tops, to, amount)
-	case blockchain.ERC721:
-		nft, err := erc721.NewERC721(asset.Token, client)
-		if err != nil {
-			return nil, err
-		}
-		return nft.TransferFrom(tops, tops.From, to, amount)
-	case blockchain.ETH:
-		nonce, err := client.PendingNonceAt(ctx, tops.From)
-		if err != nil {
-			return nil, err
-		}
-		gasPrice, err := client.SuggestGasPrice(ctx)
-		if err != nil {
-			return nil, err
-		}
-		gasTip, err := client.SuggestGasTipCap(ctx)
-		if err != nil {
-			return nil, err
-		}
-		signedTx, err := tops.Signer(tops.From, types.NewTx(&types.DynamicFeeTx{
-			ChainID:   evmChain.ChainID(),
-			Nonce:     nonce,
-			To:        &to,
-			GasFeeCap: gasPrice,
-			GasTipCap: gasTip,
-			Gas:       21000,
-			Value:     amount,
-		}))
-		if err != nil {
-			return nil, err
-		}
-		return signedTx, client.SendTransaction(ctx, signedTx)
-	default:
-		panic(fmt.Sprintf("constraint violation: unsupported asset type: %T", asset))
-	}
-}
-
-func (w *wallet) SendAll(ctx context.Context, asset blockchain.EVMAsset, to common.Address) (*types.Transaction, error) {
-	balance, err := w.Client.Balance(ctx, asset, crypto.PubkeyToAddress(w.privateKey.PublicKey), nil)
+	tokenAddr, err := htlc.Token(callOpts)
 	if err != nil {
 		return nil, err
 	}
-	return w.Send(ctx, asset, to, balance)
+	erc20, err := ierc20.NewIERC20(tokenAddr, client)
+	if err != nil {
+		return nil, err
+	}
+
+	// Make sure the chain ID matches our expectation, so we know we are on the right chain.
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if options.ChainID.Cmp(chainID) != 0 {
+		return nil, fmt.Errorf("wrong chain ID, expect %v, got %v", options.ChainID, chainID)
+	}
+
+	// Initialise the transactor
+	nonce, err := client.PendingNonceAt(ctx, crypto.PubkeyToAddress(key.PublicKey))
+	if err != nil {
+		return nil, err
+	}
+	transactor, err := bind.NewKeyedTransactorWithChainID(key, options.ChainID)
+	if err != nil {
+		return nil, err
+	}
+	transactor.Nonce = big.NewInt(int64(nonce))
+
+	wal := &wallet{
+		options: options,
+		key:     key,
+		client:  client,
+
+		mu:           new(sync.Mutex),
+		addr:         addr,
+		htlc:         htlc,
+		token:        erc20,
+		transactOpts: transactor,
+	}
+
+	// Check token allowance against the token contract
+	if err := wal.allowanceCheck(); err != nil {
+		return nil, err
+	}
+
+	return wal, nil
 }
 
-func (w *wallet) transactor(ctx context.Context, chain blockchain.Chain) (*ethclient.Client, *bind.TransactOpts, error) {
-	client, ok := w.Client.EvmClient(chain)
-	if !ok {
-		return nil, nil, fmt.Errorf("unsupported evm chain: %v", chain.Name())
+func (wallet *wallet) Address() common.Address {
+	return wallet.addr
+}
+
+func (wallet *wallet) Client() *ethclient.Client {
+	return wallet.client
+}
+
+func (wallet *wallet) Balance(ctx context.Context, pending bool) (*big.Int, error) {
+	if pending {
+		return wallet.client.PendingBalanceAt(ctx, wallet.addr)
 	}
-	tops, err := bind.NewKeyedTransactorWithChainID(w.privateKey, chain.(blockchain.EvmChain).ChainID())
+	return wallet.client.BalanceAt(ctx, wallet.addr, nil)
+}
+
+func (wallet *wallet) TokenBalance(ctx context.Context, pending bool) (*big.Int, error) {
+	callOpts := &bind.CallOpts{
+		Pending: pending,
+		Context: ctx,
+	}
+	return wallet.token.BalanceOf(callOpts, wallet.addr)
+}
+
+func (wallet *wallet) Initiate(ctx context.Context, htlc Htlc) (*types.Transaction, error) {
+	wallet.mu.Lock()
+	defer wallet.mu.Unlock()
+
+	// Initiate the atomic swap
+	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return wallet.htlc.Initiate(opts, htlc.Redeemer, htlc.Expiry, htlc.Amount, htlc.SecretHash)
+	}
+	return wallet.transact(ctx, f)
+}
+
+func (wallet *wallet) Redeem(ctx context.Context, htlc Htlc, secret []byte) (*types.Transaction, error) {
+	wallet.mu.Lock()
+	defer wallet.mu.Unlock()
+
+	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return wallet.htlc.Redeem(opts, htlc.ID, secret)
+	}
+	return wallet.transact(ctx, f)
+}
+
+func (wallet *wallet) Refund(ctx context.Context, htlc Htlc) (*types.Transaction, error) {
+	wallet.mu.Lock()
+	defer wallet.mu.Unlock()
+
+	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return wallet.htlc.Refund(opts, htlc.ID)
+	}
+	return wallet.transact(ctx, f)
+}
+
+func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) (*types.Transaction, error) {
+	wallet.mu.Lock()
+	defer wallet.mu.Unlock()
+
+	// Generate signature if redeemerSig is nil
+	if sig == nil {
+		domain, err := wallet.htlc.Eip712Domain(&bind.CallOpts{Context: ctx})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get EIP-712 domain: %w", err)
+		}
+		td := apitypes.TypedData{
+			Domain: apitypes.TypedDataDomain{
+				Name:              domain.Name,
+				Version:           domain.Version,
+				ChainId:           math.NewHexOrDecimal256(wallet.options.ChainID.Int64()),
+				VerifyingContract: wallet.options.SwapAddr.String(),
+			},
+			Message: map[string]interface{}{
+				"orderId": htlc.ID,
+			},
+			PrimaryType: "Refund",
+			Types: apitypes.Types{
+				"EIP712Domain": {
+					{Name: "name", Type: "string"},
+					{Name: "version", Type: "string"},
+					{Name: "chainId", Type: "uint256"},
+					{Name: "verifyingContract", Type: "address"},
+				},
+				"Refund": {
+					{Name: "orderId", Type: "bytes32"},
+				},
+			},
+		}
+		domainSeparator, err := td.HashStruct("EIP712Domain", td.Domain.Map())
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash domain: %w", err)
+		}
+		typedDataHash, err := td.HashStruct(td.PrimaryType, td.Message)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash message: %w", err)
+		}
+		rawData := []byte(fmt.Sprintf("\x19\x01%s%s", string(domainSeparator), string(typedDataHash)))
+		digest := crypto.Keccak256Hash(rawData)
+		signature, err := crypto.Sign(digest.Bytes(), wallet.key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign digest: %w", err)
+		}
+
+		// Adjust V value (last byte) to conform to Ethereum's signature format
+		signature[64] += 27
+		sig = signature
+	}
+
+	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+		return wallet.htlc.InstantRefund(opts, htlc.ID, sig)
+	}
+	return wallet.transact(ctx, f)
+}
+
+func (wallet *wallet) allowanceCheck() error {
+	ctx, cancel := context.WithTimeout(context.Background(), wallet.options.Timeout*2)
+	defer cancel()
+	callOpts := &bind.CallOpts{Context: ctx}
+
+	// Check we have enough allowance for the swap contract
+	allowance, err := wallet.token.Allowance(callOpts, wallet.addr, wallet.options.SwapAddr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create a transactor: %v", err)
+		return err
 	}
-	tops.Context = ctx
-	return client, tops, nil
+	totalSupply, err := wallet.token.TotalSupply(callOpts)
+	if err != nil {
+		return err
+	}
+
+	// Do a large approval when the allowance is low, we should only need to do this once.
+	if allowance.Cmp(totalSupply) == -1 {
+		data := make([]byte, 32)
+		for i := 0; i < 32; i++ {
+			data[i] = 0xff
+		}
+		max := big.NewInt(0).SetBytes(data)
+		f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+			return wallet.token.Approve(opts, wallet.options.SwapAddr, max)
+		}
+		tx, err := wallet.transact(ctx, f)
+		if err != nil {
+			return err
+		}
+
+		// Wait for the tx to be mined and check receipt status
+		receipt, err := bind.WaitMined(ctx, wallet.client, tx)
+		if err != nil {
+			return err
+		}
+		if receipt.Status == 0 {
+			return fmt.Errorf("tx reverted, hash = %v", receipt.TxHash.Hex())
+		}
+	}
+	return nil
+}
+
+// transact runs a transaction with the given function and automatically retries the transaction if nonce is incorrect.
+// you need to hold the wallet lock when calling this function.
+func (wallet *wallet) transact(ctx context.Context, f TransactFunc) (*types.Transaction, error) {
+	wallet.transactOpts.Context = ctx
+	for {
+		tx, err := f(wallet.transactOpts)
+		if err != nil {
+			// If nonce is incorrect
+			if strings.Contains(err.Error(), "nonce too low") || strings.Contains(err.Error(), "tx doesn't have the correct nonce") {
+				nonce, err := wallet.client.PendingNonceAt(ctx, wallet.addr)
+				if err != nil {
+					return nil, err
+				}
+				wallet.transactOpts.Nonce = big.NewInt(int64(nonce))
+				continue
+			}
+
+			// Return other errors immediately without retrying
+			return nil, err
+		}
+		wallet.transactOpts.Nonce = big.NewInt(wallet.transactOpts.Nonce.Int64() + 1)
+		return tx, nil
+	}
 }

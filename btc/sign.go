@@ -12,6 +12,7 @@ import (
 )
 
 type SigOptions func(*sigOptions)
+
 type sigOptions struct {
 	compressed        bool
 	sighashType       txscript.SigHashType

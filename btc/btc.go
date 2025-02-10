@@ -231,7 +231,9 @@ func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []
 		return nil, err
 	}
 	for i := range tx.TxIn {
-		tx.TxIn[i].Sequence = mempool.MaxRBFSequence
+		if tx.TxIn[i].Sequence == wire.MaxTxInSequenceNum {
+			tx.TxIn[i].Sequence = mempool.MaxRBFSequence
+		}
 	}
 	return tx, nil
 }

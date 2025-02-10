@@ -1,4 +1,4 @@
-package wallet_test
+package btc_test
 
 import (
 	"context"
@@ -21,7 +21,8 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 			key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).Should(BeNil())
-			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+			feeEstimator := btc.NewFixFeeEstimator(10)
+			wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
@@ -44,6 +45,7 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 			key2, _, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).Should(BeNil())
+			feeEstimator := btc.NewFixFeeEstimator(10)
 			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 
@@ -72,6 +74,7 @@ var _ = Describe("Wallet", func() {
 			Expect(err).Should(BeNil())
 			key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).Should(BeNil())
+			feeEstimator := btc.NewFixFeeEstimator(10)
 			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
@@ -106,7 +109,7 @@ var _ = Describe("Wallet", func() {
 	})
 
 	Context("Batch operation", func() {
-		Context("signle action", func() {
+		Context("single action", func() {
 			It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 				By("Init keys and wallet")
 				addrType := waddrmgr.WitnessPubKey
@@ -114,6 +117,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
 				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
@@ -152,6 +156,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 				key2, _, err := btctest.NewBtcKey(network, addrType)
 				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
 				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 
@@ -192,6 +197,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
 				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
@@ -246,6 +252,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
 				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
