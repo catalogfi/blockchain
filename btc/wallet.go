@@ -15,6 +15,40 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 )
 
+type ExecuteOpts func(*executeOpts)
+
+type executeOpts struct {
+	conflictUtxo *UTXO
+	rbfFeeRate   int
+	rbfFees      int
+}
+
+func defaultExecuteOpts() *executeOpts {
+	return &executeOpts{
+		conflictUtxo: nil,
+		rbfFeeRate:   0,
+		rbfFees:      0,
+	}
+}
+
+func WithConflictUtxo(utxo UTXO) ExecuteOpts {
+	return func(o *executeOpts) {
+		o.conflictUtxo = &utxo
+	}
+}
+
+func WithRbfFeeRate(feeRate int) ExecuteOpts {
+	return func(o *executeOpts) {
+		o.rbfFeeRate = feeRate
+	}
+}
+
+func WithRbfFees(fess int) ExecuteOpts {
+	return func(o *executeOpts) {
+		o.rbfFees = fess
+	}
+}
+
 type Wallet interface {
 	Address() btcutil.Address
 
@@ -26,7 +60,7 @@ type Wallet interface {
 
 	InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx) (*wire.MsgTx, error)
 
-	Execute(ctx context.Context, actions []HtlcAction) (*wire.MsgTx, error)
+	Execute(ctx context.Context, actions []HtlcAction, opts ...ExecuteOpts) (*wire.MsgTx, error)
 }
 
 type wallet struct {
@@ -312,9 +346,14 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	return transaction, nil
 }
 
-func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction) (*wire.MsgTx, error) {
+func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ...ExecuteOpts) (*wire.MsgTx, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
+
+	opts := defaultExecuteOpts()
+	for _, exeOpt := range exeOpts {
+		exeOpt(opts)
+	}
 
 	// Fetch wallet utxos without the conflict utxo and unconfirmed utxo
 	rawUtxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
@@ -323,6 +362,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction) (*wire.Msg
 	}
 	utxos := make([]UTXO, 0, len(rawUtxos))
 	for _, utxo := range rawUtxos {
+		if opts.conflictUtxo != nil && utxo.String() == opts.conflictUtxo.String() {
+			continue
+		}
 		if utxo.Status != nil && !utxo.Status.Confirmed {
 			continue
 		}
@@ -347,9 +389,14 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction) (*wire.Msg
 		return nil, err
 	}
 
-	// Parse the actions
+	// Append the conflict utxo to make sure the replacement txs will be conflicted with each other
 	recipients := []Recipient{}
 	inputs := []UTXO{}
+	if opts.conflictUtxo != nil {
+		inputs = append(inputs, *opts.conflictUtxo)
+	}
+
+	// Parse the actions
 	inputActions := map[string]HtlcAction{}
 	for _, action := range actions {
 		switch action.ActionType {
@@ -415,6 +462,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction) (*wire.Msg
 		return nil, err
 	}
 	feeRate := feeRates.High
+	if feeRate < opts.rbfFeeRate+1 {
+		feeRate = opts.rbfFeeRate + 1
+	}
 
 	// Build the tx
 	tx, err := BuildTransaction(wal.network, feeRate, inputs, utxos, sizer, recipients, wal.Address())
