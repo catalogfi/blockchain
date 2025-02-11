@@ -153,7 +153,7 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 		transactOpts: transactor,
 	}
 
-	// Check token allowance against the token contract
+	// Check token allowance against the token contracts
 	if err := wal.allowanceCheck(); err != nil {
 		return nil, err
 	}
@@ -197,6 +197,9 @@ func (wallet *wallet) Redeem(ctx context.Context, htlc Htlc, secret []byte) (*ty
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	if htlc.ChainID != wallet.options.ChainID {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
 		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
@@ -211,6 +214,9 @@ func (wallet *wallet) Refund(ctx context.Context, htlc Htlc) (*types.Transaction
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	if htlc.ChainID != wallet.options.ChainID {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
 		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
@@ -225,6 +231,9 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	if htlc.ChainID != wallet.options.ChainID {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
 		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
