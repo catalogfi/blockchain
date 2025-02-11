@@ -76,7 +76,7 @@ func (chain EvmChain) L2() bool {
 	switch chain.name {
 	case Ethereum, EthereumSepolia, EthereumLocalnet:
 		return false
-	case Arbitrum, PolygonZK, PolygonZKTestnet:
+	case Arbitrum, ArbitrumLocalnet, PolygonZK, PolygonZKTestnet:
 		return true
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))

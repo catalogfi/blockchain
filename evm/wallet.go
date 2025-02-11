@@ -7,7 +7,9 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/catalogfi/blockchain"
 	"github.com/catalogfi/blockchain/evm/bindings/contracts/htlc/gardenhtlc"
 	"github.com/catalogfi/blockchain/evm/bindings/openzeppelin/contracts/token/ERC20/ierc20"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -18,6 +20,42 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
+
+type Options struct {
+	ChainID  *big.Int
+	SwapAddr common.Address
+	Timeout  time.Duration
+	L2       bool
+}
+
+func NewOptions(chain blockchain.EvmChain, contract common.Address, timeout time.Duration) Options {
+	return Options{
+		ChainID:  chain.ChainID(),
+		SwapAddr: contract,
+		Timeout:  timeout,
+		L2:       chain.L2(),
+	}
+}
+
+func (opts Options) WithChainID(id *big.Int) Options {
+	opts.ChainID = id
+	return opts
+}
+
+func (opts Options) WithSwapAddr(swapAddr common.Address) Options {
+	opts.SwapAddr = swapAddr
+	return opts
+}
+
+func (opts Options) WithTimeout(timeout time.Duration) Options {
+	opts.Timeout = timeout
+	return opts
+}
+
+func (opts Options) WithL2(l2 bool) Options {
+	opts.L2 = l2
+	return opts
+}
 
 type TransactFunc func(*bind.TransactOpts) (*types.Transaction, error)
 
@@ -61,7 +99,7 @@ type wallet struct {
 	transactOpts *bind.TransactOpts
 }
 
-func New(options Options, key *ecdsa.PrivateKey, client *ethclient.Client) (Wallet, error) {
+func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client) (Wallet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), options.Timeout)
 	defer cancel()
 	callOpts := &bind.CallOpts{Context: ctx}
@@ -148,7 +186,6 @@ func (wallet *wallet) Initiate(ctx context.Context, htlc Htlc) (*types.Transacti
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
-	// Initiate the atomic swap
 	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
 		return wallet.htlc.Initiate(opts, htlc.Redeemer, htlc.Expiry, htlc.Amount, htlc.SecretHash)
 	}
