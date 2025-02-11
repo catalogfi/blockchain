@@ -26,7 +26,7 @@ type Wallet interface {
 
 	InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx) (*wire.MsgTx, error)
 
-	Execute(ctx context.Context, actions []HtlcAction, conflictUtxo *UTXO, prevFeeRate int) (*wire.MsgTx, error)
+	Execute(ctx context.Context, actions []HtlcAction) (*wire.MsgTx, error)
 }
 
 type wallet struct {
@@ -312,7 +312,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	return transaction, nil
 }
 
-func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, conflictUtxo *UTXO, prevFeeRate int) (*wire.MsgTx, error) {
+func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction) (*wire.MsgTx, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -323,9 +323,6 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, conflictUt
 	}
 	utxos := make([]UTXO, 0, len(rawUtxos))
 	for _, utxo := range rawUtxos {
-		if conflictUtxo != nil && utxo.String() == conflictUtxo.String() {
-			continue
-		}
 		if utxo.Status != nil && !utxo.Status.Confirmed {
 			continue
 		}
@@ -350,14 +347,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, conflictUt
 		return nil, err
 	}
 
-	// Append the conflict utxo to make sure the replacement txs will be conflicted with each other
+	// Parse the actions
 	recipients := []Recipient{}
 	inputs := []UTXO{}
-	if conflictUtxo != nil {
-		inputs = append(inputs, *conflictUtxo)
-	}
-
-	// Parse the actions
 	inputActions := map[string]HtlcAction{}
 	for _, action := range actions {
 		switch action.ActionType {
@@ -423,9 +415,6 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, conflictUt
 		return nil, err
 	}
 	feeRate := feeRates.High
-	if feeRate < prevFeeRate+1 {
-		feeRate += 1
-	}
 
 	// Build the tx
 	tx, err := BuildTransaction(wal.network, feeRate, inputs, utxos, sizer, recipients, wal.Address())

@@ -7,7 +7,6 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
-	"github.com/catalogfi/blockchain/btc/wallet"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -24,7 +23,7 @@ var _ = Describe("Wallet", func() {
 			feeEstimator := btc.NewFixFeeEstimator(10)
 			wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
-			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+			wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("Initiate and redeem an HTLC")
@@ -46,7 +45,7 @@ var _ = Describe("Wallet", func() {
 			key2, _, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).Should(BeNil())
 			feeEstimator := btc.NewFixFeeEstimator(10)
-			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+			wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("Initiate an HTLC")
@@ -75,9 +74,9 @@ var _ = Describe("Wallet", func() {
 			key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).Should(BeNil())
 			feeEstimator := btc.NewFixFeeEstimator(10)
-			wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+			wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
-			wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+			wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("Initiate an HTLC")
@@ -118,9 +117,9 @@ var _ = Describe("Wallet", func() {
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
 				feeEstimator := btc.NewFixFeeEstimator(10)
-				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
-				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+				wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 
 				By("Initiate an HTLC")
@@ -133,7 +132,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlc,
 					},
 				}
-				_, err = wal1.Execute(ctx, actions1, nil)
+				_, err = wal1.Execute(ctx, actions1)
 				Expect(err).Should(BeNil())
 				Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 
@@ -145,7 +144,7 @@ var _ = Describe("Wallet", func() {
 						Secret:     secret,
 					},
 				}
-				_, err = wal2.Execute(ctx, actions2, nil)
+				_, err = wal2.Execute(ctx, actions2)
 				Expect(err).Should(BeNil())
 			})
 
@@ -157,7 +156,7 @@ var _ = Describe("Wallet", func() {
 				key2, _, err := btctest.NewBtcKey(network, addrType)
 				Expect(err).Should(BeNil())
 				feeEstimator := btc.NewFixFeeEstimator(10)
-				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 
 				By("Initiate an HTLC")
@@ -169,7 +168,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlc,
 					},
 				}
-				_, err = wal1.Execute(ctx, actions1, nil)
+				_, err = wal1.Execute(ctx, actions1)
 				Expect(err).Should(BeNil())
 
 				By("Mine expiry number of blocks")
@@ -186,7 +185,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlc,
 					},
 				}
-				_, err = wal1.Execute(ctx, actions2, nil)
+				_, err = wal1.Execute(ctx, actions2)
 				Expect(err).Should(BeNil())
 			})
 
@@ -198,9 +197,9 @@ var _ = Describe("Wallet", func() {
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
 				feeEstimator := btc.NewFixFeeEstimator(10)
-				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
-				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+				wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 
 				By("Initiate an HTLC")
@@ -212,7 +211,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlc,
 					},
 				}
-				initTx, err := wal1.Execute(ctx, actions1, nil)
+				initTx, err := wal1.Execute(ctx, actions1)
 				Expect(err).Should(BeNil())
 
 				By("Initiate the HTLC with the pre-signed instant refund tx")
@@ -239,7 +238,7 @@ var _ = Describe("Wallet", func() {
 						InstantRefundTx: refundTx,
 					},
 				}
-				_, err = wal2.Execute(ctx, actions2, nil)
+				_, err = wal2.Execute(ctx, actions2)
 				Expect(err).Should(BeNil())
 			})
 		})
@@ -253,9 +252,9 @@ var _ = Describe("Wallet", func() {
 				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 				Expect(err).Should(BeNil())
 				feeEstimator := btc.NewFixFeeEstimator(10)
-				wal1, err := wallet.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
-				wal2, err := wallet.NewWallet(network, addrType, key2, indexer, feeEstimator)
+				wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
 				Expect(err).Should(BeNil())
 
 				By("Initialise some htlcs")
@@ -279,7 +278,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlcs1[i],
 					})
 				}
-				_, err = wal1.Execute(ctx, actions1, nil)
+				_, err = wal1.Execute(ctx, actions1)
 				Expect(err).Should(BeNil())
 
 				By("Mine expiry number of blocks")
@@ -297,7 +296,7 @@ var _ = Describe("Wallet", func() {
 						Htlc:       htlcs2[i],
 					})
 				}
-				_, err = wal2.Execute(ctx, actions2, nil)
+				_, err = wal2.Execute(ctx, actions2)
 				Expect(err).Should(BeNil())
 				Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 
@@ -341,7 +340,7 @@ var _ = Describe("Wallet", func() {
 
 					}
 				}
-				_, err = wal1.Execute(ctx, actions3, nil)
+				_, err = wal1.Execute(ctx, actions3)
 				Expect(err).Should(BeNil())
 			})
 		})
