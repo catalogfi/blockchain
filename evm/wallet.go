@@ -22,39 +22,17 @@ import (
 )
 
 type Options struct {
-	ChainID   *big.Int
+	Chain     blockchain.EvmChain
 	SwapAddrs []common.Address
 	Timeout   time.Duration
-	L2        bool
 }
 
 func NewOptions(chain blockchain.EvmChain, contracts []common.Address, timeout time.Duration) Options {
 	return Options{
-		ChainID:   chain.ChainID(),
+		Chain:     chain,
 		SwapAddrs: contracts,
 		Timeout:   timeout,
-		L2:        chain.L2(),
 	}
-}
-
-func (opts Options) WithChainID(id *big.Int) Options {
-	opts.ChainID = id
-	return opts
-}
-
-func (opts Options) WithSwapAddrs(swapAddrs []common.Address) Options {
-	opts.SwapAddrs = swapAddrs
-	return opts
-}
-
-func (opts Options) WithTimeout(timeout time.Duration) Options {
-	opts.Timeout = timeout
-	return opts
-}
-
-func (opts Options) WithL2(l2 bool) Options {
-	opts.L2 = l2
-	return opts
 }
 
 type TransactFunc func(*bind.TransactOpts) (*types.Transaction, error)
@@ -107,8 +85,8 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 	if err != nil {
 		return nil, err
 	}
-	if options.ChainID.Cmp(chainID) != 0 {
-		return nil, fmt.Errorf("wrong chain ID, expect %v, got %v", options.ChainID, chainID)
+	if options.Chain.ChainID().Cmp(chainID) != 0 {
+		return nil, fmt.Errorf("wrong chain ID, expect %v, got %v", options.Chain.ChainID(), chainID)
 	}
 
 	// Initialise contract bindings.
@@ -135,7 +113,7 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 	if err != nil {
 		return nil, err
 	}
-	transactor, err := bind.NewKeyedTransactorWithChainID(key, options.ChainID)
+	transactor, err := bind.NewKeyedTransactorWithChainID(key, options.Chain.ChainID())
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +158,9 @@ func (wallet *wallet) Initiate(ctx context.Context, htlc Htlc) (*types.Transacti
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	if htlc.ChainID.Cmp(wallet.options.Chain.ChainID()) != 0 {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.Chain.ChainID(), htlc.ChainID)
+	}
 	if err := wallet.allowanceCheck(); err != nil {
 		return nil, err
 	}
@@ -197,8 +178,8 @@ func (wallet *wallet) Redeem(ctx context.Context, htlc Htlc, secret []byte) (*ty
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
-	if htlc.ChainID != wallet.options.ChainID {
-		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	if htlc.ChainID.Cmp(wallet.options.Chain.ChainID()) != 0 {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.Chain.ChainID(), htlc.ChainID)
 	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
@@ -214,8 +195,8 @@ func (wallet *wallet) Refund(ctx context.Context, htlc Htlc) (*types.Transaction
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
-	if htlc.ChainID != wallet.options.ChainID {
-		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	if htlc.ChainID.Cmp(wallet.options.Chain.ChainID()) != 0 {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.Chain.ChainID(), htlc.ChainID)
 	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
@@ -231,8 +212,8 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
-	if htlc.ChainID != wallet.options.ChainID {
-		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.ChainID, htlc.ID)
+	if htlc.ChainID.Cmp(wallet.options.Chain.ChainID()) != 0 {
+		return nil, fmt.Errorf("invalid chain id, expect %v, got %v", wallet.options.Chain.ChainID(), htlc.ChainID)
 	}
 	contract, ok := wallet.htlcs[htlc.Contract]
 	if !ok {
@@ -249,7 +230,7 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 			Domain: apitypes.TypedDataDomain{
 				Name:              domain.Name,
 				Version:           domain.Version,
-				ChainId:           math.NewHexOrDecimal256(wallet.options.ChainID.Int64()),
+				ChainId:           math.NewHexOrDecimal256(wallet.options.Chain.ChainID().Int64()),
 				VerifyingContract: htlc.Contract.String(),
 			},
 			Message: map[string]interface{}{
