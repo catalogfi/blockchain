@@ -10,6 +10,7 @@ import (
 	"github.com/catalogfi/blockchain/evm"
 	"github.com/catalogfi/blockchain/evm/evmtest"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -31,7 +32,7 @@ var _ = Describe("Htlc", func() {
 			Expect(err).Should(BeNil())
 			keys := evmtest.MerryKeys(2)
 			htlcAddr := evmtest.MerryHtlcAddress(chain)
-			walletOpts := evm.NewOptions(chain, htlcAddr, 5*time.Second)
+			walletOpts := evm.NewOptions(chain, []common.Address{htlcAddr}, 5*time.Second)
 			wallet1, err := evm.NewWallet(walletOpts, keys[0], client)
 			Expect(err).Should(BeNil())
 			wallet2, err := evm.NewWallet(walletOpts, keys[1], client)

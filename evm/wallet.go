@@ -22,18 +22,18 @@ import (
 )
 
 type Options struct {
-	ChainID  *big.Int
-	SwapAddr common.Address
-	Timeout  time.Duration
-	L2       bool
+	ChainID   *big.Int
+	SwapAddrs []common.Address
+	Timeout   time.Duration
+	L2        bool
 }
 
-func NewOptions(chain blockchain.EvmChain, contract common.Address, timeout time.Duration) Options {
+func NewOptions(chain blockchain.EvmChain, contracts []common.Address, timeout time.Duration) Options {
 	return Options{
-		ChainID:  chain.ChainID(),
-		SwapAddr: contract,
-		Timeout:  timeout,
-		L2:       chain.L2(),
+		ChainID:   chain.ChainID(),
+		SwapAddrs: contracts,
+		Timeout:   timeout,
+		L2:        chain.L2(),
 	}
 }
 
@@ -42,8 +42,8 @@ func (opts Options) WithChainID(id *big.Int) Options {
 	return opts
 }
 
-func (opts Options) WithSwapAddr(swapAddr common.Address) Options {
-	opts.SwapAddr = swapAddr
+func (opts Options) WithSwapAddrs(swapAddrs []common.Address) Options {
+	opts.SwapAddrs = swapAddrs
 	return opts
 }
 
@@ -70,10 +70,6 @@ type Wallet interface {
 	// Balance returns the ETH balance of the wallet address
 	Balance(ctx context.Context, pending bool) (*big.Int, error)
 
-	// TokenBalance returns the token balance of the wallet address. Token is assumed an ERC-20 token and retrieved from
-	// the HTLC contract.
-	TokenBalance(ctx context.Context, pending bool) (*big.Int, error)
-
 	// Initiate an atomic swap.
 	Initiate(ctx context.Context, htlc Htlc) (*types.Transaction, error)
 
@@ -91,12 +87,13 @@ type wallet struct {
 	options Options
 	key     *ecdsa.PrivateKey
 	client  *ethclient.Client
+	addr    common.Address
+	htlcs   map[common.Address]*gardenhtlc.GardenHTLC
+	tokens  map[common.Address]*ierc20.IERC20
 
 	mu           *sync.Mutex
-	addr         common.Address
-	htlc         *gardenhtlc.GardenHTLC
-	token        *ierc20.IERC20
 	transactOpts *bind.TransactOpts
+	approved     bool
 }
 
 func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client) (Wallet, error) {
@@ -105,20 +102,6 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 	callOpts := &bind.CallOpts{Context: ctx}
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	// Initialise bindings.
-	htlc, err := gardenhtlc.NewGardenHTLC(options.SwapAddr, client)
-	if err != nil {
-		return nil, err
-	}
-	tokenAddr, err := htlc.Token(callOpts)
-	if err != nil {
-		return nil, err
-	}
-	erc20, err := ierc20.NewIERC20(tokenAddr, client)
-	if err != nil {
-		return nil, err
-	}
-
 	// Make sure the chain ID matches our expectation, so we know we are on the right chain.
 	chainID, err := client.ChainID(ctx)
 	if err != nil {
@@ -126,6 +109,25 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 	}
 	if options.ChainID.Cmp(chainID) != 0 {
 		return nil, fmt.Errorf("wrong chain ID, expect %v, got %v", options.ChainID, chainID)
+	}
+
+	// Initialise contract bindings.
+	htlcs := make(map[common.Address]*gardenhtlc.GardenHTLC)
+	tokens := make(map[common.Address]*ierc20.IERC20)
+	for _, swapAddr := range options.SwapAddrs {
+		var err error
+		htlcs[swapAddr], err = gardenhtlc.NewGardenHTLC(swapAddr, client)
+		if err != nil {
+			return nil, err
+		}
+		tokenAddr, err := htlcs[swapAddr].Token(callOpts)
+		if err != nil {
+			return nil, err
+		}
+		tokens[swapAddr], err = ierc20.NewIERC20(tokenAddr, client)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Initialise the transactor
@@ -146,8 +148,8 @@ func NewWallet(options Options, key *ecdsa.PrivateKey, client *ethclient.Client)
 
 		mu:           new(sync.Mutex),
 		addr:         addr,
-		htlc:         htlc,
-		token:        erc20,
+		htlcs:        htlcs,
+		tokens:       tokens,
 		transactOpts: transactor,
 	}
 
@@ -174,20 +176,19 @@ func (wallet *wallet) Balance(ctx context.Context, pending bool) (*big.Int, erro
 	return wallet.client.BalanceAt(ctx, wallet.addr, nil)
 }
 
-func (wallet *wallet) TokenBalance(ctx context.Context, pending bool) (*big.Int, error) {
-	callOpts := &bind.CallOpts{
-		Pending: pending,
-		Context: ctx,
-	}
-	return wallet.token.BalanceOf(callOpts, wallet.addr)
-}
-
 func (wallet *wallet) Initiate(ctx context.Context, htlc Htlc) (*types.Transaction, error) {
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	if err := wallet.allowanceCheck(); err != nil {
+		return nil, err
+	}
+	contract, ok := wallet.htlcs[htlc.Contract]
+	if !ok {
+		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
+	}
 	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
-		return wallet.htlc.Initiate(opts, htlc.Redeemer, htlc.Expiry, htlc.Amount, htlc.SecretHash)
+		return contract.Initiate(opts, htlc.Redeemer, htlc.Expiry, htlc.Amount, htlc.SecretHash)
 	}
 	return wallet.transact(ctx, f)
 }
@@ -196,8 +197,12 @@ func (wallet *wallet) Redeem(ctx context.Context, htlc Htlc, secret []byte) (*ty
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	contract, ok := wallet.htlcs[htlc.Contract]
+	if !ok {
+		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
+	}
 	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
-		return wallet.htlc.Redeem(opts, htlc.ID, secret)
+		return contract.Redeem(opts, htlc.ID, secret)
 	}
 	return wallet.transact(ctx, f)
 }
@@ -206,8 +211,12 @@ func (wallet *wallet) Refund(ctx context.Context, htlc Htlc) (*types.Transaction
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	contract, ok := wallet.htlcs[htlc.Contract]
+	if !ok {
+		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
+	}
 	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
-		return wallet.htlc.Refund(opts, htlc.ID)
+		return contract.Refund(opts, htlc.ID)
 	}
 	return wallet.transact(ctx, f)
 }
@@ -216,9 +225,14 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 	wallet.mu.Lock()
 	defer wallet.mu.Unlock()
 
+	contract, ok := wallet.htlcs[htlc.Contract]
+	if !ok {
+		return nil, fmt.Errorf("unknown contract %v", htlc.Contract.Hex())
+	}
+
 	// Generate signature if redeemerSig is nil
 	if sig == nil {
-		domain, err := wallet.htlc.Eip712Domain(&bind.CallOpts{Context: ctx})
+		domain, err := contract.Eip712Domain(&bind.CallOpts{Context: ctx})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get EIP-712 domain: %w", err)
 		}
@@ -227,7 +241,7 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 				Name:              domain.Name,
 				Version:           domain.Version,
 				ChainId:           math.NewHexOrDecimal256(wallet.options.ChainID.Int64()),
-				VerifyingContract: wallet.options.SwapAddr.String(),
+				VerifyingContract: htlc.Contract.String(),
 			},
 			Message: map[string]interface{}{
 				"orderId": htlc.ID,
@@ -266,50 +280,70 @@ func (wallet *wallet) InstantRefund(ctx context.Context, htlc Htlc, sig []byte) 
 	}
 
 	f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
-		return wallet.htlc.InstantRefund(opts, htlc.ID, sig)
+		return contract.InstantRefund(opts, htlc.ID, sig)
 	}
 	return wallet.transact(ctx, f)
 }
 
+// allowanceCheck checks if the allowance for the swap contract is sufficient. It does a large approval when the
+// allowance is low. The function should be called with the wallet lock held.
 func (wallet *wallet) allowanceCheck() error {
-	ctx, cancel := context.WithTimeout(context.Background(), wallet.options.Timeout*2)
-	defer cancel()
-	callOpts := &bind.CallOpts{Context: ctx}
-
-	// Check we have enough allowance for the swap contract
-	allowance, err := wallet.token.Allowance(callOpts, wallet.addr, wallet.options.SwapAddr)
-	if err != nil {
-		return err
-	}
-	totalSupply, err := wallet.token.TotalSupply(callOpts)
-	if err != nil {
-		return err
+	// Skip the allowance check if we have approved before
+	if wallet.approved {
+		return nil
 	}
 
-	// Do a large approval when the allowance is low, we should only need to do this once.
-	if allowance.Cmp(totalSupply) == -1 {
-		data := make([]byte, 32)
-		for i := 0; i < 32; i++ {
-			data[i] = 0xff
+	for htlcAddr, token := range wallet.tokens {
+		ctx, cancel := context.WithTimeout(context.Background(), wallet.options.Timeout)
+		defer cancel()
+		callOpts := &bind.CallOpts{Context: ctx}
+
+		// Check if we have enough allowance for the swap contract
+		allowance, err := token.Allowance(callOpts, wallet.addr, htlcAddr)
+		if err != nil {
+			return err
 		}
-		max := big.NewInt(0).SetBytes(data)
-		f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
-			return wallet.token.Approve(opts, wallet.options.SwapAddr, max)
-		}
-		tx, err := wallet.transact(ctx, f)
+		totalSupply, err := token.TotalSupply(callOpts)
 		if err != nil {
 			return err
 		}
 
-		// Wait for the tx to be mined and check receipt status
-		receipt, err := bind.WaitMined(ctx, wallet.client, tx)
-		if err != nil {
-			return err
-		}
-		if receipt.Status == 0 {
-			return fmt.Errorf("tx reverted, hash = %v", receipt.TxHash.Hex())
+		// Do a large approval when the allowance is low, we should only need to do this once.
+		if allowance.Cmp(totalSupply) == -1 {
+			// If balance is 0, check later
+			bal, err := wallet.Balance(ctx, true)
+			if err != nil {
+				return err
+			}
+			if bal.Uint64() == 0 {
+				return nil
+			}
+
+			data := make([]byte, 32)
+			for i := 0; i < 32; i++ {
+				data[i] = 0xff
+			}
+			max := big.NewInt(0).SetBytes(data)
+			f := func(opts *bind.TransactOpts) (*types.Transaction, error) {
+				return token.Approve(opts, htlcAddr, max)
+			}
+			tx, err := wallet.transact(ctx, f)
+			if err != nil {
+				return err
+			}
+
+			// Wait for the tx to be mined and check receipt status
+			receipt, err := bind.WaitMined(ctx, wallet.client, tx)
+			if err != nil {
+				return err
+			}
+			if receipt.Status == 0 {
+				return fmt.Errorf("tx reverted, hash = %v", receipt.TxHash.Hex())
+			}
 		}
 	}
+
+	wallet.approved = true
 	return nil
 }
 
