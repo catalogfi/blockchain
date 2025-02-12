@@ -31,12 +31,14 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	privateKey, err := btcec.NewPrivateKey()
 	Expect(err).To(BeNil())
 
-	requiredFeeRate := int64(10)
+	requiredFeeRate := int64(1)
 
 	mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
 
 	var wallet btc.BatcherWallet
+	var wallet2 btc.BatcherWallet
 	var cache btc.Cache
+	var cache2 btc.Cache
 
 	faucet, err := btc.NewSimpleWallet(privateKey, chainParams, indexer, mockFeeEstimator, btc.HighFee)
 	Expect(err).To(BeNil())
@@ -70,6 +72,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	pk2, err := btcec.NewPrivateKey()
 	Expect(err).To(BeNil())
+
+	pk3, err := btcec.NewPrivateKey()
+	Expect(err).To(BeNil())
+
 	address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
 	Expect(err).To(BeNil())
 
@@ -81,8 +87,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(err).To(BeNil())
 
 		cache = btc.NewBatcherCache(db, "", btc.RBF)
+		cache2 = btc.NewBatcherCache(db, "2", btc.RBF)
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
-
+		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, chainParams, cache2, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
@@ -123,6 +130,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		err = wallet.Start(context.Background())
 		Expect(err).To(BeNil())
 
+		err = wallet2.Start(context.Background())
+		Expect(err).To(BeNil())
+
 	})
 
 	AfterAll(func() {
@@ -132,6 +142,58 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		err := wallet.Stop()
 		Expect(err).To(BeNil())
+	})
+
+	It("should be able to send funds in smaller amounts", func() {
+		for i := 0; i < 10; i++ {
+			req := []btc.SendRequest{
+				{
+					Amount: 1000,
+					To:     wallet2.Address(),
+				},
+			}
+
+			id, err := wallet.Send(context.Background(), req, nil, nil)
+			Expect(err).To(BeNil())
+
+			var tx btc.Transaction
+			var ok bool
+
+			for {
+				fmt.Println("waiting for tx", id)
+				tx, ok, err = wallet.Status(context.Background(), id)
+				Expect(err).To(BeNil())
+				if ok {
+					Expect(tx).ShouldNot(BeNil())
+					break
+				}
+				time.Sleep(5 * time.Second)
+			}
+		}
+
+		req := []btc.SendRequest{
+			{
+				Amount: 7000,
+				To:     wallet.Address(),
+			},
+		}
+
+		id, err := wallet2.Send(context.Background(), req, nil, nil)
+		Expect(err).To(BeNil())
+
+		var tx btc.Transaction
+		var ok bool
+
+		for {
+			fmt.Println("waiting for tx", id)
+			tx, ok, err = wallet2.Status(context.Background(), id)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
 	})
 
 	It("should be able to send funds", func() {

@@ -96,7 +96,6 @@ type electrsIndexerClient struct {
 	logger        *zap.Logger
 	url           string
 	retryInterval time.Duration
-	utxoCache     map[string]utxoCache
 }
 
 type utxoCache struct {
@@ -106,12 +105,10 @@ type utxoCache struct {
 
 func NewElectrsIndexerClient(logger *zap.Logger, url string, retryInterval time.Duration) IndexerClient {
 
-	utxoCache := make(map[string]utxoCache)
 	return &electrsIndexerClient{
 		logger:        logger,
 		url:           url,
 		retryInterval: retryInterval,
-		utxoCache:     utxoCache,
 	}
 }
 
@@ -160,12 +157,6 @@ func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address b
 // See https://github.com/Blockstream/esplora/blob/master/API.md
 func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcutil.Address) (UTXOs, error) {
 
-	// Check if the utxos are cached
-	cache, ok := client.utxoCache[address.EncodeAddress()]
-	if ok && time.Since(cache.time) < 10*time.Second {
-		return cache.utxos, nil
-	}
-
 	endpoint, err := url.JoinPath(client.url, "address", address.EncodeAddress(), "utxo")
 	if err != nil {
 		return nil, err
@@ -195,12 +186,6 @@ func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcuti
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-
-	// Cache the utxos
-	client.utxoCache[address.EncodeAddress()] = utxoCache{
-		time:  time.Now(),
-		utxos: utxos,
 	}
 
 	return utxos, nil
@@ -388,10 +373,6 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 	})
 	if err != nil {
 		return err
-	}
-	// clear the utxo cache
-	for k := range client.utxoCache {
-		delete(client.utxoCache, k)
 	}
 	return nil
 }
