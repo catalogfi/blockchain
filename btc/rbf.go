@@ -245,8 +245,8 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 
 	// Ensure the required fee rate is higher than the current fee rate
 	// RBF cannot be performed with reduced or same fee rate
-	if currentFeeRate+2 >= requiredFeeRate {
-		requiredFeeRate = currentFeeRate + 2
+	if currentFeeRate+10 >= requiredFeeRate {
+		requiredFeeRate = currentFeeRate + 10
 	}
 
 	tx, err := w.createRBFTx(
