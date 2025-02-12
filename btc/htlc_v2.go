@@ -246,6 +246,38 @@ func (htlc *HTLC) InstantRefundLeaf() (txscript.TapLeaf, txscript.ControlBlock) 
 	return leaf, ctrBlk
 }
 
+func (htlc *HTLC) Leaf(action HtlcActionType) (txscript.TapLeaf, txscript.ControlBlock) {
+	switch action {
+	case HtlcActionRedeem:
+		return htlc.RedeemLeaf()
+	case HtlcActionRefund:
+		return htlc.RefundLeaf()
+	case HtlcActionInstantRefund:
+		return htlc.InstantRefundLeaf()
+	}
+	panic("invalid action type")
+}
+
+// HtlcActionFromWitness determines the type of HTLC (Hashed Timelock Contract) action based on the provided witness.
+// The witness is a stack of items provided in scripts during transaction validation.
+// It returns the corresponding HtlcActionType and an error if the witness does not match any known HTLC action types.
+func HtlcActionFromWitness(witness wire.TxWitness) (HtlcActionType, error) {
+	switch len(witness) {
+	case 4: // redeem or instant refund
+		ok, _ := IsMultiSigLeaf(witness[2])
+		if ok {
+			return HtlcActionInstantRefund, nil
+		}
+		return HtlcActionRedeem, nil
+	case 3: // refund
+		ok, _ := IsRefundLeaf(witness[1])
+		if ok {
+			return HtlcActionRefund, nil
+		}
+	}
+	return "", fmt.Errorf("witness not associated with any htlc action")
+}
+
 // RedeemLeaf is one of the leaf scripts in the HTLC script which can be spent by revealing the secret
 // by the redeemer.
 //

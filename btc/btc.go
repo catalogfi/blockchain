@@ -59,6 +59,14 @@ type Recipient struct {
 	Amount int64  `json:"amount"`
 }
 
+// NewRecipient constructs a new Recipient object with the given address and amount.
+func NewRecipient(to string, amount int64) Recipient {
+	return Recipient{
+		To:     to,
+		Amount: amount,
+	}
+}
+
 // SingleRecipient is a helper function to initiate a recipient list with only one element.
 func SingleRecipient(to string, amount int64) []Recipient {
 	return []Recipient{

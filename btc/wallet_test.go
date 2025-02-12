@@ -384,7 +384,7 @@ var _ = Describe("Wallet", func() {
 				for i := 0; i < len(actions); i++ {
 					tx, err := wal1.Execute(ctx, []btc.HtlcAction{actions[i]}, opts...)
 					Expect(err).Should(BeNil())
-					time.Sleep(5 * time.Second)
+					time.Sleep(1 * time.Second)
 					opts = []btc.ExecuteOpts{btc.WithRbfTxid(tx.TxHash().String())}
 				}
 			})

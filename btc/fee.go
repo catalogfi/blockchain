@@ -11,6 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -332,4 +333,18 @@ func (f fixFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		Medium: f.fee,
 		High:   f.fee,
 	}, nil
+}
+
+func AddUtxoToFetcher(fetcher *txscript.MultiPrevOutFetcher, utxo UTXO, script []byte) error {
+	hash, err := chainhash.NewHashFromStr(utxo.TxID)
+	if err != nil {
+		return err
+	}
+
+	fetcher.AddPrevOut(wire.OutPoint{
+		Hash:  *hash,
+		Index: utxo.Vout,
+	}, wire.NewTxOut(utxo.Amount, script))
+
+	return nil
 }
