@@ -2,7 +2,10 @@ package btc_test
 
 import (
 	"context"
+	"math/rand"
+	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
@@ -344,5 +347,170 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 			})
 		})
+
+		Context("rbf", func() {
+			FIt("should be able to do rbf with new actions", func(ctx context.Context) {
+				By("Init keys and wallet")
+				addrType := waddrmgr.WitnessPubKey
+				key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+				Expect(err).Should(BeNil())
+				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				Expect(err).Should(BeNil())
+				wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
+				Expect(err).Should(BeNil())
+
+				By("Prepare some init/redeem/refund/instantRefund")
+				number, amount, timelock := 3, int64(1e6), int64(6)
+				inits, err := generateInitHtlcs(number, amount, timelock, key1.PubKey(), key2.PubKey())
+				Expect(err).Should(BeNil())
+				redeems, err := generateRedeemHtlcs(ctx, number, amount, timelock, key2.PubKey(), key1.PubKey(), wal2)
+				Expect(err).Should(BeNil())
+				refunds, err := generateRefundHtlcs(ctx, number, amount, timelock, key1.PubKey(), key2.PubKey(), wal1)
+				Expect(err).Should(BeNil())
+				instantRefunds, err := generateInstantRefundHtlcs(ctx, number, amount, timelock, key2.PubKey(), key1.PubKey(), wal2, key2)
+				Expect(err).Should(BeNil())
+
+				By("Combined all actions and shuffle the order")
+				actions := append(inits, append(redeems, append(refunds, instantRefunds...)...)...)
+				rand.Shuffle(len(actions), func(i, j int) {
+					actions[i], actions[j] = actions[j], actions[i]
+				})
+
+				By("Execute all actions one by one using rbf")
+				opts := []btc.ExecuteOpts{}
+				for i := 0; i < len(actions); i++ {
+					tx, err := wal1.Execute(ctx, []btc.HtlcAction{actions[i]}, opts...)
+					Expect(err).Should(BeNil())
+					time.Sleep(5 * time.Second)
+					opts = []btc.ExecuteOpts{btc.WithRbfTxid(tx.TxHash().String())}
+				}
+			})
+		})
 	})
 })
+
+func generateInitHtlcs(n int, amount, timelock int64, initiatorPub, redeemerPub *btcec.PublicKey) ([]btc.HtlcAction, error) {
+	actions := make([]btc.HtlcAction, n)
+	for i := 0; i < n; i++ {
+		htlc, secret, err := btctest.NewHtlc(initiatorPub, redeemerPub, timelock, amount)
+		if err != nil {
+			return nil, err
+		}
+		actions[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			Secret:     secret,
+			ActionType: btc.HtlcActionInitiate,
+		}
+	}
+	return actions, nil
+}
+
+func generateRedeemHtlcs(ctx context.Context, n int, amount, timelock int64, initiatorPub, redeemerPub *btcec.PublicKey, wallet btc.Wallet) ([]btc.HtlcAction, error) {
+	actions1 := make([]btc.HtlcAction, n)
+	actions2 := make([]btc.HtlcAction, n)
+	for i := 0; i < n; i++ {
+		var err error
+		htlc, secret, err := btctest.NewHtlc(initiatorPub, redeemerPub, timelock, amount)
+		if err != nil {
+			return nil, err
+		}
+		actions1[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			ActionType: btc.HtlcActionInitiate,
+		}
+
+		actions2[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			ActionType: btc.HtlcActionRedeem,
+			Secret:     secret,
+		}
+	}
+
+	_, err := wallet.Execute(ctx, actions1)
+	if err != nil {
+		return nil, err
+	}
+	return actions2, nil
+}
+
+func generateRefundHtlcs(ctx context.Context, n int, amount, timelock int64, initiatorPub, redeemerPub *btcec.PublicKey, wallet btc.Wallet) ([]btc.HtlcAction, error) {
+	actions1 := make([]btc.HtlcAction, n)
+	actions2 := make([]btc.HtlcAction, n)
+	for i := 0; i < n; i++ {
+		var err error
+		htlc, secret, err := btctest.NewHtlc(initiatorPub, redeemerPub, timelock, amount)
+		if err != nil {
+			return nil, err
+		}
+		actions1[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			ActionType: btc.HtlcActionInitiate,
+		}
+
+		actions2[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			ActionType: btc.HtlcActionRefund,
+			Secret:     secret,
+		}
+	}
+
+	_, err := wallet.Execute(ctx, actions1)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := 0; i < int(timelock)-1; i++ {
+		if err := btctest.NewBlock(); err != nil {
+			return nil, err
+		}
+	}
+	if err := btctest.NewBlockWaitMined(indexer); err != nil {
+		return nil, err
+	}
+	return actions2, nil
+}
+
+func generateInstantRefundHtlcs(ctx context.Context, n int, amount, timelock int64, initiatorPub, redeemerPub *btcec.PublicKey, wallet btc.Wallet, key *btcec.PrivateKey) ([]btc.HtlcAction, error) {
+	actions1 := make([]btc.HtlcAction, n)
+	for i := 0; i < n; i++ {
+		var err error
+		htlc, _, err := btctest.NewHtlc(initiatorPub, redeemerPub, timelock, amount)
+		if err != nil {
+			return nil, err
+		}
+		actions1[i] = btc.HtlcAction{
+			Htlc:       htlc,
+			ActionType: btc.HtlcActionInitiate,
+		}
+	}
+
+	_, err := wallet.Execute(ctx, actions1)
+	if err != nil {
+		return nil, err
+	}
+	if err := btctest.NewBlockWaitMined(indexer); err != nil {
+		return nil, err
+	}
+	actions2 := make([]btc.HtlcAction, n)
+	for i := 0; i < n; i++ {
+		utxo, err := actions1[i].Htlc.Utxo(ctx, network, indexer)
+		if err != nil {
+			return nil, err
+		}
+		instantRefunds, err := btc.NewInstantRefundTx(network, key, actions1[i].Htlc, utxo, btc.Recipient{wallet.Address().EncodeAddress(), actions1[i].Htlc.Amount})
+		if err != nil {
+			return nil, err
+		}
+		actions2[i] = btc.HtlcAction{
+			Htlc:            actions1[i].Htlc,
+			ActionType:      btc.HtlcActionInstantRefund,
+			Secret:          actions1[i].Secret,
+			InstantRefundTx: instantRefunds,
+		}
+	}
+
+	return actions2, nil
+}

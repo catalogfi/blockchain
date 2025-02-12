@@ -2,8 +2,10 @@ package btc
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -18,34 +20,18 @@ import (
 type ExecuteOpts func(*executeOpts)
 
 type executeOpts struct {
-	conflictUtxo *UTXO
-	rbfFeeRate   int
-	rbfFees      int
+	rbfTxid string
 }
 
 func defaultExecuteOpts() *executeOpts {
 	return &executeOpts{
-		conflictUtxo: nil,
-		rbfFeeRate:   0,
-		rbfFees:      0,
+		rbfTxid: "",
 	}
 }
 
-func WithConflictUtxo(utxo UTXO) ExecuteOpts {
+func WithRbfTxid(txid string) ExecuteOpts {
 	return func(o *executeOpts) {
-		o.conflictUtxo = &utxo
-	}
-}
-
-func WithRbfFeeRate(feeRate int) ExecuteOpts {
-	return func(o *executeOpts) {
-		o.rbfFeeRate = feeRate
-	}
-}
-
-func WithRbfFees(fess int) ExecuteOpts {
-	return func(o *executeOpts) {
-		o.rbfFees = fess
+		o.rbfTxid = txid
 	}
 }
 
@@ -355,6 +341,15 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		exeOpt(opts)
 	}
 
+	var replacedTx Transaction
+	var err error
+	if opts.rbfTxid != "" {
+		replacedTx, err = wal.indexer.GetTx(ctx, opts.rbfTxid)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Fetch wallet utxos without the conflict utxo and unconfirmed utxo
 	rawUtxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
 	if err != nil {
@@ -362,15 +357,34 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 	utxos := make([]UTXO, 0, len(rawUtxos))
 	for _, utxo := range rawUtxos {
-		if opts.conflictUtxo != nil && utxo.String() == opts.conflictUtxo.String() {
-			continue
-		}
 		if utxo.Status != nil && !utxo.Status.Confirmed {
 			continue
 		}
 		utxos = append(utxos, utxo)
 	}
+	var conflictUtxo *UTXO
+	if replacedTx.TxID != "" {
+		for _, vin := range replacedTx.VINs {
+			if vin.Prevout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
+				utxo := UTXO{
+					TxID:   vin.TxID,
+					Vout:   uint32(vin.Vout),
+					Amount: int64(vin.Prevout.Value),
+				}
+
+				// Mark the first utxo from the wallet as the conflict utxo
+				if conflictUtxo != nil {
+					conflictUtxo = &utxo
+					continue
+				}
+				utxos = append(utxos, utxo)
+			}
+		}
+	}
 	sizer := NewSizeEstimatorOfAddrType(utxos, wal.addrType)
+	if conflictUtxo != nil {
+		sizer = NewSizeEstimatorOfAddrType(append(utxos, *conflictUtxo), wal.addrType)
+	}
 
 	// Fetcher
 	pkScript, err := PkScript(wal.addrType, wal.key.PubKey())
@@ -388,12 +402,78 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	if err != nil {
 		return nil, err
 	}
+	if conflictUtxo != nil {
+		fetcher, err = InitFetcher(append(utxos, *conflictUtxo), pkScript)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Append the conflict utxo to make sure the replacement txs will be conflicted with each other
 	recipients := []Recipient{}
 	inputs := []UTXO{}
-	if opts.conflictUtxo != nil {
-		inputs = append(inputs, *opts.conflictUtxo)
+	// if opts.conflictUtxo != nil {
+	// 	inputs = append(inputs, *opts.conflictUtxo)
+	// }
+
+	// Include everything from the previous tx
+	prevWitnesses := map[string]wire.TxWitness{}
+	prevSequences := map[string]int{}
+	if replacedTx.TxID != "" {
+		for _, vin := range replacedTx.VINs {
+			if vin.Prevout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
+				continue
+			}
+
+			utxo := UTXO{
+				TxID:   vin.TxID,
+				Vout:   uint32(vin.Vout),
+				Amount: int64(vin.Prevout.Value),
+			}
+			inputs = append(inputs, utxo)
+			witness, err := decodeWitness(*vin.Witness)
+			if err != nil {
+				return nil, err
+			}
+			prevWitnesses[utxo.String()] = witness
+			prevSequences[utxo.String()] = vin.Sequence
+			hash, err := chainhash.NewHashFromStr(utxo.TxID)
+			if err != nil {
+				return nil, err
+			}
+			script, err := hex.DecodeString(vin.Prevout.ScriptPubKey)
+			if err != nil {
+				return nil, err
+			}
+			fetcher.AddPrevOut(wire.OutPoint{
+				Hash:  *hash,
+				Index: utxo.Vout,
+			}, wire.NewTxOut(utxo.Amount, script))
+
+			switch len(witness) {
+			case 4:
+				ok, _ := IsMultiSigLeaf(witness[2])
+				if ok {
+					sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund)
+				} else {
+					sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(witness[1])))
+				}
+			case 3:
+				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRefund, SegwitSizeHtlcRefund)
+			default:
+				return nil, errors.New("invalid witness length")
+			}
+		}
+
+		for _, vout := range replacedTx.VOUTs {
+			if vout.ScriptPubKeyAddress == wal.Address().EncodeAddress() {
+				continue
+			}
+			recipients = append(recipients, Recipient{
+				To:     vout.ScriptPubKeyAddress,
+				Amount: int64(vout.Value),
+			})
+		}
 	}
 
 	// Parse the actions
@@ -413,6 +493,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := prevWitnesses[utxo.String()]; ok {
+				continue
 			}
 			inputs = append(inputs, utxo)
 			inputActions[utxo.String()] = action
@@ -440,6 +523,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			if err != nil {
 				return nil, err
 			}
+			if _, ok := prevWitnesses[utxo.String()]; ok {
+				continue
+			}
 			inputs = append([]UTXO{utxo}, inputs...)
 			recipients = append([]Recipient{recipient}, recipients...)
 			inputActions[utxo.String()] = action
@@ -462,8 +548,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 	feeRate := feeRates.High
-	if feeRate < opts.rbfFeeRate+1 {
-		feeRate = opts.rbfFeeRate + 1
+	if replacedTx.TxID != "" {
+		prevFeeRate := float64(replacedTx.Fee*4) / float64(replacedTx.Weight)
+		if float64(feeRate) <= prevFeeRate {
+			feeRate = int(math.Ceil(prevFeeRate + 1))
+		}
 	}
 
 	// Build the tx
@@ -472,17 +561,67 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 
+	// Check if we have meet the fee requirement for rbf
+	if replacedTx.TxID != "" {
+		for {
+			vsize, err := sizer.EstimateTxVirtualSize(tx)
+			if err != nil {
+				return nil, err
+			}
+			if TotalFee(tx, fetcher) >= int(replacedTx.Fee)+vsize {
+				break
+			}
+			feeRate++
+
+			// Build tx again with new fee rate
+			tx, err = BuildTransaction(wal.network, feeRate, inputs, utxos, sizer, recipients, wal.Address())
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Set sequence number for refund inputs
 	for i := range tx.TxIn {
 		action, ok := inputActions[tx.TxIn[i].PreviousOutPoint.String()]
 		if ok && action.ActionType == HtlcActionRefund {
 			tx.TxIn[i].Sequence = uint32(action.Htlc.Timelock)
+
+		}
+		if sequence, ok := prevSequences[tx.TxIn[i].PreviousOutPoint.String()]; ok {
+			tx.TxIn[i].Sequence = uint32(sequence)
 		}
 	}
 
 	// Sign the tx
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 	for i, input := range tx.TxIn {
+		outpoint := fetcher.FetchPrevOutput(input.PreviousOutPoint)
+		witness, ok := prevWitnesses[input.PreviousOutPoint.String()]
+		if ok {
+			switch len(witness) {
+			case 4: // redeem or instant refund
+				leaf := txscript.NewTapLeaf(txscript.BaseLeafVersion, witness[2])
+				sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashAll, wal.key)
+				if err != nil {
+					return nil, err
+				}
+				witness[0] = sig
+			case 3: // refund
+				leaf := txscript.NewTapLeaf(txscript.BaseLeafVersion, witness[1])
+				sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashAll, wal.key)
+				if err != nil {
+					return nil, err
+				}
+				witness[0] = sig
+			default:
+				return nil, fmt.Errorf("unknown type of utxo %v", input.PreviousOutPoint.String())
+			}
+
+			tx.TxIn[i].Witness = witness
+			continue
+		}
+
 		action, ok := inputActions[tx.TxIn[i].PreviousOutPoint.String()]
 		if !ok {
 			if err := SignUtxos(wal.addrType, tx, i, wal.key, fetcher, sigHashes); err != nil {
@@ -491,7 +630,6 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			continue
 		}
 
-		outpoint := fetcher.FetchPrevOutput(input.PreviousOutPoint)
 		switch action.ActionType {
 		case HtlcActionRedeem:
 			leaf, ctrBlk := action.Htlc.RedeemLeaf()
@@ -537,4 +675,16 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 	return tx, nil
+}
+
+func decodeWitness(witnessStr []string) (wire.TxWitness, error) {
+	witness := make(wire.TxWitness, len(witnessStr))
+	for i := range witness {
+		decoded, err := hex.DecodeString(witnessStr[i])
+		if err != nil {
+			return nil, err
+		}
+		witness[i] = decoded
+	}
+	return witness, nil
 }
