@@ -66,10 +66,10 @@ var _ = BeforeSuite(func() {
 	By("You may want to disable some assertion when forcing running a specific test.")
 
 	var ok bool
-	// btcUsername, ok = os.LookupEnv("BTC_REGNET_USERNAME")
-	// Expect(ok).Should(BeTrue())
-	// btcPassword, ok = os.LookupEnv("BTC_REGNET_PASSWORD")
-	// Expect(ok).Should(BeTrue())
+	btcUsername, ok = os.LookupEnv("BTC_REGNET_USERNAME")
+	Expect(ok).Should(BeTrue())
+	btcPassword, ok = os.LookupEnv("BTC_REGNET_PASSWORD")
+	Expect(ok).Should(BeTrue())
 	indexerHost, ok = os.LookupEnv("BTC_REGNET_INDEXER")
 	Expect(ok).Should(BeTrue())
 

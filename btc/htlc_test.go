@@ -4,15 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"fmt"
-	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/localnet"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -478,93 +475,6 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
 
-	It("should be able to init and refund HTLC1", func(ctx context.Context) {
-		var wallet btc.BatcherWallet
-		var cache btc.Cache
-		db, err := leveldb.OpenFile("test", nil)
-		Expect(err).To(BeNil())
-
-		cache = btc.NewBatcherCache(db, "asdhjfjkashdfk", btc.RBF)
-
-		requiredFeeRate := int64(1)
-
-		mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
-
-		pk3, err := btcec.NewPrivateKey()
-		Expect(err).To(BeNil())
-		bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
-		wallet, err = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, &chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
-		Expect(err).To(BeNil())
-
-		err = wallet.Start(context.Background())
-		Expect(err).To(BeNil())
-
-		txid, err := aliceSimpleWallet.Send(context.Background(), []btc.SendRequest{
-			{
-
-				To:     wallet.Address(),
-				Amount: 40000000,
-			},
-		}, nil, nil)
-		Expect(err).To(BeNil())
-
-		var tx btc.Transaction
-		var ok bool
-
-		for {
-			fmt.Println("waiting for tx", txid)
-			tx, ok, err = aliceSimpleWallet.Status(context.Background(), txid)
-			Expect(err).To(BeNil())
-			if ok {
-				Expect(tx).ShouldNot(BeNil())
-				break
-			}
-			time.Sleep(5 * time.Second)
-		}
-
-		aliceHTLC, _, _ := generateHTLC(alicePrivKey, bobPrivKey)
-
-		By("Initiate Alice HTLC")
-		aliceHTLCWallet, err := btc.NewHTLCWallet(wallet, indexer, &chainParams)
-		Expect(err).To(BeNil())
-		txid, err = aliceHTLCWallet.Initiate(ctx, aliceHTLC, 300000)
-		Expect(err).To(BeNil())
-		Expect(txid).NotTo(BeEmpty())
-
-		for {
-			fmt.Println("waiting for tx", txid)
-			tx, ok, err = wallet.Status(context.Background(), txid)
-			Expect(err).To(BeNil())
-			if ok {
-				Expect(tx).ShouldNot(BeNil())
-				break
-			}
-			time.Sleep(5 * time.Second)
-		}
-
-		By("Mine expiry no of blocks")
-		err = localnet.MineBitcoinBlocks(int(1000000), indexer)
-		Expect(err).To(BeNil())
-
-		By("mining completed")
-
-		By("Refund Alice HTLC")
-		txid, err = aliceHTLCWallet.Refund(ctx, aliceHTLC, nil)
-		Expect(err).To(BeNil())
-		Expect(txid).NotTo(BeEmpty())
-
-		for {
-			fmt.Println("waiting for tx", txid)
-			tx, ok, err = wallet.Status(context.Background(), txid)
-			Expect(err).To(BeNil())
-			if ok {
-				Expect(tx).ShouldNot(BeNil())
-				break
-			}
-			time.Sleep(5 * time.Second)
-		}
-
-	})
 })
 
 // ------------------------------Helper functions--------------------------------
