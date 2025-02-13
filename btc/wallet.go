@@ -372,7 +372,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 
 				// Mark the first utxo from the previous tx as the conflict utxo. This conflict utxo will always present
 				// in the inputs to make sure it will be conflicted with all replaced txs.
-				if conflictUtxo != nil {
+				if conflictUtxo == nil {
 					conflictUtxo = &utxo
 					continue
 				}
@@ -408,6 +408,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	prevWitnesses := map[string]wire.TxWitness{}
 	prevSequences := map[string]int{}
 	if replacedTx.TxID != "" {
+
+		// Add the conflict
+		if conflictUtxo != nil {
+			inputs = append(inputs, *conflictUtxo)
+		}
 
 		// Inputs
 		for _, vin := range replacedTx.VINs {

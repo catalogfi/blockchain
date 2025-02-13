@@ -10,6 +10,7 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/fatih/color"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -349,7 +350,7 @@ var _ = Describe("Wallet", func() {
 		})
 
 		Context("rbf", func() {
-			FIt("should be able to do rbf with new actions", func(ctx context.Context) {
+			It("should be able to do rbf with new actions", func(ctx context.Context) {
 				By("Init keys and wallet")
 				addrType := waddrmgr.WitnessPubKey
 				key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
@@ -387,6 +388,57 @@ var _ = Describe("Wallet", func() {
 					time.Sleep(1 * time.Second)
 					opts = []btc.ExecuteOpts{btc.WithRbfTxid(tx.TxHash().String())}
 				}
+			})
+
+			It("should make sure the rbf tx is conflicted with all previous txs", func(ctx context.Context) {
+				By("Init keys and wallet")
+				addrType := waddrmgr.WitnessPubKey
+				key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+				Expect(err).Should(BeNil())
+				key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+				Expect(err).Should(BeNil())
+				feeEstimator := btc.NewFixFeeEstimator(10)
+				wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
+				Expect(err).Should(BeNil())
+				wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
+				Expect(err).Should(BeNil())
+
+				By("Construct two inits and one redeem")
+				init1, err := generateInitHtlcs(1, 1e6, 6, key1.PubKey(), key2.PubKey())
+				Expect(err).Should(BeNil())
+				init2, err := generateInitHtlcs(1, 1e7, 6, key1.PubKey(), key2.PubKey())
+				Expect(err).Should(BeNil())
+				redeem, err := generateRedeemHtlcs(ctx, 1, 1e7, 6, key2.PubKey(), key1.PubKey(), wal2)
+				Expect(err).Should(BeNil())
+
+				By("Initiate one htlc")
+				tx1, err := wal1.Execute(ctx, init1)
+				Expect(err).Should(BeNil())
+				color.Green("tx1: %s", tx1.TxHash().String())
+
+				By("Redeem one htlc with higher amount")
+				tx2, err := wal1.Execute(ctx, redeem, btc.WithRbfTxid(tx1.TxHash().String()))
+				Expect(err).Should(BeNil())
+				color.Green("tx2: %s", tx2.TxHash().String())
+
+				By("Initiate another htlc")
+				tx3, err := wal1.Execute(ctx, init2, btc.WithRbfTxid(tx2.TxHash().String()))
+				Expect(err).Should(BeNil())
+				color.Green("tx3: %s", tx3.TxHash().String())
+
+				By("tx1 and tx2 should be rejected from the mempool and cannot be submitted again")
+				Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(tx3.TxHash().String()))).Should(Succeed())
+				time.Sleep(5 * time.Second)
+				canceledCtx, cancel := context.WithCancel(ctx)
+				cancel()
+				_, err = indexer.GetTx(canceledCtx, tx1.TxHash().String())
+				Expect(err).ToNot(BeNil())
+				_, err = indexer.GetTx(canceledCtx, tx2.TxHash().String())
+				Expect(err).ToNot(BeNil())
+				_, err = indexer.GetTx(canceledCtx, tx3.TxHash().String())
+				Expect(err).To(BeNil())
+				Expect(indexer.SubmitTx(canceledCtx, tx1)).ShouldNot(Succeed())
+				Expect(indexer.SubmitTx(canceledCtx, tx2)).ShouldNot(Succeed())
 			})
 		})
 	})
@@ -433,7 +485,7 @@ func generateRedeemHtlcs(ctx context.Context, n int, amount, timelock int64, ini
 	if err != nil {
 		return nil, err
 	}
-	return actions2, nil
+	return actions2, btctest.NewBlockWaitMined(indexer)
 }
 
 func generateRefundHtlcs(ctx context.Context, n int, amount, timelock int64, initiatorPub, redeemerPub *btcec.PublicKey, wallet btc.Wallet) ([]btc.HtlcAction, error) {
