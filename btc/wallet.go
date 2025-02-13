@@ -356,6 +356,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	// Add wallet utxos which are used in the previous tx
 	var replacedTx Transaction
 	var conflictUtxo *UTXO
+	inputsMap, outputsMaps := map[string]bool{}, map[string]bool{} // make sure no double executions
 	if opts.rbfTxid != "" {
 		replacedTx, err = wal.indexer.GetTx(ctx, opts.rbfTxid)
 		if err != nil {
@@ -374,6 +375,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 				// in the inputs to make sure it will be conflicted with all replaced txs.
 				if conflictUtxo == nil {
 					conflictUtxo = &utxo
+					inputsMap[vin.Prevout.ScriptPubKeyAddress] = true
 					continue
 				}
 				utxos = append(utxos, utxo)
@@ -408,12 +410,6 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	prevWitnesses := map[string]wire.TxWitness{}
 	prevSequences := map[string]int{}
 	if replacedTx.TxID != "" {
-
-		// Add the conflict
-		if conflictUtxo != nil {
-			inputs = append(inputs, *conflictUtxo)
-		}
-
 		// Inputs
 		for _, vin := range replacedTx.VINs {
 			if vin.Prevout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
@@ -427,6 +423,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 				Amount: int64(vin.Prevout.Value),
 			}
 			inputs = append(inputs, utxo)
+			inputsMap[vin.Prevout.ScriptPubKeyAddress] = true
 			witness, err := decodeWitness(*vin.Witness)
 			if err != nil {
 				return nil, err
@@ -467,28 +464,40 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 				To:     vout.ScriptPubKeyAddress,
 				Amount: int64(vout.Value),
 			})
+			outputsMaps[vout.ScriptPubKeyAddress] = true
+		}
+
+		// Add the conflict
+		if conflictUtxo != nil {
+			inputs = append(inputs, *conflictUtxo)
+			inputsMap[conflictUtxo.String()] = true
 		}
 	}
 
 	// Parse the actions
 	inputActions := map[string]HtlcAction{}
 	for _, action := range actions {
+		addr, err := action.Htlc.Address(wal.network)
+		if err != nil {
+			return nil, err
+		}
 		switch action.ActionType {
 		case HtlcActionInitiate:
-			addr, err := action.Htlc.Address(wal.network)
-			if err != nil {
-				return nil, err
+			if ok := outputsMaps[addr.String()]; ok {
+				continue
 			}
 			recipients = append(recipients, NewRecipient(addr.String(), action.Htlc.Amount))
+			outputsMaps[addr.String()] = true
 		case HtlcActionRedeem, HtlcActionRefund:
+			if ok := inputsMap[addr.EncodeAddress()]; ok {
+				continue
+			}
 			utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
 			if err != nil {
 				return nil, err
 			}
-			if _, ok := prevWitnesses[utxo.String()]; ok {
-				continue
-			}
 			inputs = append(inputs, utxo)
+			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
 			if action.ActionType == HtlcActionRedeem {
 				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Secret)))
@@ -509,11 +518,12 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			if err != nil {
 				return nil, err
 			}
-			if _, ok := prevWitnesses[utxo.String()]; ok {
+			if ok := inputsMap[addr.EncodeAddress()]; ok {
 				continue
 			}
 			inputs = append([]UTXO{utxo}, inputs...)
 			recipients = append([]Recipient{recipient}, recipients...)
+			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
 			sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund)
 
