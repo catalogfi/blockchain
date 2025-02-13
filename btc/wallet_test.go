@@ -55,9 +55,10 @@ var _ = Describe("Wallets", Ordered, func() {
 			mockFeeEstimator := NewMockFeeEstimator(10)
 			db, err := leveldb.OpenFile(tempDBDir, nil)
 			Expect(err).To(BeNil())
+			bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
 			if mode == BATCHER_CPFP {
 				cache := btc.NewBatcherCache(db, "", btc.CPFP)
-				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.CPFP))
+				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.CPFP))
 			} else if mode == BATCHER_GUARDIAN {
 				cache := btc.NewBatcherCache(db, "send", btc.RBF)
 				spendCache := btc.NewBatcherCache(db, "spend", btc.RBF)
@@ -65,7 +66,7 @@ var _ = Describe("Wallets", Ordered, func() {
 				Expect(err).To(BeNil())
 			} else {
 				cache := btc.NewBatcherCache(db, "", btc.RBF)
-				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.RBF))
+				wallet, err = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, &chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(1*time.Second), btc.WithStrategy(btc.RBF))
 			}
 			Expect(err).To(BeNil())
 		}
