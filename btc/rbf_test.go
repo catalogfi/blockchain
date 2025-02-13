@@ -57,6 +57,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	checkSigScript, checkSigScriptAddr, checkSigScriptCb, err := sigCheckTapScript(*chainParams, schnorr.SerializePubKey(privateKey.PubKey()))
 	Expect(err).To(BeNil())
 
+	p2wshSigCheckScript2, p2wshSigCheckScriptAddr2, err := sigCheckScript(*chainParams, privateKey)
+	Expect(err).To(BeNil())
+
 	randAddr, err := randomP2wpkhAddress(*chainParams)
 	Expect(err).To(BeNil())
 

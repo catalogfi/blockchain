@@ -126,7 +126,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(txid).NotTo(BeEmpty())
 
 		By("Mine expiry no of blocks")
-		err = localnet.MineBitcoinBlocks(int(50), indexer)
+		err = localnet.MineBitcoinBlocks(int(aliceHTLC.Timelock), indexer)
 		Expect(err).To(BeNil())
 
 		By("Refund Alice HTLC")
