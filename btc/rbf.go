@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -403,20 +404,15 @@ func (w *batcherWallet) createRBFTx(
 
 	var spendUTXOs UTXOs
 	var spendUTXOsMap map[string]UTXOs
+	var totalSpendsToMeValue int64
 
 	// Fetch UTXOs for spend requests
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		spendUTXOs, spendUTXOsMap, _, err = getUTXOsFromSpendRequest(spendRequests)
+		spendUTXOs, spendUTXOsMap, totalSpendsToMeValue, _, err = getUTXOsFromSpendRequest(spendRequests, w.Address())
 		return err
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	totalSpendsToMeUtxos := spendUTXOsMap[w.Address().EncodeAddress()]
-	totalSpendsToMeValue := int64(0)
-	for _, utxo := range totalSpendsToMeUtxos {
-		totalSpendsToMeValue += utxo.Amount
 	}
 
 	totalExistingValue := int64(0)
@@ -735,7 +731,7 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 		txIn := wire.NewTxIn(wire.NewOutPoint(txid, vout), nil, nil)
 		tx.AddTxIn(txIn)
 
-		sequence, ok := sequencesMap[utxo.TxID]
+		sequence, ok := sequencesMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))]
 		if ok {
 			tx.TxIn[len(tx.TxIn)-1].Sequence = sequence
 		}
@@ -805,16 +801,17 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 // getRbfSequenceMap updates the sequence map with rbf sequences for cover UTXOs
 func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[string]uint32 {
 	for _, utxo := range coverUtxos {
-		sequencesMap[utxo.TxID] = wire.MaxTxInSequenceNum - 2
+		sequencesMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))] = wire.MaxTxInSequenceNum - 2
 	}
 	return sequencesMap
 }
 
 // getUTXOsFromSpendRequest returns UTXOs from spend requests and the total value of the UTXOs
-func getUTXOsFromSpendRequest(spendReq []SpendRequest) (UTXOs, utxoMap, int64, error) {
+func getUTXOsFromSpendRequest(spendReq []SpendRequest, selfAddress btcutil.Address) (UTXOs, utxoMap, int64, int64, error) {
 	utxos := UTXOs{}
 	totalValue := int64(0)
 	utxoMap := make(utxoMap)
+	spendsToMeValue := int64(0)
 
 	for _, req := range spendReq {
 		utxos = append(utxos, req.Utxos...)
@@ -822,12 +819,16 @@ func getUTXOsFromSpendRequest(spendReq []SpendRequest) (UTXOs, utxoMap, int64, e
 			totalValue += utxo.Amount
 		}
 		utxoMap[req.ScriptAddress.EncodeAddress()] = req.Utxos
+
+		if req.Recipient == nil || (req.Recipient != nil && req.Recipient.EncodeAddress() == selfAddress.EncodeAddress()) {
+			spendsToMeValue += totalValue
+		}
 	}
 
 	// If there are any spend requests, check if the scripts have funds to spend
 	if totalValue == 0 && len(spendReq) > 0 {
-		return nil, nil, 0, ErrNoFundsToSpend
+		return nil, nil, 0, 0, ErrNoFundsToSpend
 	}
 
-	return utxos, utxoMap, totalValue, nil
+	return utxos, utxoMap, spendsToMeValue, totalValue, nil
 }

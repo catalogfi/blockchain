@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -555,7 +556,7 @@ func generateSequenceMap(utxosMap utxoMap, spendRequest []SpendRequest) map[stri
 		}
 		for _, utxo := range utxos {
 			if req.Sequence != 0 {
-				sequencesMap[utxo.TxID] = req.Sequence
+				sequencesMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))] = req.Sequence
 			}
 		}
 	}
@@ -602,7 +603,7 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, red
 		txIn := wire.NewTxIn(wire.NewOutPoint(txid, vout), nil, nil)
 		tx.AddTxIn(txIn)
 
-		sequence, ok := sequencesMap[utxo.TxID]
+		sequence, ok := sequencesMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))]
 		if ok {
 			tx.TxIn[len(tx.TxIn)-1].Sequence = sequence
 		}
