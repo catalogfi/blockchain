@@ -474,6 +474,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[1].Value).To(Equal(int(initiateAmount) - int(tx.Fee)/2))
 		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
+
 })
 
 // ------------------------------Helper functions--------------------------------

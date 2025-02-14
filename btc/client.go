@@ -1,9 +1,14 @@
 package btc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"net/http"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
@@ -338,4 +343,115 @@ func (client *client) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkIn
 	case result := <-results:
 		return result, nil
 	}
+}
+
+type RPCRequest struct {
+	Jsonrpc string        `json:"jsonrpc"`
+	ID      string        `json:"id"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+type Fees struct {
+	Base       float64 `json:"base"`
+	Modified   float64 `json:"modified"`
+	Ancestor   float64 `json:"ancestor"`
+	Descendant float64 `json:"descendant"`
+}
+
+// Transaction represents a single transaction entry
+type DescendantTransaction struct {
+	Vsize             int      `json:"vsize"`
+	Weight            int      `json:"weight"`
+	Time              int64    `json:"time"`
+	Height            int      `json:"height"`
+	DescendantCount   int      `json:"descendantcount"`
+	DescendantSize    int      `json:"descendantsize"`
+	AncestorCount     int      `json:"ancestorcount"`
+	AncestorSize      int      `json:"ancestorsize"`
+	WtxID             string   `json:"wtxid"`
+	Fees              Fees     `json:"fees"`
+	Depends           []string `json:"depends"`
+	SpentBy           []string `json:"spentby"`
+	BIP125Replaceable bool     `json:"bip125-replaceable"`
+	Unbroadcast       bool     `json:"unbroadcast"`
+}
+
+type BitcoinRPCClient struct {
+	RpcUser string
+	RpcPass string
+	RpcURL  string
+}
+
+func NewBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinRPCClient {
+	return BitcoinRPCClient{
+		RpcUser: rpcUser,
+		RpcPass: rpcPass,
+		RpcURL:  rpcURL,
+	}
+}
+
+func (b *BitcoinRPCClient) GetDescendantsFee(ctx context.Context, txId string) (int64, error) {
+	verbose := true
+	// Create the JSON-RPC request
+	requestBody := RPCRequest{
+		Jsonrpc: "1.0",
+		ID:      "curltext",
+		Method:  "getmempooldescendants",
+		Params:  []interface{}{txId, verbose},
+	}
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return 0, fmt.Errorf("Error marshalling JSON: %w", err)
+	}
+
+	// Create a new HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", b.RpcURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("Error creating request: %w", err)
+	}
+
+	// Add headers
+	req.Header.Set("Content-Type", "text/plain")
+	req.SetBasicAuth(b.RpcUser, b.RpcPass)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("Error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("Error reading response: %w", err)
+	}
+
+	var apiResponse struct {
+		Result map[string]DescendantTransaction `json:"result"`
+		Error  interface{}                      `json:"error"`
+		ID     string                           `json:"id"`
+	}
+
+	if err := json.Unmarshal(body, &apiResponse); err != nil {
+		return 0, fmt.Errorf("Error unmarshalling JSON: %w", err)
+	}
+
+	if len(apiResponse.Result) == 0 {
+		return 0, nil
+	}
+
+	transactions := make([]DescendantTransaction, 0, len(apiResponse.Result))
+	for _, tx := range apiResponse.Result {
+		transactions = append(transactions, tx)
+	}
+
+	var sum float64
+	for _, tx := range transactions {
+		sum += tx.Fees.Base
+	}
+
+	return int64(math.Round(sum * 100000000)), nil
 }

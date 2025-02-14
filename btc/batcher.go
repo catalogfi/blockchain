@@ -155,6 +155,7 @@ type batcherWallet struct {
 	sw           Wallet
 	opts         BatcherOptions
 	indexer      IndexerClient
+	rpc          BitcoinRPCClient
 	feeEstimator FeeEstimator
 	cache        Cache
 }
@@ -167,7 +168,7 @@ type Batch struct {
 	Strategy    Strategy
 }
 
-func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
+func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, rpc *BitcoinRPCClient, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
 	wallet := &batcherWallet{
 		indexer:      indexer,
 		privateKey:   privateKey,
@@ -175,6 +176,7 @@ func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, f
 		logger:       logger,
 		feeEstimator: feeEstimator,
 		chainParams:  chainParams,
+		rpc:          *rpc,
 		opts:         defaultBatcherOptions(),
 	}
 	for _, opt := range opts {
