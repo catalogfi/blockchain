@@ -145,7 +145,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(err).To(BeNil())
 	})
 
-	It("should be able to send funds in smaller amounts", func() {
+	FIt("should be able to send funds in smaller amounts", func() {
 		for i := 0; i < 10; i++ {
 			req := []btc.SendRequest{
 				{

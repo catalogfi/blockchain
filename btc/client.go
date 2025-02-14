@@ -391,7 +391,7 @@ func NewBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinR
 	}
 }
 
-func (b *BitcoinRPCClient) GetDescendants(ctx context.Context, txId string) (int64, error) {
+func (b *BitcoinRPCClient) GetDescendantsFee(ctx context.Context, txId string) (int64, error) {
 	verbose := true
 	// Create the JSON-RPC request
 	requestBody := RPCRequest{
