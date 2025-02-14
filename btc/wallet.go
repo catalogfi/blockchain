@@ -545,7 +545,8 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 	feeRate := feeRates.High
 	if replacedTx.TxID != "" {
-		prevFeeRate := float64(replacedTx.Fee*4) / float64(replacedTx.Weight)
+		// feeRate = fee / vsize
+		prevFeeRate := float64(replacedTx.Fee) / math.Ceil(float64(replacedTx.Weight)/4)
 		if float64(feeRate) <= prevFeeRate {
 			feeRate = int(math.Ceil(prevFeeRate + 1))
 		}
