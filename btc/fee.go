@@ -46,14 +46,6 @@ var (
 	SegwitSizeP2TR = txsizes.RedeemP2TRInputWitnessWeight
 )
 
-// TxVirtualSize returns the virtual size of a transaction.
-func TxVirtualSize(tx *wire.MsgTx) int {
-	size := tx.SerializeSize()
-	baseSize := tx.SerializeSizeStripped()
-	swSize := size - baseSize
-	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
-}
-
 // TotalFee returns the total amount fees used by the given tx.
 func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int {
 	fees := int64(0)
@@ -167,6 +159,30 @@ func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, erro
 	}
 
 	return totalBase + (totalSegwit+3)/blockchain.WitnessScaleFactor, nil
+}
+
+func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
+	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
+	for _, input := range tx.TxIn {
+		key := input.PreviousOutPoint.String()
+		base, ok := estimator.baseSizeMap[key]
+		if !ok {
+			return 0, NewUnknownUtxoError(key)
+		}
+		totalBase += base
+		segwit, ok := estimator.segwitSizeMap[key]
+		if !ok {
+			return 0, NewUnknownUtxoError(key)
+		}
+		totalSegwit += segwit
+	}
+
+	// Additional 2 weight units for segwit marker + flag if tx has any witness input
+	if totalSegwit > 0 {
+		totalSegwit += 2
+	}
+
+	return totalBase*4 + totalSegwit, nil
 }
 
 type FeeLevel string

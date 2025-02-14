@@ -3,13 +3,14 @@ package btc
 import (
 	"bytes"
 	"fmt"
+	"log"
+	"math"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -227,17 +228,137 @@ func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTX
 
 // BuildRbfTransaction is similar to `BuildTransaction`, the only difference is it updates the sequence of all the tx
 // inputs to `mempool.MaxRBFSequence`, so the tx is RBF-compatible.
-func BuildRbfTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx, err := BuildTransaction(network, feeRate, inputs, utxos, sizeEstimator, recipients, changeAddr)
+func BuildRbfTransaction(network *chaincfg.Params, feeRate int, prevFees int64, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+	tx := wire.NewMsgTx(DefaultTxVersion)
+	totalIn, totalOut := int64(0), int64(0)
+
+	if feeRate < MinRelayFeeRate*1000 {
+		return nil, fmt.Errorf("fee rate too low, expect %v got %v", MinRelayFeeRate, feeRate)
+	}
+	if feeRate > MaxRelayFeeRate*1000 {
+		return nil, fmt.Errorf("fee rate too high, expect %v got %v", MaxRelayFeeRate, feeRate)
+	}
+
+	// Adding required inputs and output
+	for _, utxo := range inputs {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
+		tx.AddTxIn(txIn)
+		if utxo.Amount == 0 {
+			return nil, fmt.Errorf("utxo amount is not set")
+		}
+		totalIn += utxo.Amount
+	}
+	for _, recipient := range recipients {
+		toAddress, err := btcutil.DecodeAddress(recipient.To, network)
+		if err != nil {
+			return nil, err
+		}
+		toScript, err := txscript.PayToAddrScript(toAddress)
+		if err != nil {
+			return nil, err
+		}
+		tx.AddTxOut(wire.NewTxOut(recipient.Amount, toScript))
+		totalOut += recipient.Amount
+	}
+
+	// Function to check if the input amount is greater than or equal to the output amount plus fees
+	valueCheck := func() (bool, error) {
+		if totalIn <= totalOut {
+			return false, nil
+		}
+
+		weight, err := sizeEstimator.EstimateTxWeight(tx)
+		if err != nil {
+			return false, err
+		}
+		vsize := (weight + 3) / 4
+		feesByFeeRate := math.Ceil(float64((feeRate+1)*vsize) / 1000)
+		feesByPrevFee := math.Ceil(float64(prevFees) + float64(weight)/4)
+		log.Print("weight = ", weight, " feesByFeeRate =  ", feesByFeeRate, " feesByPrevFee = ", feesByPrevFee)
+		fees := int64(math.Max(feesByFeeRate, feesByPrevFee))
+
+		// If the amount is enough to cover the outputs and fees
+		if totalIn > totalOut+fees {
+			// Add a change utxo to the output if the change amount is greater than the dust
+			if totalIn-totalOut-fees > DustAmount {
+				if changeAddr != nil {
+					changeScript, err := txscript.PayToAddrScript(changeAddr)
+					if err != nil {
+						return false, err
+					}
+					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
+
+					// Estimate the fees again as we add a new output
+					weight, err := sizeEstimator.EstimateTxWeight(tx)
+					if err != nil {
+						return false, err
+					}
+					vsize := (weight + 3) / 4
+					feesByFeeRate := math.Ceil(float64((feeRate+1)*vsize) / 1000)
+					feesByPrevFee := math.Ceil(float64(prevFees) + float64(weight)/4)
+					fees := int64(math.Max(feesByFeeRate, feesByPrevFee))
+					log.Print("weight = ", weight, " feesByFeeRate =  ", feesByFeeRate, " feesByPrevFee = ", feesByPrevFee)
+
+					// Adjust the change utxo amount if it's still enough, delete it otherwise
+					if totalIn-totalOut-fees > DustAmount {
+						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
+					} else {
+						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
+					}
+				}
+			}
+
+			return true, nil
+		}
+
+		return false, nil
+	}
+
+	// Check if the existing inputs are enough and we might not need to add any extra utxo
+	enough, err := valueCheck()
 	if err != nil {
 		return nil, err
 	}
-	for i := range tx.TxIn {
-		if tx.TxIn[i].Sequence == wire.MaxTxInSequenceNum {
-			tx.TxIn[i].Sequence = mempool.MaxRBFSequence
+	if enough {
+		return tx, nil
+	}
+
+	// Keep adding utxos until we have enough funds to cover the output amount
+	for _, utxo := range utxos {
+
+		// Check if it's worth to add the tx by calculating the cost
+		// (The utxos need to be confirmed in this case as we don't do package calculation)
+		// We use a hard coded value (200) for the size of adding this utxo, this is close to the tx size
+		// of spending a P2PKH utxo. If we really want, we can do a more precise estimation, which is
+		// base = outpoint(36) + sigscript(1)+ sequence(4) | segwit = marker(1) + flag(1) + witness(x)
+		// worstVS := (base + 36 + 1 + 4) + (segwit+2+3)/blockchain.WitnessScaleFactor
+		cost := 200 * feeRate
+		if int64(cost) > utxo.Amount {
+			continue
+		}
+
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
+		totalIn += utxo.Amount
+
+		// Check if we have enough inputs to cover the outputs and fee
+		enough, err := valueCheck()
+		if err != nil {
+			return nil, err
+		}
+		if enough {
+			return tx, nil
 		}
 	}
-	return tx, nil
+
+	return nil, fmt.Errorf("funds not enough")
 }
 
 // TxRawBytes returns the raw bytes of a transaction.
