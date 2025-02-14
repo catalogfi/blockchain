@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"go.uber.org/zap"
@@ -36,7 +36,7 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	if err != nil {
 		// If no batch is found, create a new RBF batch.
 		if err == ErrStoreNotFound {
-			return w.createNewRBFBatch(c, nil, pendingRequests, 0, 0, 0)
+			return w.createNewRBFBatch(c, nil, pendingRequests, 0, 0, 0, 0)
 		}
 		return fmt.Errorf("failed to read latest batch: %w", err)
 	}
@@ -75,7 +75,7 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 			}
 
 			// Create a new RBF batch with missing and pending requests.
-			return w.createNewRBFBatch(c, nil, append(missingRequests, pendingRequests...), 0, 0, 0)
+			return w.createNewRBFBatch(c, nil, append(missingRequests, pendingRequests...), 0, 0, 0, 0)
 		}
 
 		return fmt.Errorf("failed to get tx: %w", err)
@@ -84,7 +84,7 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	// If the transaction is confirmed, create a new RBF batch.
 	if tx.Status.Confirmed {
 		w.logger.Info("latest batch is confirmed, creating new rbf batch", zap.String("txid", tx.TxID))
-		return w.createNewRBFBatch(c, nil, pendingRequests, 0, 0, 0)
+		return w.createNewRBFBatch(c, nil, pendingRequests, 0, 0, 0, 0)
 	}
 
 	// Update the latest batch with the transaction details.
@@ -129,8 +129,14 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 		}
 	}
 
+	descendantsFee, err := w.rpc.GetDescendantsFee(c, batch.Tx.TxID)
+	if err != nil {
+		w.logger.Error("failed to get descendants", zap.Error(err), zap.String("txid", batch.Tx.TxID))
+		return fmt.Errorf("failed to get descendants: %w", err)
+	}
+
 	// Attempt to create a new RBF batch with combined requests.
-	if err = w.createNewRBFBatch(c, previousUTXOs, append(existingRequests, newRequests...), currentFeeRate, int(batch.Tx.Fee), 0); err != ErrTxInputsMissingOrSpent {
+	if err = w.createNewRBFBatch(c, previousUTXOs, append(existingRequests, newRequests...), currentFeeRate, int(batch.Tx.Fee), 0, int(descendantsFee)); err != ErrTxInputsMissingOrSpent {
 		if err != nil {
 			w.logger.Error("failed to create new rbf batch", zap.Error(err), zap.String("txid", batch.Tx.TxID))
 		}
@@ -160,7 +166,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 	}
 
 	// Create a new RBF batch with missing and pending requests.
-	return w.createNewRBFBatch(c, nil, append(missingRequests, newRequests...), 0, 0, requiredFeeRate)
+	return w.createNewRBFBatch(c, nil, append(missingRequests, newRequests...), 0, 0, requiredFeeRate, 0)
 }
 
 // getConfirmedBatch retrieves the confirmed RBF batch from the cache
@@ -218,7 +224,7 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 }
 
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
-func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate int) error {
+func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate, descendantsFee int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 
@@ -257,6 +263,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		false,
 		uint(currentFee),
 		currentFeeRate,
+		descendantsFee,
 		10,
 	)
 	if err != nil {
@@ -370,6 +377,7 @@ func (w *batcherWallet) createRBFTx(
 	previousFee uint,
 
 	previousFeeRate int,
+	descendantsFee int,
 	// Depth to limit the recursion
 	depth int,
 
@@ -475,11 +483,13 @@ func (w *batcherWallet) createRBFTx(
 	}
 
 	// Calculate the transaction size
-	txb := btcutil.NewTx(tx)
-	trueSize := mempool.GetTxVirtualSize(txb)
+	baseSize := tx.SerializeSizeStripped()
+	totalSize := tx.SerializeSize()
+	weight := baseSize*3 + totalSize
+	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 
-	newFee := ((int(trueSize)) * feeRate) + int(previousFee)
-	needEstimateWithPrevFeeRate := ((int(trueSize)) * previousFeeRate) + 1
+	newFee := ((int(vSize)) * feeRate) + int(previousFee)
+	needEstimateWithPrevFeeRate := ((int(vSize)) * previousFeeRate) + 1
 
 	newFeeEstimate := int(0)
 	if needEstimateWithPrevFeeRate > newFee {
@@ -550,7 +560,7 @@ func (w *batcherWallet) createRBFTx(
 			zap.String("TxData", hex.EncodeToString(txBytes)),
 		)
 		// Recursively call createRBFTx with the updated parameters
-		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, checkValidity, previousFee, previousFeeRate, depth-1)
+		return w.createRBFTx(c, utxos, spendRequests, sendRequests, sacps, sequencesMap, avoidUtxos, uint(newFeeEstimate), feeRate, checkValidity, previousFee, previousFeeRate, descendantsFee, depth-1)
 	}
 
 	// Return the created transaction and utxo used to fund the transaction

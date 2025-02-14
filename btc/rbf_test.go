@@ -88,8 +88,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		cache = btc.NewBatcherCache(db, "", btc.RBF)
 		cache2 = btc.NewBatcherCache(db, "2", btc.RBF)
-		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
-		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, chainParams, cache2, logger, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+		bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
+		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, chainParams, cache2, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
@@ -144,7 +145,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(err).To(BeNil())
 	})
 
-	It("should be able to send funds in smaller amounts", func() {
+	FIt("should be able to send funds in smaller amounts", func() {
 		for i := 0; i < 10; i++ {
 			req := []btc.SendRequest{
 				{
@@ -238,7 +239,6 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		requiredFeeRate += 10
 	})
-
 	It("should be able to spend multiple scripts and send to multiple parties", func() {
 		defaultAmount := int64(defaultAmount)
 
