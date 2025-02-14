@@ -826,13 +826,15 @@ func getUTXOsFromSpendRequest(spendReq []SpendRequest, selfAddress btcutil.Addre
 
 	for _, req := range spendReq {
 		utxos = append(utxos, req.Utxos...)
+		currentAmount := int64(0)
 		for _, utxo := range req.Utxos {
 			totalValue += utxo.Amount
+			currentAmount += utxo.Amount
 		}
 		utxoMap[req.ScriptAddress.EncodeAddress()] = req.Utxos
 
 		if req.Recipient == nil || (req.Recipient != nil && req.Recipient.EncodeAddress() == selfAddress.EncodeAddress()) {
-			spendsToMeValue += totalValue
+			spendsToMeValue += currentAmount
 		}
 	}
 
