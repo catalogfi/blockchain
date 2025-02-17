@@ -326,18 +326,63 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 		return err
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			// Get the confirmed batch.
+			confirmedBatch, err := w.getConfirmedBatch(c)
+			if err != nil {
+				w.logger.Error("failed to get confirmed batch", zap.Error(err))
+				return err
+			}
+
+			// Read the missing requests from the cache.
+			missingRequestIds := getMissingRequestIds(latestBatch.RequestIds, confirmedBatch.RequestIds)
+			missingRequests, err := w.cache.ReadRequests(c, missingRequestIds...)
+			if err != nil {
+				w.logger.Error("failed to read missing requests", zap.Error(err), zap.Strings("request_ids", missingRequestIds))
+				return err
+			}
+			if len(missingRequests) > 0 {
+				// Delete the pending batch from the cache.
+				err = w.cache.DeletePendingBatches(c)
+				if err != nil {
+					w.logger.Error("failed to delete pending batches", zap.Error(err))
+					return err
+				}
+
+				return w.createNewRBFBatch(c, nil, missingRequests, 0, 0, 0, 0)
+			}
+			return nil
+		}
 		w.logger.Error("updateRBF: failed to get tx", zap.Error(err))
 		return err
 	}
 
 	if tx.Status.Confirmed && !latestBatch.Tx.Status.Confirmed {
-		latestBatch.Tx = tx
-		err = w.cache.UpdateAndDeletePendingBatches(c, latestBatch)
-		if err == nil {
-			return ErrFeeUpdateNotNeeded
+		// Get the confirmed batch.
+		confirmedBatch, err := w.getConfirmedBatch(c)
+		if err != nil {
+			w.logger.Error("failed to get confirmed batch", zap.Error(err))
+			return err
 		}
-		w.logger.Error("updateRBF: failed to update batch", zap.Error(err))
-		return err
+
+		// Read the missing requests from the cache.
+		missingRequestIds := getMissingRequestIds(latestBatch.RequestIds, confirmedBatch.RequestIds)
+		missingRequests, err := w.cache.ReadRequests(c, missingRequestIds...)
+		if err != nil {
+			w.logger.Error("failed to read missing requests", zap.Error(err), zap.Strings("request_ids", missingRequestIds))
+			return err
+		}
+		if len(missingRequests) > 0 {
+			// Delete the pending batch from the cache.
+			err = w.cache.DeletePendingBatches(c)
+			if err != nil {
+				w.logger.Error("failed to delete pending batches", zap.Error(err))
+				return err
+			}
+
+			return w.createNewRBFBatch(c, nil, missingRequests, 0, 0, 0, 0)
+		}
+		return nil
 	}
 
 	currentFeeRate := int(tx.Fee) * 4 / tx.Weight
@@ -638,6 +683,8 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, usedUTXOS UTXOs, am
 	total := int64(0)
 	overhead := int64(0)
 	selectedUtxos := []UTXO{}
+	selectedUtxosMap := make(map[string]bool)
+
 	for _, utxo := range utxos {
 		found := false
 		for _, utxo2 := range usedUTXOS {
@@ -655,8 +702,12 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, usedUTXOS UTXOs, am
 		if avoidUtxos[utxo.TxID] {
 			continue
 		}
+		if selectedUtxosMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))] {
+			continue
+		}
 		total += utxo.Amount
 		selectedUtxos = append(selectedUtxos, utxo)
+		selectedUtxosMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))] = true
 		overhead = int64(len(selectedUtxos)*(w.CoverUTXOSpendWeight())) * feeRate
 		if total >= amount+overhead {
 			break
