@@ -84,6 +84,14 @@ func (w *batcherWallet) createRBFBatch(c context.Context) error {
 	// If the transaction is confirmed, create a new RBF batch.
 	if tx.Status.Confirmed {
 		w.logger.Info("latest batch is confirmed, creating new rbf batch", zap.String("txid", tx.TxID))
+
+		// Delete the pending batch from the cache.
+		err = w.cache.DeletePendingBatches(c)
+		if err != nil {
+			w.logger.Error("failed to delete pending batches", zap.Error(err))
+			return err
+		}
+
 		return w.createNewRBFBatch(c, nil, pendingRequests, 0, 0, 0, 0)
 	}
 
