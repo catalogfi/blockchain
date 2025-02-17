@@ -189,8 +189,11 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 
 	confirmedBatch := Batch{}
 
+	w.logger.Info("found pending batches", zap.Int("count", len(batches)))
+
 	// Loop through the batches to find a confirmed batch
 	for _, batch := range batches {
+		w.logger.Info("checking batch for validity", zap.String("txid", batch.Tx.TxID))
 		var tx Transaction
 		err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
 			tx, err = w.indexer.GetTx(ctx, batch.Tx.TxID)
