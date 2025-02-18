@@ -21,6 +21,8 @@ var (
 	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
 
 	ErrMempoolConflict = errors.New("txn-mempool-conflict")
+
+	ErrTxNotInMempool = errors.New("Transaction not in mempool")
 )
 
 // Client to interact with the Bitcoin network. It's implementation uses standard bitcoind JSON-RPC behind the scene.
@@ -53,6 +55,9 @@ type Client interface {
 
 	// GetNetworkInfo returns the network configuration of the node we connect to.
 	GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error)
+
+	// GetMempoolEntry returns details on the active state of the TX memory pool.
+	GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error)
 }
 
 type client struct {
@@ -334,6 +339,43 @@ func (client *client) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkIn
 	case <-ctx.Done():
 		return nil, fmt.Errorf("GetNetworkInfo : %w", ctx.Err())
 	case err := <-errs:
+		return nil, err
+	case result := <-results:
+		return result, nil
+	}
+}
+
+func (client *client) GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error) {
+	future := client.rpcClient.GetMempoolEntryAsync(txid)
+	results := make(chan *btcjson.GetMempoolEntryResult, 1)
+	errs := make(chan error, 1)
+	go func() {
+		defer close(results)
+		defer close(errs)
+
+		result, err := future.Receive()
+		if err != nil {
+			errs <- err
+			return
+		}
+		results <- result
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("GetMempoolEntry : %w", ctx.Err())
+	case err := <-errs:
+		// Parse the error based on the error code and message
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) {
+			switch rpcErr.Code {
+			case btcjson.ErrRPCInvalidAddressOrKey:
+				if strings.Contains(err.Error(), "Transaction not in mempool") {
+					return nil, ErrTxNotInMempool
+				}
+			}
+		}
+
 		return nil, err
 	case result := <-results:
 		return result, nil

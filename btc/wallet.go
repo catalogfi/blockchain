@@ -55,6 +55,7 @@ type wallet struct {
 	addrType     waddrmgr.AddressType
 	addr         btcutil.Address
 	indexer      IndexerClient
+	client       Client
 	feeEstimator FeeEstimator
 }
 
@@ -87,23 +88,24 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error
 	if err != nil {
 		return nil, err
 	}
-	sizer := NewSizeEstimatorOfAddrType(utxos, wal.addrType)
+	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 
 	// Recipients
 	htlcAddr, err := htlc.Address(wal.network)
 	if err != nil {
 		return nil, err
 	}
-	recipients := SingleRecipient(htlcAddr.EncodeAddress(), htlc.Amount)
+	recipients := []Recipient{NewRecipient(htlcAddr.EncodeAddress(), htlc.Amount)}
 
 	// Fees
 	feeRate, err := wal.feeEstimator.FeeSuggestion()
 	if err != nil {
 		return nil, err
 	}
+	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
 
 	// Build tx
-	tx, err := BuildTransaction(wal.network, feeRate.High, nil, utxos, sizer, recipients, wal.Address())
+	tx, err := BuildTx(wal.network, feeMode, nil, utxos, recipients, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -148,8 +150,9 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 	}
 
 	// Build tx
-	sizeEstimator := NewSizeEstimator(utxos, BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(secret)))
-	tx, err := BuildTransaction(wal.network, feeRate.High, utxos, nil, sizeEstimator, nil, wal.Address())
+	sizer := NewSizeEstimator(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(secret)), utxos...)
+	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 	if err != nil {
 		return nil, err
 	}
-	fetcher, err := InitFetcher(utxos, script)
+	fetcher, err := NewFetcher(script, utxos...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +170,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 	for i, utxo := range tx.TxIn {
 		out := fetcher.FetchPrevOutput(utxo.PreviousOutPoint)
-		leaf, ctrBlk := htlc.RedeemLeaf()
+		leaf, ctrBlk := htlc.Leaf(HtlcActionRedeem)
 		ctrBlkBytes, err := ctrBlk.ToBytes()
 		if err != nil {
 			return nil, err
@@ -215,8 +218,9 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	}
 
 	// Build tx
-	sizeEstimator := NewSizeEstimator(utxos, BaseSizeHtlcRefund, SegwitSizeHtlcRefund)
-	tx, err := BuildTransaction(wal.network, feeRate.High, utxos, nil, sizeEstimator, nil, wal.Address())
+	sizer := NewSizeEstimator(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxos...)
+	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +230,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	if err != nil {
 		return nil, err
 	}
-	fetcher, err := InitFetcher(utxos, script)
+	fetcher, err := NewFetcher(script, utxos...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +240,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 		tx.TxIn[i].Sequence = uint32(htlc.Timelock)
 	}
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-	leaf, ctrBlk := htlc.RefundLeaf()
+	leaf, ctrBlk := htlc.Leaf(HtlcActionRefund)
 	ctrBlkBytes, err := ctrBlk.ToBytes()
 	if err != nil {
 		return nil, err
@@ -282,7 +286,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	if err != nil {
 		return nil, err
 	}
-	fetcher, err := InitFetcher(utxos, pkScript)
+	fetcher, err := NewFetcher(pkScript, utxos...)
 	if err != nil {
 		return nil, err
 	}
@@ -291,10 +295,10 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 		return nil, err
 	}
 	fetcher.AddPrevOut(tx.TxIn[0].PreviousOutPoint, wire.NewTxOut(htlc.Amount, p2trScript))
-
-	sizer := NewSizeEstimatorOfAddrType(utxos, wal.addrType)
-	sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund)
-	transaction, err := BuildTransaction(wal.network, feeRate.High, []UTXO{utxo}, utxos, sizer, []Recipient{recipient}, wal.Address())
+	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
+	sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
+	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	transaction, err := BuildTx(wal.network, feeMode, []UTXO{utxo}, utxos, []Recipient{recipient}, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +308,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	for i, input := range transaction.TxIn {
 		if i == 0 {
 			// Sign the instant refund leaf
-			leaf, ctrBlk := htlc.InstantRefundLeaf()
+			leaf, ctrBlk := htlc.Leaf(HtlcActionInstantRefund)
 			ctrBlkBytes, err := ctrBlk.ToBytes()
 			if err != nil {
 				return nil, err
@@ -384,9 +388,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 
 	// Add all wallet utxos info to the size estimator
-	sizer := NewSizeEstimatorOfAddrType(utxos, wal.addrType)
+	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 	if conflictUtxo != nil {
-		sizer = NewSizeEstimatorOfAddrType(append(utxos, *conflictUtxo), wal.addrType)
+		sizer = NewSizeEstimatorOfAddrType(wal.addrType, append(utxos, *conflictUtxo)...)
 	}
 
 	// Fetcher
@@ -394,12 +398,12 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	if err != nil {
 		return nil, err
 	}
-	fetcher, err := InitFetcher(utxos, pkScript)
+	fetcher, err := NewFetcher(pkScript, utxos...)
 	if err != nil {
 		return nil, err
 	}
 	if conflictUtxo != nil {
-		if err := AddUtxoToFetcher(fetcher, *conflictUtxo, pkScript); err != nil {
+		if err := AddUtxosToFetcher(fetcher, pkScript, *conflictUtxo); err != nil {
 			return nil, err
 		}
 	}
@@ -436,7 +440,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			if err != nil {
 				return nil, err
 			}
-			if err := AddUtxoToFetcher(fetcher, utxo, script); err != nil {
+			if err := AddUtxosToFetcher(fetcher, script, utxo); err != nil {
 				return nil, err
 			}
 
@@ -447,11 +451,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			}
 			switch action {
 			case HtlcActionRedeem:
-				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(witness[1])))
+				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(witness[1])), utxo)
 			case HtlcActionRefund:
-				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRefund, SegwitSizeHtlcRefund)
+				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxo)
 			case HtlcActionInstantRefund:
-				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund)
+				sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
 			}
 		}
 
@@ -500,9 +504,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
 			if action.ActionType == HtlcActionRedeem {
-				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Secret)))
+				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Secret)), utxo)
 			} else if action.ActionType == HtlcActionRefund {
-				sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcRefund, SegwitSizeHtlcRefund)
+				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxo)
 			}
 
 			// Add utxo to the fetcher
@@ -510,7 +514,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			if err != nil {
 				return nil, err
 			}
-			if err := AddUtxoToFetcher(fetcher, utxo, fromScript); err != nil {
+			if err := AddUtxosToFetcher(fetcher, fromScript, utxo); err != nil {
 				return nil, err
 			}
 		case HtlcActionInstantRefund:
@@ -525,7 +529,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			recipients = append([]Recipient{recipient}, recipients...)
 			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
-			sizer.AddUtxos([]UTXO{utxo}, BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund)
+			sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
 
 			// Add to the fetcher
 			fromScript, err := action.Htlc.P2trScript()
@@ -545,6 +549,12 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 	feeRate := feeRates.High
 	if replacedTx.TxID != "" {
+		// // TODO : NEED TO CHECK ERROR IF TX IS CONFIRMED
+		// entry, err := wal.client.GetMempoolEntry(ctx, replacedTx.TxID)
+		// if err != nil {
+		// 	return nil, err
+		// }
+
 		// feeRate = fee / vsize
 		prevFeeRate := float64(replacedTx.Fee) / math.Ceil(float64(replacedTx.Weight)/4)
 		if float64(feeRate) <= prevFeeRate {
@@ -553,7 +563,8 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 
 	// Build the tx
-	tx, err := BuildTransaction(wal.network, feeRate, inputs, utxos, sizer, recipients, wal.Address())
+	feeMode := MinFeeRateMode(feeRate*1000, sizer)
+	tx, err := BuildTx(wal.network, feeMode, inputs, utxos, recipients, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -571,7 +582,8 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			feeRate++
 
 			// Build tx again with new fee rate
-			tx, err = BuildTransaction(wal.network, feeRate, inputs, utxos, sizer, recipients, wal.Address())
+			feeMode := MinFeeRateMode(feeRate*1000, sizer)
+			tx, err = BuildTx(wal.network, feeMode, inputs, utxos, recipients, wal.Address())
 			if err != nil {
 				return nil, err
 			}

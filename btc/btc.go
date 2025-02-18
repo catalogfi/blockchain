@@ -3,7 +3,6 @@ package btc
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"math"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -24,14 +23,14 @@ const (
 	// DustAmount is the minimum transaction amount accepted by Bitcoin miners.
 	DustAmount = 546
 
-	// MinRelayFeeRate is the minimum fee rate (in sat/vb) a transaction must meet in order to be broadcast by the node.
-	// This is default value used by Bitcore Core. Different node may have different setting for this.
-	MinRelayFeeRate = 1
+	// MinRelayFeeRate is the minimum feerate (in sat/kvb) a transaction must meet in order to be broadcast by the node.
+	// This is a default value used by Bitcore Core. Different node may have different setting for this.
+	MinRelayFeeRate = 1 * 1000
 
 	// MaxRelayFeeRate is not something in the bitcoin protocol, but more of a defensive check to make sure we're not
 	// using an unreasonable value. (i.e. third-party api) If the fee rate we choose is greater than this value, this
 	// usually means something is wrong.
-	MaxRelayFeeRate = 1000
+	MaxRelayFeeRate = 500 * 1000
 
 	// SigHashSingleAnyoneCanPay is an alias for the signature hash types: `txscript.SigHashSingle |
 	// txscript.SigHashAnyOneCanPay`.
@@ -49,9 +48,36 @@ type UTXO struct {
 	Status *Status `json:"status"`
 }
 
+// NewUtxo returns a new Utxo object with given parameters. It won't have the status field.
+func NewUtxo(txid string, vout uint32, amount int64) UTXO {
+	return UTXO{
+		TxID:   txid,
+		Vout:   vout,
+		Amount: amount,
+	}
+}
+
 // String returns a string that identifies this UTXO, it is in the format of "<txid>:<vout>".
 func (utxo UTXO) String() string {
 	return fmt.Sprintf("%v:%v", utxo.TxID, utxo.Vout)
+}
+
+// ToOutPoint converts the UTXO to the type of `*wire.OutPoint`
+func (utxo UTXO) ToOutPoint() (*wire.OutPoint, error) {
+	hash, err := chainhash.NewHashFromStr(utxo.TxID)
+	if err != nil {
+		return nil, err
+	}
+	return wire.NewOutPoint(hash, utxo.Vout), nil
+}
+
+// ToTxIn converts the UTXO to a `*wire.TxIn` so it can be easily added to a new tx. It won't have any witness data.
+func (utxo UTXO) ToTxIn() (*wire.TxIn, error) {
+	outpoint, err := utxo.ToOutPoint()
+	if err != nil {
+		return nil, err
+	}
+	return wire.NewTxIn(outpoint, nil, nil), nil
 }
 
 // Recipient is a recipient of a transaction. It contains the address and the amount to be sent.
@@ -68,22 +94,23 @@ func NewRecipient(to string, amount int64) Recipient {
 	}
 }
 
-// SingleRecipient is a helper function to initiate a recipient list with only one element.
-func SingleRecipient(to string, amount int64) []Recipient {
-	return []Recipient{
-		{
-			To:     to,
-			Amount: amount,
-		},
+// ToTxOut converts the Recipient to a `*wire.TxOut` so it can be easily added to a new tx.
+func (recipient Recipient) ToTxOut(network *chaincfg.Params) (*wire.TxOut, error) {
+	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
+	if err != nil {
+		return nil, err
 	}
+	toScript, err := txscript.PayToAddrScript(toAddress)
+	if err != nil {
+		return nil, err
+	}
+	return wire.NewTxOut(recipient.Amount, toScript), nil
 }
 
 // PublicKeyAddress generates a Bitcoin address from a given public key, depending on the specified address type.
 // If an unsupported address type is provided, it returns an error.
 func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, pub *btcec.PublicKey) (btcutil.Address, error) {
 	switch addrType {
-	case waddrmgr.RawPubKey:
-		return btcutil.NewAddressPubKey(pub.SerializeCompressed(), network)
 	case waddrmgr.PubKeyHash:
 		return btcutil.NewAddressPubKeyHash(btcutil.Hash160(pub.SerializeCompressed()), network)
 	case waddrmgr.WitnessPubKey:
@@ -96,271 +123,6 @@ func PublicKeyAddress(network *chaincfg.Params, addrType waddrmgr.AddressType, p
 	}
 }
 
-// BuildTransaction is a helper function for building a bitcoin transaction. It uses the given `feeRate` to calculate
-// fees. `inputs` will be a list of utxos that required to be included in the transaction. `utxos` is a list of
-// transaction will be picked to cover the output amount and fees. The size estimator is to estimate the size of the
-// signed tx for fee purpose. The `recipients` includes a list of target addresses and the associated amounts to be
-// sent.  If there's any change, it will be sent back to the `changeAddr`.
-func BuildTransaction(network *chaincfg.Params, feeRate int, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx := wire.NewMsgTx(DefaultTxVersion)
-	totalIn, totalOut := int64(0), int64(0)
-
-	if feeRate < MinRelayFeeRate {
-		return nil, fmt.Errorf("fee rate too low, expect %v got %v", MinRelayFeeRate, feeRate)
-	}
-	if feeRate > MaxRelayFeeRate {
-		return nil, fmt.Errorf("fee rate too high, expect %v got %v", MaxRelayFeeRate, feeRate)
-	}
-
-	// Adding required inputs and output
-	for _, utxo := range inputs {
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
-		if err != nil {
-			return nil, err
-		}
-		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
-		tx.AddTxIn(txIn)
-		if utxo.Amount == 0 {
-			return nil, fmt.Errorf("utxo amount is not set")
-		}
-		totalIn += utxo.Amount
-	}
-	for _, recipient := range recipients {
-		toAddress, err := btcutil.DecodeAddress(recipient.To, network)
-		if err != nil {
-			return nil, err
-		}
-		toScript, err := txscript.PayToAddrScript(toAddress)
-		if err != nil {
-			return nil, err
-		}
-		tx.AddTxOut(wire.NewTxOut(recipient.Amount, toScript))
-		totalOut += recipient.Amount
-	}
-
-	// Function to check if the input amount is greater than or equal to the output amount plus fees
-	valueCheck := func() (bool, error) {
-		if totalIn <= totalOut {
-			return false, nil
-		}
-
-		vs, err := sizeEstimator.EstimateTxVirtualSize(tx)
-		if err != nil {
-			return false, err
-		}
-		fees := int64(vs * feeRate)
-
-		// If the amount is enough to cover the outputs and fees
-		if totalIn > totalOut+fees {
-			// Add a change utxo to the output if the change amount is greater than the dust
-			if totalIn-totalOut-fees > DustAmount {
-				if changeAddr != nil {
-					changeScript, err := txscript.PayToAddrScript(changeAddr)
-					if err != nil {
-						return false, err
-					}
-					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
-
-					// Estimate the fees again as we add a new output
-					vs, err := sizeEstimator.EstimateTxVirtualSize(tx)
-					if err != nil {
-						return false, err
-					}
-					fees := int64(vs * feeRate)
-
-					// Adjust the change utxo amount if it's still enough, delete it otherwise
-					if totalIn-totalOut-fees > DustAmount {
-						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
-					} else {
-						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
-					}
-				}
-			}
-
-			return true, nil
-		}
-
-		return false, nil
-	}
-
-	// Check if the existing inputs are enough and we might not need to add any extra utxo
-	enough, err := valueCheck()
-	if err != nil {
-		return nil, err
-	}
-	if enough {
-		return tx, nil
-	}
-
-	// Keep adding utxos until we have enough funds to cover the output amount
-	for _, utxo := range utxos {
-
-		// Check if it's worth to add the tx by calculating the cost
-		// (The utxos need to be confirmed in this case as we don't do package calculation)
-		// We use a hard coded value (200) for the size of adding this utxo, this is close to the tx size
-		// of spending a P2PKH utxo. If we really want, we can do a more precise estimation, which is
-		// base = outpoint(36) + sigscript(1)+ sequence(4) | segwit = marker(1) + flag(1) + witness(x)
-		// worstVS := (base + 36 + 1 + 4) + (segwit+2+3)/blockchain.WitnessScaleFactor
-		cost := 200 * feeRate
-		if int64(cost) > utxo.Amount {
-			continue
-		}
-
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
-		if err != nil {
-			return nil, err
-		}
-		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
-		totalIn += utxo.Amount
-
-		// Check if we have enough inputs to cover the outputs and fee
-		enough, err := valueCheck()
-		if err != nil {
-			return nil, err
-		}
-		if enough {
-			return tx, nil
-		}
-	}
-
-	return nil, fmt.Errorf("funds not enough")
-}
-
-// BuildRbfTransaction is similar to `BuildTransaction`, the only difference is it updates the sequence of all the tx
-// inputs to `mempool.MaxRBFSequence`, so the tx is RBF-compatible.
-func BuildRbfTransaction(network *chaincfg.Params, feeRate int, prevFees int64, inputs, utxos []UTXO, sizeEstimator *SizeEstimator, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
-	tx := wire.NewMsgTx(DefaultTxVersion)
-	totalIn, totalOut := int64(0), int64(0)
-
-	if feeRate < MinRelayFeeRate*1000 {
-		return nil, fmt.Errorf("fee rate too low, expect %v got %v", MinRelayFeeRate, feeRate)
-	}
-	if feeRate > MaxRelayFeeRate*1000 {
-		return nil, fmt.Errorf("fee rate too high, expect %v got %v", MaxRelayFeeRate, feeRate)
-	}
-
-	// Adding required inputs and output
-	for _, utxo := range inputs {
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
-		if err != nil {
-			return nil, err
-		}
-		txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
-		tx.AddTxIn(txIn)
-		if utxo.Amount == 0 {
-			return nil, fmt.Errorf("utxo amount is not set")
-		}
-		totalIn += utxo.Amount
-	}
-	for _, recipient := range recipients {
-		toAddress, err := btcutil.DecodeAddress(recipient.To, network)
-		if err != nil {
-			return nil, err
-		}
-		toScript, err := txscript.PayToAddrScript(toAddress)
-		if err != nil {
-			return nil, err
-		}
-		tx.AddTxOut(wire.NewTxOut(recipient.Amount, toScript))
-		totalOut += recipient.Amount
-	}
-
-	// Function to check if the input amount is greater than or equal to the output amount plus fees
-	valueCheck := func() (bool, error) {
-		if totalIn <= totalOut {
-			return false, nil
-		}
-
-		weight, err := sizeEstimator.EstimateTxWeight(tx)
-		if err != nil {
-			return false, err
-		}
-		vsize := (weight + 3) / 4
-		feesByFeeRate := math.Ceil(float64((feeRate+1)*vsize) / 1000)
-		feesByPrevFee := math.Ceil(float64(prevFees) + float64(weight)/4)
-		log.Print("weight = ", weight, " feesByFeeRate =  ", feesByFeeRate, " feesByPrevFee = ", feesByPrevFee)
-		fees := int64(math.Max(feesByFeeRate, feesByPrevFee))
-
-		// If the amount is enough to cover the outputs and fees
-		if totalIn > totalOut+fees {
-			// Add a change utxo to the output if the change amount is greater than the dust
-			if totalIn-totalOut-fees > DustAmount {
-				if changeAddr != nil {
-					changeScript, err := txscript.PayToAddrScript(changeAddr)
-					if err != nil {
-						return false, err
-					}
-					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
-
-					// Estimate the fees again as we add a new output
-					weight, err := sizeEstimator.EstimateTxWeight(tx)
-					if err != nil {
-						return false, err
-					}
-					vsize := (weight + 3) / 4
-					feesByFeeRate := math.Ceil(float64((feeRate+1)*vsize) / 1000)
-					feesByPrevFee := math.Ceil(float64(prevFees) + float64(weight)/4)
-					fees := int64(math.Max(feesByFeeRate, feesByPrevFee))
-					log.Print("weight = ", weight, " feesByFeeRate =  ", feesByFeeRate, " feesByPrevFee = ", feesByPrevFee)
-
-					// Adjust the change utxo amount if it's still enough, delete it otherwise
-					if totalIn-totalOut-fees > DustAmount {
-						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
-					} else {
-						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
-					}
-				}
-			}
-
-			return true, nil
-		}
-
-		return false, nil
-	}
-
-	// Check if the existing inputs are enough and we might not need to add any extra utxo
-	enough, err := valueCheck()
-	if err != nil {
-		return nil, err
-	}
-	if enough {
-		return tx, nil
-	}
-
-	// Keep adding utxos until we have enough funds to cover the output amount
-	for _, utxo := range utxos {
-
-		// Check if it's worth to add the tx by calculating the cost
-		// (The utxos need to be confirmed in this case as we don't do package calculation)
-		// We use a hard coded value (200) for the size of adding this utxo, this is close to the tx size
-		// of spending a P2PKH utxo. If we really want, we can do a more precise estimation, which is
-		// base = outpoint(36) + sigscript(1)+ sequence(4) | segwit = marker(1) + flag(1) + witness(x)
-		// worstVS := (base + 36 + 1 + 4) + (segwit+2+3)/blockchain.WitnessScaleFactor
-		cost := 200 * feeRate
-		if int64(cost) > utxo.Amount {
-			continue
-		}
-
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
-		if err != nil {
-			return nil, err
-		}
-		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil))
-		totalIn += utxo.Amount
-
-		// Check if we have enough inputs to cover the outputs and fee
-		enough, err := valueCheck()
-		if err != nil {
-			return nil, err
-		}
-		if enough {
-			return tx, nil
-		}
-	}
-
-	return nil, fmt.Errorf("funds not enough")
-}
-
 // TxRawBytes returns the raw bytes of a transaction.
 func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
@@ -370,19 +132,124 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// InitFetcher initializes a txscript.MultiPrevOutFetcher with the given utxos and script.
-// The returned fetcher can be used to sign transactions with the given utxos as inputs.
-func InitFetcher(utxos []UTXO, script []byte) (*txscript.MultiPrevOutFetcher, error) {
-	fetcher := txscript.NewMultiPrevOutFetcher(nil)
-	for _, utxo := range utxos {
-		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+// FeeMode is a function type that calculates the required fees for a given transaction under different scenario.
+type FeeMode func(tx *wire.MsgTx) (int64, error)
+
+// MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be greater than or equal
+// to the given `feeRate` (sats/kvb).
+func MinFeeRateMode(feeRate int, sizer *SizeEstimator) FeeMode {
+	return func(tx *wire.MsgTx) (int64, error) {
+		vs, err := sizer.EstimateTxVirtualSize(tx)
+		if err != nil {
+			return 0, err
+		}
+		return int64(vs*feeRate+999) / 1000, nil
+	}
+}
+
+// FixedFeesMode is used to build a tx with a fixed amount of fees.
+func FixedFeesMode(fees int64) FeeMode {
+	return func(tx *wire.MsgTx) (int64, error) {
+		return fees, nil
+	}
+}
+
+// GaslessMode will always return 0 fees. This is usually used to build a gas-less transaction.
+func GaslessMode() FeeMode {
+	return func(tx *wire.MsgTx) (int64, error) {
+		return 0, nil
+	}
+}
+
+// RbfMode computes the required fees for a transaction to be replace-by-fee (RBF) compliant.
+// It considers the minimum fee rate, previous fee rate, and previous fees to calculate the maximum
+// fees needed for the transaction. Both `minFeeRate` and `prevFeeRate` will be in sats/kvb.
+func RbfMode(minFeeRate, prevFeeRate int, prevFees int64, sizer *SizeEstimator) FeeMode {
+	return func(tx *wire.MsgTx) (int64, error) {
+		weight, err := sizer.EstimateTxWeight(tx)
+		if err != nil {
+			return 0, err
+		}
+		vsize := (weight + 3) / 4
+		fees1 := math.Ceil(float64((prevFeeRate+1)*vsize) / 1000)
+		fees2 := math.Ceil(float64(prevFees) + float64(weight)/4)
+		fees3 := math.Ceil(float64(minFeeRate * vsize / 1000))
+		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
+	}
+}
+
+// BuildTx is a helper function for building a bitcoin transaction. It uses the given `FeeMode` to calculate
+// fees. `inputs` will be a list of utxos that guaranteed to be included in the transaction. `utxos` is a list of
+// transaction will be picked to cover the output amount and fees. The `recipients` includes a list of target addresses
+// and the associated amounts to be sent.  If there's any change, it will be sent back to the `changeAddr`.
+func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+	tx := wire.NewMsgTx(DefaultTxVersion)
+	totalIn, totalOut := int64(0), int64(0)
+
+	// Adding required inputs and output
+	for _, utxo := range inputs {
+		if utxo.Amount == 0 {
+			return nil, fmt.Errorf("utxo %v amount is not set", utxo.String())
+		}
+		txIn, err := utxo.ToTxIn()
 		if err != nil {
 			return nil, err
 		}
-		fetcher.AddPrevOut(wire.OutPoint{
-			Hash:  *hash,
-			Index: utxo.Vout,
-		}, wire.NewTxOut(utxo.Amount, script))
+		tx.AddTxIn(txIn)
+		totalIn += utxo.Amount
 	}
-	return fetcher, nil
+	for _, recipient := range recipients {
+		txOut, err := recipient.ToTxOut(network)
+		if err != nil {
+			return nil, err
+		}
+		tx.AddTxOut(txOut)
+		totalOut += recipient.Amount
+	}
+
+	for i := -1; i < len(utxos); i++ {
+		// Add the utxo to the transaction input
+		if i >= 0 {
+			txin, err := utxos[i].ToTxIn()
+			if err != nil {
+				return nil, err
+			}
+			tx.AddTxIn(txin)
+			totalIn += utxos[i].Amount
+		}
+
+		// Check if the input amount is enough to cover the fees and output
+		fees, err := feeReq(tx)
+		if err != nil {
+			return nil, err
+		}
+		if totalIn >= totalOut+fees {
+			// Add a change utxo to the output if the change amount is greater than the dust
+			if totalIn-totalOut-fees > DustAmount {
+				if changeAddr != nil {
+					changeScript, err := txscript.PayToAddrScript(changeAddr)
+					if err != nil {
+						return nil, err
+					}
+					tx.AddTxOut(wire.NewTxOut(0, changeScript)) // adjust the amount later
+
+					// Fees will be changed since we add a new output field to the tx
+					fees, err := feeReq(tx)
+					if err != nil {
+						return nil, err
+					}
+
+					// Adjust the change utxo amount if it's still enough, delete it otherwise
+					if totalIn-totalOut-fees > DustAmount {
+						tx.TxOut[len(tx.TxOut)-1].Value = totalIn - totalOut - fees
+					} else {
+						tx.TxOut = tx.TxOut[:len(tx.TxOut)-1]
+					}
+				}
+			}
+			return tx, nil
+		}
+	}
+
+	return nil, fmt.Errorf("funds not enough")
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
 	"go.uber.org/zap"
@@ -22,10 +23,11 @@ var (
 	debug       string
 
 	// Vars
-	network *chaincfg.Params
-	logger  *zap.Logger
-	indexer btc.IndexerClient
-	client  btc.Client
+	network   *chaincfg.Params
+	logger    *zap.Logger
+	indexer   btc.IndexerClient
+	client    btc.Client
+	addrTypes []waddrmgr.AddressType
 )
 
 func TestBtc(t *testing.T) {
@@ -64,4 +66,10 @@ var _ = BeforeSuite(func() {
 	}
 	client, err = btc.NewClient(config)
 	Expect(err).Should(BeNil())
+
+	addrTypes = []waddrmgr.AddressType{
+		waddrmgr.PubKeyHash,
+		waddrmgr.WitnessPubKey,
+		waddrmgr.TaprootPubKey,
+	}
 })

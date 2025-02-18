@@ -160,7 +160,7 @@ func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey
 	}
 
 	// Calculate the sighashes
-	fetcher, err := InitFetcher(utxos, pkScript)
+	fetcher, err := NewFetcher(pkScript, utxos...)
 	if err != nil {
 		return err
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -183,6 +182,19 @@ func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
 	return false, 0, nil
 }
 
+// Refundable checks if the htlc is refundable. It takes the utxos and the latest block height as input. It finds the
+// utxo with enough amount first and then check if it's expired for refunding.
+func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
+	for _, utxo := range utxos {
+		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
+			if latest-*utxo.Status.BlockHeight+1 >= uint64(htlc.Timelock) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
 	addr, err := htlc.Address(network)
 	if err != nil {
@@ -201,61 +213,23 @@ func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer In
 	return UTXO{}, fmt.Errorf("not initiated")
 }
 
-// Refundable checks if the htlc is refundable. It takes the utxos and the latest block height as input. It finds the
-// utxo with enough amount first and then check if it's expired for refunding.
-func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
-	for _, utxo := range utxos {
-		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
-			if latest-*utxo.Status.BlockHeight+1 >= uint64(htlc.Timelock) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (htlc *HTLC) Expired(utxos []UTXO, latest uint64) bool {
-	for _, utxo := range utxos {
-		if utxo.Status != nil && utxo.Status.Confirmed {
-			if latest-*utxo.Status.BlockHeight >= uint64(htlc.Timelock) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (htlc *HTLC) RedeemLeaf() (txscript.TapLeaf, txscript.ControlBlock) {
-	leaf := htlc.tree.RootNode.Right().(txscript.TapLeaf)
-	index := htlc.tree.LeafProofIndex[leaf.TapHash()]
-	ctrBlk := htlc.tree.LeafMerkleProofs[index].ToControlBlock(GardenNums)
-	return leaf, ctrBlk
-}
-
-func (htlc *HTLC) RefundLeaf() (txscript.TapLeaf, txscript.ControlBlock) {
-	leaf := htlc.tree.RootNode.Left().Right().(txscript.TapLeaf)
-	index := htlc.tree.LeafProofIndex[leaf.TapHash()]
-	ctrBlk := htlc.tree.LeafMerkleProofs[index].ToControlBlock(GardenNums)
-	return leaf, ctrBlk
-}
-
-func (htlc *HTLC) InstantRefundLeaf() (txscript.TapLeaf, txscript.ControlBlock) {
-	leaf := htlc.tree.RootNode.Left().Left().(txscript.TapLeaf)
-	index := htlc.tree.LeafProofIndex[leaf.TapHash()]
-	ctrBlk := htlc.tree.LeafMerkleProofs[index].ToControlBlock(GardenNums)
-	return leaf, ctrBlk
-}
-
+// Leaf returns the tapLeaf associated with given action.
 func (htlc *HTLC) Leaf(action HtlcActionType) (txscript.TapLeaf, txscript.ControlBlock) {
+	var leaf txscript.TapLeaf
 	switch action {
 	case HtlcActionRedeem:
-		return htlc.RedeemLeaf()
+		leaf = htlc.tree.RootNode.Right().(txscript.TapLeaf)
 	case HtlcActionRefund:
-		return htlc.RefundLeaf()
+		leaf = htlc.tree.RootNode.Left().Right().(txscript.TapLeaf)
 	case HtlcActionInstantRefund:
-		return htlc.InstantRefundLeaf()
+		leaf = htlc.tree.RootNode.Left().Left().(txscript.TapLeaf)
+	default:
+		panic("invalid action type")
 	}
-	panic("invalid action type")
+
+	index := htlc.tree.LeafProofIndex[leaf.TapHash()]
+	ctrBlk := htlc.tree.LeafMerkleProofs[index].ToControlBlock(GardenNums)
+	return leaf, ctrBlk
 }
 
 // HtlcActionFromWitness determines the type of HTLC (Hashed Timelock Contract) action based on the provided witness.
@@ -442,34 +416,18 @@ func IsMultiSigLeaf(script []byte) (bool, string) {
 // will contain only one input and one output, the input amount should be equal or slightly more than the output amount.
 // The output will be sent to the target address. Initiator's signature will be added to the witness.
 func NewInstantRefundTx(network *chaincfg.Params, key *btcec.PrivateKey, htlc *HTLC, utxo UTXO, recipient Recipient) (*wire.MsgTx, error) {
-	tx := wire.NewMsgTx(DefaultTxVersion)
-
-	// Build tx
-	hash, err := chainhash.NewHashFromStr(utxo.TxID)
+	tx, err := BuildTx(network, GaslessMode(), []UTXO{utxo}, nil, []Recipient{recipient}, nil)
 	if err != nil {
 		return nil, err
 	}
-	txIn := wire.NewTxIn(wire.NewOutPoint(hash, utxo.Vout), nil, nil)
-	tx.AddTxIn(txIn)
-
-	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
-	if err != nil {
-		return nil, err
-	}
-	toScript, err := txscript.PayToAddrScript(toAddress)
-	if err != nil {
-		return nil, err
-	}
-	tx.AddTxOut(wire.NewTxOut(utxo.Amount, toScript))
 
 	// Sign the tx
-	leaf, _ := htlc.InstantRefundLeaf()
+	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
 	script, err := htlc.P2trScript()
 	if err != nil {
 		return nil, err
 	}
-
-	fetcher, err := InitFetcher(UTXOs{utxo}, script)
+	fetcher, err := NewFetcher(script, utxo)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +467,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	}
 	fetcher := txscript.NewCannedPrevOutputFetcher(script, htlc.Amount)
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-	leaf, _ := htlc.InstantRefundLeaf()
+	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
 	tapSigHashes, err := txscript.CalcTapscriptSignaturehash(sigHashes, SigHashSingleAnyoneCanPay, tx, 0, fetcher, leaf)
 	if err != nil {
 		return UTXO{}, Recipient{}, err

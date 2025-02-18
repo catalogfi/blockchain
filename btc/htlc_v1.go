@@ -19,6 +19,20 @@ var (
 	// NormalHtlcSize is a more accurate way to estimate the htlc script size, since the timelock will be between
 	// [128, 32767] most of our use cases.
 	NormalHtlcSize = 13 + (20+1)*2 + (32 + 1) + (2 + 1)
+
+	// RedeemHtlcRefundSigScriptSize is an estimate of the sigScript size when refunding an htlc script
+	// stack number + stack size * 4 + signature + public key + script size
+	RedeemHtlcRefundSigScriptSize = 1 + 4 + 73 + 33 + NormalHtlcSize
+
+	// RedeemHtlcRedeemSigScriptSize is an estimate of the sigScript size when redeeming an htlc script
+	// stack number + stack size * 5 + signature + public key + secret + script size
+	RedeemHtlcRedeemSigScriptSize = func(secretSize int) int {
+		return 1 + 5 + 73 + 33 + secretSize + +1 + NormalHtlcSize
+	}
+
+	// RedeemMultisigSigScriptSize is an estimate of the sigScript size from an 2-of-2 multisig script
+	// stack number + stack size * 4 + signature * 2 + script size
+	RedeemMultisigSigScriptSize = 1 + 4 + 73*2 + 71
 )
 
 // MultisigScript generates a 2-out-2 multisig script.
@@ -123,6 +137,16 @@ func HtlcWitness(script, pub, signature, secret []byte) wire.TxWitness {
 		witnessStack[2] = nil
 		witnessStack[3] = script
 	}
+	return witnessStack
+}
+
+// MultisigWitness used for generating the witness script for spending a multisig utxo.
+func MultisigWitness(script, sigA, sigB []byte) wire.TxWitness {
+	witnessStack := wire.TxWitness(make([][]byte, 4))
+	witnessStack[0] = nil
+	witnessStack[1] = sigA
+	witnessStack[2] = sigB
+	witnessStack[3] = script
 	return witnessStack
 }
 

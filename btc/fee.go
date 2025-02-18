@@ -19,18 +19,14 @@ import (
 )
 
 const (
-	MempoolFeeAPI = "https://mempool.space/api/v1/fees/recommended"
+	MempoolFeeApiMainnet = "https://mempool.space/api/v1/fees/recommended"
 
-	MempoolFeeAPITestnet = "https://mempool.space/testnet/api/v1/fees/recommended"
+	MempoolFeeApiTestnet3 = "https://mempool.space/testnet/api/v1/fees/recommended"
 
-	BlockstreamAPI = "https://blockstream.info/api/fee-estimates"
+	MempoolFeeApiTestnet4 = "https://mempool.space/testnet4/api/v1/fees/recommended"
+
+	BlockstreamApiMainnet = "https://blockstream.info/api/fee-estimates"
 )
-
-type UnknownUtxo error
-
-func NewUnknownUtxoError(txid string) UnknownUtxo {
-	return fmt.Errorf("unknown utxo = %v ", txid)
-}
 
 var (
 	BaseSizeP2PKH = txsizes.RedeemP2PKHSigScriptSize
@@ -45,6 +41,38 @@ var (
 
 	SegwitSizeP2TR = txsizes.RedeemP2TRInputWitnessWeight
 )
+
+// NewFetcher initializes a txscript.MultiPrevOutFetcher with the given utxos and script.
+func NewFetcher(script []byte, utxos ...UTXO) (*txscript.MultiPrevOutFetcher, error) {
+	fetcher := txscript.NewMultiPrevOutFetcher(nil)
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		fetcher.AddPrevOut(wire.OutPoint{
+			Hash:  *hash,
+			Index: utxo.Vout,
+		}, wire.NewTxOut(utxo.Amount, script))
+	}
+	return fetcher, nil
+}
+
+// AddUtxosToFetcher adds the list of utxos to the fetcher.
+func AddUtxosToFetcher(fetcher *txscript.MultiPrevOutFetcher, script []byte, utxos ...UTXO) error {
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return err
+		}
+		fetcher.AddPrevOut(wire.OutPoint{
+			Hash:  *hash,
+			Index: utxo.Vout,
+		}, wire.NewTxOut(utxo.Amount, script))
+	}
+
+	return nil
+}
 
 // TotalFee returns the total amount fees used by the given tx.
 func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int {
@@ -77,7 +105,7 @@ func NewEmptySizeEstimator() *SizeEstimator {
 }
 
 // NewSizeEstimator returns an SizeEstimator with some preload UTXOs.
-func NewSizeEstimator(utxos []UTXO, base, segwit int) *SizeEstimator {
+func NewSizeEstimator(base, segwit int, utxos ...UTXO) *SizeEstimator {
 	baseSizeMap := make(map[string]int)
 	segwitSizeMap := make(map[string]int)
 	if base != 0 || segwit != 0 {
@@ -95,21 +123,21 @@ func NewSizeEstimator(utxos []UTXO, base, segwit int) *SizeEstimator {
 }
 
 // NewSizeEstimatorOfAddrType returns an SizeEstimator basing on the provided address type.
-func NewSizeEstimatorOfAddrType(utxos []UTXO, addrType waddrmgr.AddressType) *SizeEstimator {
+func NewSizeEstimatorOfAddrType(addrType waddrmgr.AddressType, utxos ...UTXO) *SizeEstimator {
 	switch addrType {
 	case waddrmgr.PubKeyHash:
-		return NewSizeEstimator(utxos, BaseSizeP2PKH, SegwitSizeP2PKH)
+		return NewSizeEstimator(BaseSizeP2PKH, SegwitSizeP2PKH, utxos...)
 	case waddrmgr.WitnessPubKey:
-		return NewSizeEstimator(utxos, BaseSizeP2WPKH, SegwitSizeP2WPKH)
+		return NewSizeEstimator(BaseSizeP2WPKH, SegwitSizeP2WPKH, utxos...)
 	case waddrmgr.TaprootPubKey:
-		return NewSizeEstimator(utxos, BaseSizeP2TR, SegwitSizeP2TR)
+		return NewSizeEstimator(BaseSizeP2TR, SegwitSizeP2TR, utxos...)
 	default:
 		panic(fmt.Sprintf("unknown address type: %v", addrType))
 	}
 }
 
 // AddUtxos adds a list of UTXOs and their estimated base and segwit size
-func (estimator *SizeEstimator) AddUtxos(utxos []UTXO, base, segwit int) {
+func (estimator *SizeEstimator) AddUtxos(base, segwit int, utxos ...UTXO) {
 	estimator.mu.Lock()
 	defer estimator.mu.Unlock()
 
@@ -125,11 +153,11 @@ func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 
 	base, ok := estimator.baseSizeMap[utxo.String()]
 	if !ok {
-		return 0, 0, NewUnknownUtxoError(utxo.String())
+		return 0, 0, fmt.Errorf("unknown utxo = %v", utxo.String())
 	}
 	segwit, ok := estimator.segwitSizeMap[utxo.String()]
 	if !ok {
-		return 0, 0, NewUnknownUtxoError(utxo.String())
+		return 0, 0, fmt.Errorf("unknown utxo = %v", utxo.String())
 	}
 	return base, segwit, nil
 }
@@ -143,12 +171,12 @@ func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, erro
 		key := input.PreviousOutPoint.String()
 		base, ok := estimator.baseSizeMap[key]
 		if !ok {
-			return 0, NewUnknownUtxoError(key)
+			return 0, fmt.Errorf("unknown utxo = %v", key)
 		}
 		totalBase += base
 		segwit, ok := estimator.segwitSizeMap[key]
 		if !ok {
-			return 0, NewUnknownUtxoError(key)
+			return 0, fmt.Errorf("unknown utxo = %v", key)
 		}
 		totalSegwit += segwit
 	}
@@ -167,12 +195,12 @@ func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
 		key := input.PreviousOutPoint.String()
 		base, ok := estimator.baseSizeMap[key]
 		if !ok {
-			return 0, NewUnknownUtxoError(key)
+			return 0, fmt.Errorf("unknown utxo = %v", key)
 		}
 		totalBase += base
 		segwit, ok := estimator.segwitSizeMap[key]
 		if !ok {
-			return 0, NewUnknownUtxoError(key)
+			return 0, fmt.Errorf("unknown utxo = %v", key)
 		}
 		totalSegwit += segwit
 	}
@@ -258,19 +286,19 @@ func (f *mempoolFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		defer resp.Body.Close()
 
 		res := struct {
-			Minimum int `json:"minimumFee"`
-			Economy int `json:"economyFee"`
-			Low     int `json:"hourFee"`
-			Medium  int `json:"halfHourFee"`
-			High    int `json:"fastestFee"`
+			Minimum float64 `json:"minimumFee"`
+			Economy float64 `json:"economyFee"`
+			Low     float64 `json:"hourFee"`
+			Medium  float64 `json:"halfHourFee"`
+			High    float64 `json:"fastestFee"`
 		}{}
 		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 			return FeeSuggestion{}, err
 		}
 		f.last = FeeSuggestion{
-			Low:    res.Economy,
-			Medium: res.Medium,
-			High:   res.High,
+			Low:    int(res.Economy * 1000),
+			Medium: int(res.Medium * 1000),
+			High:   int(res.High * 1000),
 		}
 		f.lastTime = time.Now()
 		return f.last, nil
@@ -318,9 +346,9 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 			}
 
 			feerates := FeeSuggestion{
-				Low:    int(math.Ceil(fees["6"])),
-				Medium: int(math.Ceil(fees["3"])),
-				High:   int(math.Ceil(fees["1"])),
+				Low:    int(math.Ceil(fees["6"] * 1000)),
+				Medium: int(math.Ceil(fees["3"] * 1000)),
+				High:   int(math.Ceil(fees["1"] * 1000)),
 			}
 
 			f.last = feerates
@@ -349,18 +377,4 @@ func (f fixFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		Medium: f.fee,
 		High:   f.fee,
 	}, nil
-}
-
-func AddUtxoToFetcher(fetcher *txscript.MultiPrevOutFetcher, utxo UTXO, script []byte) error {
-	hash, err := chainhash.NewHashFromStr(utxo.TxID)
-	if err != nil {
-		return err
-	}
-
-	fetcher.AddPrevOut(wire.OutPoint{
-		Hash:  *hash,
-		Index: utxo.Vout,
-	}, wire.NewTxOut(utxo.Amount, script))
-
-	return nil
 }

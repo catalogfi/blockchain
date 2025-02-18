@@ -50,7 +50,7 @@ var _ = Describe("bitcoin client", func() {
 				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
 				By("Create a new tx")
-				_, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+				key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
 				Expect(err).To(BeNil())
 				txid, err := btctest.Faucet(addr.EncodeAddress())
 				Expect(err).To(BeNil())
@@ -97,6 +97,25 @@ var _ = Describe("bitcoin client", func() {
 				netInfo, err := client.GetNetworkInfo(ctx)
 				Expect(err).To(BeNil())
 				Expect(netInfo.RelayFee).Should(BeNumerically(">=", 0))
+
+				By("GetMempoolEntry()")
+				utxos := []btc.UTXO{
+					{
+						TxID:   txid.String(),
+						Vout:   uint32(vout),
+						Amount: 1e8,
+					},
+				}
+				sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
+				feeMode := btc.MinFeeRateMode(10000, sizer)
+				tx1, err := btc.BuildTx(network, feeMode, utxos, nil, nil, addr)
+				Expect(err).To(BeNil())
+				Expect(btc.SignTx(waddrmgr.PubKeyHash, tx1, key, utxos)).Should(Succeed())
+				Expect(client.SubmitTx(ctx, tx1)).Should(Succeed())
+				Eventually(func() error {
+					_, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
+					return err
+				}).Should(Succeed())
 			})
 		})
 	})
@@ -115,10 +134,11 @@ var _ = Describe("bitcoin client", func() {
 			By("Construct a new tx")
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
 			Expect(err).To(BeNil())
-			amount, feeRate := int64(1e5), 5
-			recipients := btc.SingleRecipient(pkAddr.EncodeAddress(), amount)
-			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
-			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr)
+			amount := int64(1e5)
+			recipients := []btc.Recipient{btc.NewRecipient(pkAddr.EncodeAddress(), amount)}
+			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
+			feeMode := btc.MinFeeRateMode(10000, sizer)
+			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
@@ -152,13 +172,18 @@ var _ = Describe("bitcoin client", func() {
 				},
 			}
 
-			transaction1, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients1, pkAddr)
+			feeMode1 := btc.FixedFeesMode(1000)
+			transaction1, err := btc.BuildTx(network, feeMode1, nil, utxos, recipients1, pkAddr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
 
 			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
+
+			By("Expect a `ErrTxNotInMempool` error if the tx is not in the mempool")
+			_, err = client.GetMempoolEntry(ctx, transaction1.TxHash().String())
+			Expect(errors.Is(err, btc.ErrTxNotInMempool)).Should(BeTrue())
 		})
 
 		It("should return an error when the utxo has been spent", func() {
@@ -174,10 +199,11 @@ var _ = Describe("bitcoin client", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr1)
 			Expect(err).To(BeNil())
-			amount, feeRate := int64(1e5), 5
-			recipients := btc.SingleRecipient(pkAddr2.EncodeAddress(), amount)
-			sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH)
-			transaction, err := btc.BuildTransaction(network, feeRate, nil, utxos, sizer, recipients, pkAddr1)
+			amount, feeRate := int64(1e5), 5000
+			recipients := []btc.Recipient{btc.NewRecipient(pkAddr2.EncodeAddress(), amount)}
+			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
+			feeMode := btc.MinFeeRateMode(feeRate, sizer)
+			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
