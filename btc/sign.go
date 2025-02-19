@@ -112,7 +112,11 @@ func SignUtxos(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *bt
 		}
 		tx.TxIn[index].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
 	case waddrmgr.TaprootPubKey:
-		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, opts.tapScriptRootHash, opts.sighashType, key)
+		sighashType := opts.sighashType
+		if sighashType == txscript.SigHashAll {
+			sighashType = txscript.SigHashDefault
+		}
+		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, opts.tapScriptRootHash, sighashType, key)
 		if err != nil {
 			return err
 		}

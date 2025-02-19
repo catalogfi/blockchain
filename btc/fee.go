@@ -29,7 +29,11 @@ const (
 )
 
 var (
-	BaseSizeP2PKH = txsizes.RedeemP2PKHSigScriptSize
+	// BaseSizeP2PKH is the worst case (largest) serialize size of a transaction input script that redeems a compressed
+	// P2PKH output. This assumes we always use a low-s value signature. The signature size are usually 71 (60%) or
+	// 72(40%), with a very small chance of 70 or 69 (<1%). It is calculated as :
+	// sigLength(1) + sig(72) + pubKeyLength(1) + compressedPubKey(33)
+	BaseSizeP2PKH = 1 + 72 + 1 + 33
 
 	BaseSizeP2WPKH = 0
 
@@ -37,9 +41,14 @@ var (
 
 	SegwitSizeP2PKH = 0
 
-	SegwitSizeP2WPKH = txsizes.RedeemP2WPKHInputWitnessWeight
+	// SegwitSizeP2WPKH is the worst case weight of a witness for spending P2WPKH outputs. It is calculated as :
+	// number of items(1) + sigLength(1) + sig(72) + pubKeyLength(1) + compressedPubKey(33)
+	SegwitSizeP2WPKH = 1 + 1 + 72 + 1 + 33
 
 	SegwitSizeP2TR = txsizes.RedeemP2TRInputWitnessWeight
+
+	// SegwitSizeP2trDefault is the witness size when the schnorr signature is signed using the default sighash flag.
+	SegwitSizeP2trDefault = 1 + 1 + 64
 )
 
 // NewFetcher initializes a txscript.MultiPrevOutFetcher with the given utxos and script.
