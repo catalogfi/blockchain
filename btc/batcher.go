@@ -378,15 +378,11 @@ func (w *batcherWallet) processBatch() {
 	if err := w.createBatch(); err != nil {
 		if !errors.Is(err, ErrBatchParametersNotMet) {
 			w.logger.Error("failed to create batch", zap.Error(err))
-		} else {
-			w.logger.Info("waiting for new batch")
 		}
 
 		if err := w.updateBatchFeeRate(); err != nil {
 			if !errors.Is(err, ErrFeeUpdateNotNeeded) {
 				w.logger.Error("failed to update fee rate", zap.Error(err))
-			} else {
-				w.logger.Info("fee update skipped")
 			}
 		} else {
 			w.logger.Info("batch fee updated", zap.String("strategy", string(w.opts.Strategy)))
