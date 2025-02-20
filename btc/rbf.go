@@ -127,16 +127,13 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 		if err != nil {
 			return fmt.Errorf("failed to get utxo tx: %w", err)
 		}
-		if !utxoTx.Status.Confirmed {
-			previousUTXOs = append(previousUTXOs, UTXO{
-				TxID:   vin.TxID,
-				Vout:   uint32(vin.Vout),
-				Amount: int64(utxoTx.VOUTs[vin.Vout].Value),
-				Status: &utxoTx.Status,
-			})
-		}
+		previousUTXOs = append(previousUTXOs, UTXO{
+			TxID:   vin.TxID,
+			Vout:   uint32(vin.Vout),
+			Amount: int64(utxoTx.VOUTs[vin.Vout].Value),
+			Status: &utxoTx.Status,
+		})
 	}
-
 	descendantsFee, err := w.rpc.GetDescendantsFee(c, batch.Tx.TxID)
 	if err != nil {
 		w.logger.Error("failed to get descendants", zap.Error(err), zap.String("txid", batch.Tx.TxID))
@@ -646,7 +643,6 @@ func (w *batcherWallet) getUtxosWithFee(ctx context.Context, usedUTXOS UTXOs, am
 		w.logger.Error("failed to get pending funding utxos", zap.Error(err))
 		return nil, 0, err
 	}
-
 	var coverUtxos UTXOs
 
 	// Get UTXOs from the indexer
