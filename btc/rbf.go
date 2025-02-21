@@ -446,6 +446,25 @@ func (w *batcherWallet) createRBFTx(
 		return nil, err
 	}
 
+	// remove utxos that are already in spendUtxos
+	newUtxos := []UTXO{}
+	for _, utxo := range utxos {
+		found := false
+		for _, spendUtxo := range spendUTXOs {
+			if utxo.TxID == spendUtxo.TxID && utxo.Vout == spendUtxo.Vout {
+				found = true
+				break
+			}
+		}
+		if !found {
+			newUtxos = append(newUtxos, utxo)
+		}
+	}
+
+	oldUtxos := utxos
+
+	utxos = newUtxos
+
 	totalExistingValue := int64(0)
 	for _, utxo := range utxos {
 		totalExistingValue += utxo.Amount
@@ -478,7 +497,6 @@ func (w *batcherWallet) createRBFTx(
 
 	// Combine spend UTXOs with provided UTXOs
 	totalUtxos := append(spendUTXOs, utxos...)
-
 	// Generate the recipients for the spend requests
 	extraSendRequests, err := generateSendRequests(spendRequests, spendUTXOsMap, w.Address())
 	if err != nil {
@@ -556,6 +574,7 @@ func (w *batcherWallet) createRBFTx(
 				zap.Int64("changeAmount", changeAmount),
 				zap.Int("newFeeEstimate", newFeeEstimate),
 			)
+			utxos = oldUtxos
 			previousUTXOs := utxos
 
 			err := withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
