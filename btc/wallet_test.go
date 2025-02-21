@@ -388,115 +388,105 @@ var _ = Describe("Wallet", func() {
 			})
 
 			It("should be able to do rbf when the replaced tx has descendants", func(ctx context.Context) {
-
+				// todo
 			})
 		})
 
-		// Context("duplicate actions", func() {
-		// 	It("should handle duplicate inits", func(ctx context.Context) {
-		// 		By("Init keys and wallet")
-		// 		addrType := waddrmgr.WitnessPubKey
-		// 		key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
-		// 		Expect(err).Should(BeNil())
-		// 		key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-		// 		Expect(err).Should(BeNil())
-		// 		feeEstimator := btc.NewFixFeeEstimator(10)
-		// 		wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		// 		_, err = btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		//
-		// 		By("Initiate one htlc")
-		// 		init1, err := generateInitHtlcs(1, 1e6, 6, wal1.PublicKey(), key2.PubKey())
-		// 		Expect(err).Should(BeNil())
-		// 		tx1, err := wal1.Execute(ctx, init1)
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx1: %s", tx1.TxHash().String())
-		//
-		// 		By("Initiate again with duplicate actions")
-		// 		init2, err := generateInitHtlcs(1, 1e7, 6, key1.PubKey(), key2.PubKey())
-		// 		Expect(err).Should(BeNil())
-		// 		tx2, err := wal1.Execute(ctx, append(init1, append(init2, init2...)...), btc.WithRbfTxid(tx1.TxHash().String()))
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx2: %s", tx2.TxHash().String())
-		// 	})
-		//
-		// 	It("should handle duplicate redeems", func(ctx context.Context) {
-		// 		By("Init keys and wallet")
-		// 		addrType := waddrmgr.WitnessPubKey
-		// 		key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
-		// 		Expect(err).Should(BeNil())
-		// 		key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-		// 		Expect(err).Should(BeNil())
-		// 		feeEstimator := btc.NewFixFeeEstimator(10)
-		// 		wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		// 		wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		//
-		// 		By("Redeem one htlc")
-		// 		redeems, err := generateRedeemHtlcs(ctx, 2, 1e6, 6, key2.PubKey(), key1.PubKey(), wal2)
-		// 		Expect(err).Should(BeNil())
-		// 		tx1, err := wal1.Execute(ctx, redeems[:1])
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx1: %s", tx1.TxHash().String())
-		//
-		// 		By("Redeem again with duplicate actions")
-		// 		tx2, err := wal1.Execute(ctx, append(redeems, redeems...), btc.WithRbfTxid(tx1.TxHash().String()))
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx2: %s", tx2.TxHash().String())
-		// 	})
-		//
-		// 	It("should handle duplicate refunds", func(ctx context.Context) {
-		// 		By("Init keys and wallet")
-		// 		addrType := waddrmgr.WitnessPubKey
-		// 		key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
-		// 		Expect(err).Should(BeNil())
-		// 		key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-		// 		Expect(err).Should(BeNil())
-		// 		feeEstimator := btc.NewFixFeeEstimator(10)
-		// 		wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		//
-		// 		By("Refund one htlc")
-		// 		refunds, err := generateRefundHtlcs(ctx, 2, 1e6, 6, key1.PubKey(), key2.PubKey(), wal1)
-		// 		Expect(err).Should(BeNil())
-		// 		tx1, err := wal1.Execute(ctx, refunds[:1])
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx1: %s", tx1.TxHash().String())
-		//
-		// 		By("Refund again with duplicate actions")
-		// 		tx2, err := wal1.Execute(ctx, append(refunds, refunds...), btc.WithRbfTxid(tx1.TxHash().String()))
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx2: %s", tx2.TxHash().String())
-		// 	})
-		//
-		// 	It("should handle duplicate instant refunds", func(ctx context.Context) {
-		// 		By("Init keys and wallet")
-		// 		addrType := waddrmgr.WitnessPubKey
-		// 		key1, _, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
-		// 		Expect(err).Should(BeNil())
-		// 		key2, _, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-		// 		Expect(err).Should(BeNil())
-		// 		feeEstimator := btc.NewFixFeeEstimator(10)
-		// 		wal1, err := btc.NewWallet(network, addrType, key1, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		// 		wal2, err := btc.NewWallet(network, addrType, key2, indexer, feeEstimator)
-		// 		Expect(err).Should(BeNil())
-		//
-		// 		By("Instant refunds one htlc")
-		// 		instantRefunds, err := generateInstantRefundHtlcs(ctx, 2, 1e6, 6, key2.PubKey(), key1.PubKey(), wal2, key2)
-		// 		Expect(err).Should(BeNil())
-		// 		tx1, err := wal1.Execute(ctx, instantRefunds[:1])
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx1: %s", tx1.TxHash().String())
-		//
-		// 		By("Instant refunds again with duplicate actions")
-		// 		tx2, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), btc.WithRbfTxid(tx1.TxHash().String()))
-		// 		Expect(err).Should(BeNil())
-		// 		color.Green("tx2: %s", tx2.TxHash().String())
-		// 	})
-		// })
+		Context("duplicate actions", func() {
+			It("should handle duplicate inits", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+
+					By("Initiate one htlc")
+					init1, err := generateInitHtlcs(1, 1e6, 6, wal1.PublicKey(), wal2.PublicKey())
+					Expect(err).Should(BeNil())
+					tx1, err := wal1.Execute(ctx, init1)
+					Expect(err).Should(BeNil())
+					color.Green("tx1: %s", tx1.TxHash().String())
+
+					By("Initiate again with duplicate actions")
+					init2, err := generateInitHtlcs(1, 1e7, 6, wal1.PublicKey(), wal2.PublicKey())
+					Expect(err).Should(BeNil())
+					tx2, err := wal1.Execute(ctx, append(init1, append(init2, init2...)...), btc.WithRbfTxid(tx1.TxHash().String()))
+					Expect(err).Should(BeNil())
+					color.Green("tx2: %s", tx2.TxHash().String())
+				}
+			})
+
+			It("should handle duplicate redeems", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+
+					By("Redeem one htlc")
+					redeems, err := generateRedeemHtlcs(ctx, 2, 1e6, 6, wal2.PublicKey(), wal1.PublicKey(), wal2)
+					Expect(err).Should(BeNil())
+					tx1, err := wal1.Execute(ctx, redeems[:1])
+					Expect(err).Should(BeNil())
+					color.Green("tx1: %s", tx1.TxHash().String())
+
+					By("Redeem again with duplicate actions")
+					tx2, err := wal1.Execute(ctx, append(redeems, redeems...), btc.WithRbfTxid(tx1.TxHash().String()))
+					Expect(err).Should(BeNil())
+					color.Green("tx2: %s", tx2.TxHash().String())
+				}
+			})
+
+			It("should handle duplicate refunds", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+
+					By("Refund one htlc")
+					refunds, err := generateRefundHtlcs(ctx, 2, 1e6, 6, wal1.PublicKey(), wal2.PublicKey(), wal1)
+					Expect(err).Should(BeNil())
+					tx1, err := wal1.Execute(ctx, refunds[:1])
+					Expect(err).Should(BeNil())
+					color.Green("tx1: %s", tx1.TxHash().String())
+
+					By("Refund again with duplicate actions")
+					tx2, err := wal1.Execute(ctx, append(refunds, refunds...), btc.WithRbfTxid(tx1.TxHash().String()))
+					Expect(err).Should(BeNil())
+					color.Green("tx2: %s", tx2.TxHash().String())
+				}
+			})
+
+			It("should handle duplicate instant refunds", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+
+					By("Instant refunds one htlc")
+					instantRefunds, err := generateInstantRefundHtlcs(ctx, 2, 1e6, 6, wal2.PublicKey(), wal1.PublicKey(), wal2)
+					Expect(err).Should(BeNil())
+					tx1, err := wal1.Execute(ctx, instantRefunds[:1])
+					Expect(err).Should(BeNil())
+					color.Green("tx1: %s", tx1.TxHash().String())
+
+					By("Instant refunds again with duplicate actions")
+					tx2, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), btc.WithRbfTxid(tx1.TxHash().String()))
+					Expect(err).Should(BeNil())
+					color.Green("tx2: %s", tx2.TxHash().String())
+				}
+			})
+		})
 	})
 })
 

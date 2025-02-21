@@ -3,6 +3,7 @@ package btc
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -249,6 +250,8 @@ func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, rec
 			return tx, nil
 		}
 	}
+
+	log.Printf("have %v utxos, total in = %v, total out = %v", len(utxos), totalIn, totalOut)
 
 	return nil, fmt.Errorf("funds not enough")
 }
