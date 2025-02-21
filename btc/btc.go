@@ -166,13 +166,12 @@ func GaslessMode() FeeMode {
 // fees needed for the transaction. Both `minFeeRate` and `prevFeeRate` will be in sats/kvb.
 func RbfMode(minFeeRate, prevFeeRate int, prevFees int64, sizer *SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
-		weight, err := sizer.EstimateTxWeight(tx)
+		vsize, err := sizer.EstimateTxVirtualSize(tx)
 		if err != nil {
 			return 0, err
 		}
-		vsize := (weight + 3) / 4
 		fees1 := math.Ceil(float64((prevFeeRate+1)*vsize) / 1000)
-		fees2 := math.Ceil(float64(prevFees) + float64(weight)/4)
+		fees2 := math.Ceil(float64(prevFees) + float64(vsize))
 		fees3 := math.Ceil(float64(minFeeRate * vsize / 1000))
 		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
 	}

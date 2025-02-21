@@ -10,7 +10,6 @@ require (
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
 	github.com/btcsuite/btcwallet v0.16.9
-	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.4
 	github.com/ethereum/go-ethereum v1.14.5
 	github.com/fatih/color v1.16.0
 	github.com/onsi/ginkgo/v2 v2.19.0
@@ -21,7 +20,6 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/aead/siphash v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f // indirect
 	github.com/btcsuite/btcwallet/walletdb v1.4.2 // indirect
@@ -43,7 +41,6 @@ require (
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/holiman/uint256 v1.2.4 // indirect
-	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/lightninglabs/neutrino/cache v1.1.2 // indirect
 	github.com/lightningnetwork/lnd/fn v1.0.5 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.2.3 // indirect

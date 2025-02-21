@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -35,9 +34,13 @@ func WithRbfTxid(txid string) ExecuteOpts {
 }
 
 type Wallet interface {
+	PublicKey() *btcec.PublicKey
+
 	Address() btcutil.Address
 
-	Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error)
+	InstantRefundTx(utxo UTXO, htlc *HTLC) (*wire.MsgTx, error)
+
+	Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire.MsgTx, error)
 
 	Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire.MsgTx, error)
 
@@ -51,7 +54,8 @@ type Wallet interface {
 type wallet struct {
 	mu           *sync.Mutex
 	network      *chaincfg.Params
-	key          *btcec.PrivateKey
+	internalKey  *btcec.PrivateKey
+	externalKey  *btcec.PrivateKey
 	addrType     waddrmgr.AddressType
 	addr         btcutil.Address
 	indexer      IndexerClient
@@ -59,67 +63,83 @@ type wallet struct {
 	feeEstimator FeeEstimator
 }
 
-func NewWallet(network *chaincfg.Params, addrType waddrmgr.AddressType, key *btcec.PrivateKey, indexer IndexerClient, estimator FeeEstimator) (Wallet, error) {
-	addr, err := PublicKeyAddress(network, addrType, key.PubKey())
+func NewWallet(network *chaincfg.Params, addrType waddrmgr.AddressType, privateKey *btcec.PrivateKey, indexer IndexerClient, client Client, estimator FeeEstimator) (Wallet, error) {
+	externalKey := privateKey
+	if addrType == waddrmgr.TaprootPubKey {
+		externalKey = txscript.TweakTaprootPrivKey(*privateKey, nil)
+	}
+	addr, err := PublicKeyAddress(network, addrType, externalKey.PubKey())
 	if err != nil {
 		return nil, err
 	}
 	return &wallet{
 		mu:           new(sync.Mutex),
-		key:          key,
+		network:      network,
+		internalKey:  privateKey,
+		externalKey:  externalKey,
 		addrType:     addrType,
 		addr:         addr,
-		network:      network,
 		indexer:      indexer,
+		client:       client,
 		feeEstimator: estimator,
 	}, nil
+}
+
+func (wal *wallet) PublicKey() *btcec.PublicKey {
+	return wal.externalKey.PubKey()
 }
 
 func (wal *wallet) Address() btcutil.Address {
 	return wal.addr
 }
 
-func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) {
+func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire.MsgTx, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
 	// Inputs
 	utxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 
 	// Recipients
 	htlcAddr, err := htlc.Address(wal.network)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	recipients := []Recipient{NewRecipient(htlcAddr.EncodeAddress(), htlc.Amount)}
 
 	// Fees
 	feeRate, err := wal.feeEstimator.FeeSuggestion()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
 
 	// Build tx
 	tx, err := BuildTx(wal.network, feeMode, nil, utxos, recipients, wal.Address())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Sign tx
-	if err := SignTx(wal.addrType, tx, wal.key, utxos); err != nil {
-		return nil, err
+	if err := SignTx(wal.addrType, tx, wal.internalKey, utxos); err != nil {
+		return nil, nil, err
 	}
 
 	// Submit tx
 	if err := wal.indexer.SubmitTx(ctx, tx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return tx, nil
+
+	utxo := NewUtxo(tx.TxHash().String(), 0, htlc.Amount)
+	irTx, err := wal.InstantRefundTx(utxo, htlc)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tx, irTx, nil
 }
 
 func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire.MsgTx, error) {
@@ -175,7 +195,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 		if err != nil {
 			return nil, err
 		}
-		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashAll, wal.key)
+		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashDefault, wal.externalKey)
 		if err != nil {
 			return nil, err
 		}
@@ -247,7 +267,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	}
 	for i, utxo := range tx.TxIn {
 		out := fetcher.FetchPrevOutput(utxo.PreviousOutPoint)
-		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashAll, wal.key)
+		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashDefault, wal.externalKey)
 		if err != nil {
 			return nil, err
 		}
@@ -315,14 +335,14 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 			}
 
 			out := fetcher.FetchPrevOutput(input.PreviousOutPoint)
-			redeemerSig, err := txscript.RawTxInTapscriptSignature(transaction, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashAll, wal.key)
+			redeemerSig, err := txscript.RawTxInTapscriptSignature(transaction, sigHashes, i, out.Value, out.PkScript, leaf, txscript.SigHashAll, wal.externalKey)
 			if err != nil {
 				return nil, err
 			}
 			initiatorSig := tx.TxIn[i].Witness[0]
 			transaction.TxIn[i].Witness = append(wire.TxWitness{}, redeemerSig, initiatorSig, leaf.Script, ctrBlkBytes)
 		} else {
-			if err := SignUtxos(wal.addrType, transaction, i, wal.key, fetcher, sigHashes); err != nil {
+			if err := SignUtxos(wal.addrType, transaction, i, wal.internalKey, fetcher, sigHashes); err != nil {
 				return nil, err
 			}
 		}
@@ -366,6 +386,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		if err != nil {
 			return nil, err
 		}
+		if replacedTx.Status.Confirmed {
+			return nil, ErrTxNotInMempool
+		}
 
 		for _, vin := range replacedTx.VINs {
 			if vin.Prevout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
@@ -394,7 +417,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	}
 
 	// Fetcher
-	pkScript, err := wal.pkScript()
+	pkScript, err := PkScript(wal.addrType, wal.externalKey.PubKey())
 	if err != nil {
 		return nil, err
 	}
@@ -548,22 +571,22 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 	feeRate := feeRates.High
+	feeMode := MinFeeRateMode(feeRate*1000, sizer)
 	if replacedTx.TxID != "" {
-		// // TODO : NEED TO CHECK ERROR IF TX IS CONFIRMED
-		// entry, err := wal.client.GetMempoolEntry(ctx, replacedTx.TxID)
-		// if err != nil {
-		// 	return nil, err
-		// }
-
-		// feeRate = fee / vsize
-		prevFeeRate := float64(replacedTx.Fee) / math.Ceil(float64(replacedTx.Weight)/4)
-		if float64(feeRate) <= prevFeeRate {
-			feeRate = int(math.Ceil(prevFeeRate + 1))
+		entry, err := wal.client.GetMempoolEntry(ctx, replacedTx.TxID)
+		if err != nil {
+			return nil, err
 		}
+		prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+		if err != nil {
+			return nil, err
+		}
+
+		prevFeeRate := int(prevFees*1e3) / int(entry.DescendantSize)
+		feeMode = RbfMode(feeRate*1000, prevFeeRate, int64(prevFees), sizer)
 	}
 
 	// Build the tx
-	feeMode := MinFeeRateMode(feeRate*1000, sizer)
 	tx, err := BuildTx(wal.network, feeMode, inputs, utxos, recipients, wal.Address())
 	if err != nil {
 		return nil, err
@@ -614,7 +637,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			// Second last witness should be the script and the first witness is our signature.
 			// We have validated the witness before storing the map, so we can confidently use it.
 			leaf := txscript.NewTapLeaf(txscript.BaseLeafVersion, witness[len(witness)-2])
-			sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashAll, wal.key)
+			sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashDefault, wal.externalKey)
 			if err != nil {
 				return nil, err
 			}
@@ -626,7 +649,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		// Rest utxos should be the wallet utxos or from new actions.
 		action, ok := inputActions[tx.TxIn[i].PreviousOutPoint.String()]
 		if !ok {
-			if err := SignUtxos(wal.addrType, tx, i, wal.key, fetcher, sigHashes); err != nil {
+			if err := SignUtxos(wal.addrType, tx, i, wal.internalKey, fetcher, sigHashes); err != nil {
 				return nil, err
 			}
 			continue
@@ -638,7 +661,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		if err != nil {
 			return nil, err
 		}
-		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashAll, wal.key)
+		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, outpoint.Value, outpoint.PkScript, leaf, txscript.SigHashDefault, wal.externalKey)
 		if err != nil {
 			return nil, err
 		}
@@ -659,17 +682,34 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	return tx, wal.indexer.SubmitTx(ctx, tx)
 }
 
-func (wal *wallet) pkScript() ([]byte, error) {
-	var pub *btcec.PublicKey
-	switch wal.addrType {
-	case waddrmgr.TaprootPubKey:
-		pub = txscript.ComputeTaprootOutputKey(wal.key.PubKey(), nil)
-	case waddrmgr.PubKeyHash, waddrmgr.WitnessPubKey:
-		pub = wal.key.PubKey()
-	default:
-		return nil, errors.New("invalid address type")
+func (wal *wallet) InstantRefundTx(utxo UTXO, htlc *HTLC) (*wire.MsgTx, error) {
+	recipient := NewRecipient(wal.addr.EncodeAddress(), htlc.Amount)
+	irTx, err := BuildTx(wal.network, GaslessMode(), []UTXO{utxo}, nil, []Recipient{recipient}, nil)
+	if err != nil {
+		return nil, err
 	}
-	return PkScript(wal.addrType, pub)
+
+	// Sign the tx
+	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
+	script, err := htlc.P2trScript()
+	if err != nil {
+		return nil, err
+	}
+	fetcher, err := NewFetcher(script, utxo)
+	if err != nil {
+		return nil, err
+	}
+	sigHashes := txscript.NewTxSigHashes(irTx, fetcher)
+	for i, input := range irTx.TxIn {
+		out := fetcher.FetchPrevOutput(input.PreviousOutPoint)
+		sig, err := txscript.RawTxInTapscriptSignature(irTx, sigHashes, i, out.Value, out.PkScript, leaf, SigHashSingleAnyoneCanPay, wal.externalKey)
+		if err != nil {
+			return nil, err
+		}
+
+		irTx.TxIn[i].Witness = append(irTx.TxIn[i].Witness, sig)
+	}
+	return irTx, nil
 }
 
 func decodeWitness(witnessStr []string) (wire.TxWitness, error) {

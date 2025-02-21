@@ -103,6 +103,19 @@ func NewBtcAddrWithFunds(network *chaincfg.Params, addrType waddrmgr.AddressType
 	return key, addr, nil
 }
 
+// NewWallet returns a new wallet. If `funds` is true, the wallet will be funded with the `merry faucet` command.
+func NewWallet(network *chaincfg.Params, addrType waddrmgr.AddressType, indexer btc.IndexerClient, client btc.Client, feeEstimator btc.FeeEstimator, waitMined bool) (btc.Wallet, error) {
+	waitMinedIndexer := indexer
+	if !waitMined {
+		waitMinedIndexer = nil
+	}
+	key, _, err := NewBtcAddrWithFunds(network, addrType, waitMinedIndexer)
+	if err != nil {
+		return nil, err
+	}
+	return btc.NewWallet(network, addrType, key, indexer, client, feeEstimator)
+}
+
 // RandomSecret creates a random secret with size [1,32)
 func RandomSecret() ([]byte, [32]byte) {
 	length := rand.Intn(31) + 1

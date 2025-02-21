@@ -15,7 +15,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
 )
 
 const (
@@ -45,7 +44,9 @@ var (
 	// number of items(1) + sigLength(1) + sig(72) + pubKeyLength(1) + compressedPubKey(33)
 	SegwitSizeP2WPKH = 1 + 1 + 72 + 1 + 33
 
-	SegwitSizeP2TR = txsizes.RedeemP2TRInputWitnessWeight
+	// SegwitSizeP2TR is the worst case weight of a witness for spending P2TR outputs. It is calculated as :
+	// number of items(1) + sigLength(1) + sig(64)
+	SegwitSizeP2TR = 1 + 1 + 64
 
 	// SegwitSizeP2trDefault is the witness size when the schnorr signature is signed using the default sighash flag.
 	SegwitSizeP2trDefault = 1 + 1 + 64
@@ -171,55 +172,48 @@ func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 	return base, segwit, nil
 }
 
+func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
+	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
+	legacy := 0
+	for _, input := range tx.TxIn {
+		key := input.PreviousOutPoint.String()
+		base, ok := estimator.baseSizeMap[key]
+		if !ok {
+			return 0, fmt.Errorf("unknown utxo = %v", key)
+		}
+		totalBase += base
+		if base != 0 {
+			legacy++
+		}
+		segwit, ok := estimator.segwitSizeMap[key]
+		if !ok {
+			return 0, fmt.Errorf("unknown utxo = %v", key)
+		}
+		totalSegwit += segwit
+	}
+
+	// Additional 2 weight units for segwit marker + flag if tx has any witness input
+	if totalSegwit > 0 {
+		totalSegwit += 2
+	}
+
+	// When including both legacy and segwit inputs
+	if totalSegwit > 0 && legacy > 0 {
+		totalBase += legacy
+	}
+
+	return totalBase*4 + totalSegwit, nil
+}
+
 // EstimateTxVirtualSize returns the estimated size of the given transaction. It would be an upperbound, and usually the
 // fees might be a few bytes less. It assumes the tx is not signed at all. It would return an error if one of the utxo
 // is unknown in terms of signature size.
 func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
-	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
-	for _, input := range tx.TxIn {
-		key := input.PreviousOutPoint.String()
-		base, ok := estimator.baseSizeMap[key]
-		if !ok {
-			return 0, fmt.Errorf("unknown utxo = %v", key)
-		}
-		totalBase += base
-		segwit, ok := estimator.segwitSizeMap[key]
-		if !ok {
-			return 0, fmt.Errorf("unknown utxo = %v", key)
-		}
-		totalSegwit += segwit
+	weight, err := estimator.EstimateTxWeight(tx)
+	if err != nil {
+		return 0, err
 	}
-
-	// Additional 2 weight units for segwit marker + flag if tx has any witness input
-	if totalSegwit > 0 {
-		totalSegwit += 2
-	}
-
-	return totalBase + (totalSegwit+3)/blockchain.WitnessScaleFactor, nil
-}
-
-func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
-	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
-	for _, input := range tx.TxIn {
-		key := input.PreviousOutPoint.String()
-		base, ok := estimator.baseSizeMap[key]
-		if !ok {
-			return 0, fmt.Errorf("unknown utxo = %v", key)
-		}
-		totalBase += base
-		segwit, ok := estimator.segwitSizeMap[key]
-		if !ok {
-			return 0, fmt.Errorf("unknown utxo = %v", key)
-		}
-		totalSegwit += segwit
-	}
-
-	// Additional 2 weight units for segwit marker + flag if tx has any witness input
-	if totalSegwit > 0 {
-		totalSegwit += 2
-	}
-
-	return totalBase*4 + totalSegwit, nil
+	return (weight + 3) / blockchain.WitnessScaleFactor, nil
 }
 
 type FeeLevel string
