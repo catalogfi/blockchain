@@ -425,6 +425,11 @@ func (w *batcherWallet) createRBFTx(
 		checkValidity = true
 	}
 
+	w.logger.Debug(
+		"first utxos",
+		zap.Any("depth", depth),
+		zap.Any("utxos", utxos),
+	)
 	var sacpsInAmount int64
 	var sacpsOutAmount int64
 	var err error
@@ -445,6 +450,16 @@ func (w *batcherWallet) createRBFTx(
 	if err != nil {
 		return nil, err
 	}
+
+	w.logger.Debug(
+		"spends",
+		zap.Any("spendUTXOs", spendUTXOs),
+	)
+
+	w.logger.Debug(
+		"utxos",
+		zap.Any("utxos", utxos),
+	)
 
 	totalExistingValue := int64(0)
 	for _, utxo := range utxos {
