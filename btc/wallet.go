@@ -592,27 +592,6 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 
-	// Check if we have meet the fee requirement for rbf
-	if replacedTx.TxID != "" {
-		for {
-			vsize, err := sizer.EstimateTxVirtualSize(tx)
-			if err != nil {
-				return nil, err
-			}
-			if TotalFee(tx, fetcher) > int(replacedTx.Fee)+vsize {
-				break
-			}
-			feeRate++
-
-			// Build tx again with new fee rate
-			feeMode := MinFeeRateMode(feeRate*1000, sizer)
-			tx, err = BuildTx(wal.network, feeMode, inputs, utxos, recipients, wal.Address())
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	// Set sequence number for refund inputs
 	for i := range tx.TxIn {
 		action, ok := inputActions[tx.TxIn[i].PreviousOutPoint.String()]

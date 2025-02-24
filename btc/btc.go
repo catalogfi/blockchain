@@ -26,12 +26,12 @@ const (
 
 	// MinRelayFeeRate is the minimum feerate (in sat/kvb) a transaction must meet in order to be broadcast by the node.
 	// This is a default value used by Bitcore Core. Different node may have different setting for this.
-	MinRelayFeeRate = 1 * 1000
+	MinRelayFeeRate = SatoshiPerKb(1e3)
 
 	// MaxRelayFeeRate is not something in the bitcoin protocol, but more of a defensive check to make sure we're not
 	// using an unreasonable value. (i.e. third-party api) If the fee rate we choose is greater than this value, this
 	// usually means something is wrong.
-	MaxRelayFeeRate = 500 * 1000
+	MaxRelayFeeRate = SatoshiPerKb(500e3)
 
 	// SigHashSingleAnyoneCanPay is an alias for the signature hash types: `txscript.SigHashSingle |
 	// txscript.SigHashAnyOneCanPay`.
