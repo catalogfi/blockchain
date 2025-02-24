@@ -62,7 +62,7 @@ var _ = Describe("Indexer client", func() {
 			Expect(btcTx.MsgTx().TxHash().String()).Should(Equal(txid.String()))
 
 			By("SubmitTx()")
-			amount, feeRate := int64(1e6), 10000
+			amount, feeRate := int64(1e6), btctest.RandomFeeRate()
 			recipients := []btc.Recipient{btc.NewRecipient(addr.EncodeAddress(), amount)}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
@@ -93,7 +93,7 @@ var _ = Describe("Indexer client", func() {
 			By("Construct a new tx")
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
 			Expect(err).To(BeNil())
-			amount, feeRate := int64(1e6), 10000
+			amount, feeRate := int64(1e6), btctest.RandomFeeRate()
 			recipients := []btc.Recipient{btc.NewRecipient(pkAddr.EncodeAddress(), amount)}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)

@@ -129,6 +129,15 @@ func RandomSecret() ([]byte, [32]byte) {
 	return data, hash
 }
 
+// func RandomAmount(min, max int64) int64 {
+// 	return min + rand.Int63n(max-min+1)
+// }
+
+// RandomFeeRate will generates a random fee rate between 1 sat/vb to 500 sat/vb.
+func RandomFeeRate() btc.SatoshiPerKb {
+	return btc.SatoshiPerKb(1000) + btc.SatoshiPerKb(rand.Int63n(499*1000+1))
+}
+
 // NewHtlc creates a new HTLC with random secret.
 func NewHtlc(initiatorPubKey, redeemerPubKey *btcec.PublicKey, timelock, amount int64) (*btc.HTLC, []byte, error) {
 	initiatorPubBytes := schnorr.SerializePubKey(initiatorPubKey)

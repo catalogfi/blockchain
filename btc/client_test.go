@@ -199,7 +199,7 @@ var _ = Describe("bitcoin client", func() {
 			By("Build the transaction")
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr1)
 			Expect(err).To(BeNil())
-			amount, feeRate := int64(1e5), 5000
+			amount, feeRate := int64(1e5), btctest.RandomFeeRate()
 			recipients := []btc.Recipient{btc.NewRecipient(pkAddr2.EncodeAddress(), amount)}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)

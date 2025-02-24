@@ -118,29 +118,29 @@ var _ = Describe("bitcoin fees", func() {
 				estimatorTestnet := btc.NewBlockstreamFeeEstimator(&chaincfg.TestNet3Params, "", 15*time.Second)
 				fees, err := estimatorTestnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Low).Should(Equal(1))
-				Expect(fees.Medium).Should(Equal(1))
-				Expect(fees.High).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(btc.SatoshiPerKb(1e3)))
+				Expect(fees.Medium).Should(Equal(btc.SatoshiPerKb(1e3)))
+				Expect(fees.High).Should(Equal(btc.SatoshiPerKb(1e3)))
 
 				By("Regnet")
 				estimatorRegnet := btc.NewBlockstreamFeeEstimator(&chaincfg.RegressionNetParams, "", 15*time.Second)
 				fees, err = estimatorRegnet.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Low).Should(Equal(1))
-				Expect(fees.Medium).Should(Equal(1))
-				Expect(fees.High).Should(Equal(1))
+				Expect(fees.Low).Should(Equal(btc.SatoshiPerKb(1e3)))
+				Expect(fees.Medium).Should(Equal(btc.SatoshiPerKb(1e3)))
+				Expect(fees.High).Should(Equal(btc.SatoshiPerKb(1e3)))
 			})
 		})
 
 		Context("fix fee estimator", func() {
 			It("should return a fixed fee for fixFeeEstimator", func() {
-				fee := rand.Intn(100)
-				estimator := btc.NewFixFeeEstimator(fee)
+				feeRate := btctest.RandomFeeRate()
+				estimator := btc.NewFixFeeEstimator(feeRate)
 				fees, err := estimator.FeeSuggestion()
 				Expect(err).Should(BeNil())
-				Expect(fees.Low).Should(Equal(fee))
-				Expect(fees.Medium).Should(Equal(fee))
-				Expect(fees.High).Should(Equal(fee))
+				Expect(fees.Low).Should(Equal(feeRate))
+				Expect(fees.Medium).Should(Equal(feeRate))
+				Expect(fees.High).Should(Equal(feeRate))
 			})
 		})
 	})
@@ -161,7 +161,7 @@ var _ = Describe("bitcoin fees", func() {
 
 				edge := 0
 				for i := 0; i < 10000; i++ {
-					amount, feeRate := rand.Int63n(10000)+1e7, 1e3+rand.Intn(100)*1000
+					amount, feeRate := rand.Int63n(10000)+1e7, btctest.RandomFeeRate()
 					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
 					feeMode := btc.MinFeeRateMode(feeRate, sizer)
 					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)

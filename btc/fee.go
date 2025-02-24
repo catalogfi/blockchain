@@ -12,6 +12,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -216,6 +217,22 @@ func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, erro
 	return (weight + 3) / blockchain.WitnessScaleFactor, nil
 }
 
+// SatoshiPerKb is the fee rate in satoshi per kilobyte. This will be the default measure of fee rate in this package.
+type SatoshiPerKb int64
+
+// NewSatoshiPerKb returns a new SatoshiPerKb from the given fee and virtual size.
+func NewSatoshiPerKb(fee int64, vsize int) SatoshiPerKb {
+	return SatoshiPerKb(fee * 1000 / int64(vsize))
+}
+
+func (rate SatoshiPerKb) Int() int {
+	return int(rate)
+}
+
+func (rate SatoshiPerKb) ToSatoshiPerByte() mempool.SatoshiPerByte {
+	return mempool.SatoshiPerByte(float64(rate) / 1000)
+}
+
 type FeeLevel string
 
 var (
@@ -225,13 +242,13 @@ var (
 )
 
 type FeeSuggestion struct {
-	Low    int `json:"low"`
-	Medium int `json:"medium"`
-	High   int `json:"high"`
+	Low    SatoshiPerKb `json:"low"`
+	Medium SatoshiPerKb `json:"medium"`
+	High   SatoshiPerKb `json:"high"`
 }
 
 // Fee will return the fee rate of the given fee level.
-func (feeSuggestion FeeSuggestion) Fee(level FeeLevel) int {
+func (feeSuggestion FeeSuggestion) Fee(level FeeLevel) SatoshiPerKb {
 	switch level {
 	case FeeLow:
 		return feeSuggestion.Low
@@ -299,9 +316,9 @@ func (f *mempoolFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 			return FeeSuggestion{}, err
 		}
 		f.last = FeeSuggestion{
-			Low:    int(res.Economy * 1000),
-			Medium: int(res.Medium * 1000),
-			High:   int(res.High * 1000),
+			Low:    SatoshiPerKb(res.Economy * 1000),
+			Medium: SatoshiPerKb(res.Medium * 1000),
+			High:   SatoshiPerKb(res.High * 1000),
 		}
 		f.lastTime = time.Now()
 		return f.last, nil
@@ -349,9 +366,9 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 			}
 
 			feerates := FeeSuggestion{
-				Low:    int(math.Ceil(fees["6"] * 1000)),
-				Medium: int(math.Ceil(fees["3"] * 1000)),
-				High:   int(math.Ceil(fees["1"] * 1000)),
+				Low:    SatoshiPerKb(math.Ceil(fees["6"] * 1000)),
+				Medium: SatoshiPerKb(math.Ceil(fees["3"] * 1000)),
+				High:   SatoshiPerKb(math.Ceil(fees["1"] * 1000)),
 			}
 
 			f.last = feerates
@@ -360,15 +377,15 @@ func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
 		}
 		return f.last, nil
 	} else {
-		return FeeSuggestion{1, 1, 1}, nil
+		return FeeSuggestion{1e3, 1e3, 1e3}, nil
 	}
 }
 
 type fixFeeEstimator struct {
-	fee int
+	fee SatoshiPerKb
 }
 
-func NewFixFeeEstimator(fee int) FeeEstimator {
+func NewFixFeeEstimator(fee SatoshiPerKb) FeeEstimator {
 	return fixFeeEstimator{
 		fee: fee,
 	}

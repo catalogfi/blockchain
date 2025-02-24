@@ -571,7 +571,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		return nil, err
 	}
 	feeRate := feeRates.High
-	feeMode := MinFeeRateMode(feeRate*1000, sizer)
+	feeMode := MinFeeRateMode(feeRate, sizer)
 	if replacedTx.TxID != "" {
 		entry, err := wal.client.GetMempoolEntry(ctx, replacedTx.TxID)
 		if err != nil {
@@ -582,8 +582,8 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			return nil, err
 		}
 
-		prevFeeRate := int(prevFees*1e3) / int(entry.DescendantSize)
-		feeMode = RbfMode(feeRate*1000, prevFeeRate, int64(prevFees), sizer)
+		prevFeeRate := NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
+		feeMode = RbfMode(feeRate, prevFeeRate, int64(prevFees), sizer)
 	}
 
 	// Build the tx

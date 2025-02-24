@@ -19,7 +19,7 @@ var _ = Describe("Wallet", func() {
 		It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallets")
-				feeEstimator := btc.NewFixFeeEstimator(10)
+				feeEstimator := btc.NewFixFeeEstimator(10e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -41,7 +41,7 @@ var _ = Describe("Wallet", func() {
 		It("should be able to refund an HTLC after it expires", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallets")
-				feeEstimator := btc.NewFixFeeEstimator(10)
+				feeEstimator := btc.NewFixFeeEstimator(10e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -69,7 +69,7 @@ var _ = Describe("Wallet", func() {
 		It("should be able to instant refund a HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallet")
-				feeEstimator := btc.NewFixFeeEstimator(10)
+				feeEstimator := btc.NewFixFeeEstimator(10e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -96,7 +96,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -132,7 +132,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to refund an HTLC after it expires", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -172,7 +172,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to instant refund an HTLC", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -205,7 +205,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to execute multiple execution at once", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -305,7 +305,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to do rbf with new actions", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -342,7 +342,7 @@ var _ = Describe("Wallet", func() {
 			It("should make sure the rbf tx is conflicted with all previous txs", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -396,7 +396,7 @@ var _ = Describe("Wallet", func() {
 			It("should handle duplicate inits", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -421,7 +421,7 @@ var _ = Describe("Wallet", func() {
 			It("should handle duplicate redeems", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -444,7 +444,7 @@ var _ = Describe("Wallet", func() {
 			It("should handle duplicate refunds", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -467,7 +467,7 @@ var _ = Describe("Wallet", func() {
 			It("should handle duplicate instant refunds", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10)
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)

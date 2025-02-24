@@ -138,13 +138,13 @@ type FeeMode func(tx *wire.MsgTx) (int64, error)
 
 // MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be greater than or equal
 // to the given `feeRate` (sats/kvb).
-func MinFeeRateMode(feeRate int, sizer *SizeEstimator) FeeMode {
+func MinFeeRateMode(feeRate SatoshiPerKb, sizer *SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vs, err := sizer.EstimateTxVirtualSize(tx)
 		if err != nil {
 			return 0, err
 		}
-		return int64(vs*feeRate+999) / 1000, nil
+		return int64(vs*feeRate.Int()+999) / 1000, nil
 	}
 }
 
@@ -165,15 +165,15 @@ func GaslessMode() FeeMode {
 // RbfMode computes the required fees for a transaction to be replace-by-fee (RBF) compliant.
 // It considers the minimum fee rate, previous fee rate, and previous fees to calculate the maximum
 // fees needed for the transaction. Both `minFeeRate` and `prevFeeRate` will be in sats/kvb.
-func RbfMode(minFeeRate, prevFeeRate int, prevFees int64, sizer *SizeEstimator) FeeMode {
+func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vsize, err := sizer.EstimateTxVirtualSize(tx)
 		if err != nil {
 			return 0, err
 		}
-		fees1 := math.Ceil(float64((prevFeeRate+1)*vsize) / 1000)
+		fees1 := math.Ceil(float64((prevFeeRate.Int()+1)*vsize) / 1000)
 		fees2 := math.Ceil(float64(prevFees) + float64(vsize))
-		fees3 := math.Ceil(float64(minFeeRate * vsize / 1000))
+		fees3 := math.Ceil(float64(minFeeRate.Int() * vsize / 1000))
 		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
 	}
 }

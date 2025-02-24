@@ -36,7 +36,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			By("Construct the funding tx (p2pkhAddr1 -> multi-sig)")
 			utxos, err := indexer.GetUTXOs(context.Background(), addr1)
 			Expect(err).To(BeNil())
-			amount, feeRate := int64(1e5), 10000
+			amount, feeRate := int64(1e5), btctest.RandomFeeRate()
 			fundingRecipients := []btc.Recipient{btc.NewRecipient(addr.EncodeAddress(), amount)}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
