@@ -377,6 +377,24 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 	return w.reSubmitBatchWithNewRequests(c, latestBatch, nil)
 }
 
+// Remove duplicates from `a` that are present in `b` UTXOs list
+func filterDuplicates(a UTXOs, b UTXOs) UTXOs {
+	result := UTXOs{}
+	for _, utxo := range a {
+		found := false
+		for _, utxo2 := range b {
+			if utxo.TxID == utxo2.TxID && utxo.Vout == utxo2.Vout {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, utxo)
+		}
+	}
+	return result
+}
+
 // createRBFTx creates a new RBF transaction with the given UTXOs, spend requests, and send requests
 // checkValidity is used to determine if the transaction should be validated while building
 // depth is used to limit the number of add cover utxos to the transaction
@@ -445,6 +463,8 @@ func (w *batcherWallet) createRBFTx(
 	if err != nil {
 		return nil, err
 	}
+
+	utxos = filterDuplicates(utxos, spendUTXOs)
 
 	totalExistingValue := int64(0)
 	for _, utxo := range utxos {
