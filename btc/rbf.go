@@ -118,7 +118,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 	}
 
 	// Calculate the current fee rate for the batch transaction.
-	currentFeeRate := int(batch.Tx.Fee) * blockchain.WitnessScaleFactor / (batch.Tx.Weight)
+	currentFeeRate := float64(int(batch.Tx.Fee)*blockchain.WitnessScaleFactor) / float64(batch.Tx.Weight)
 
 	previousUTXOs := UTXOs{}
 	for _, vin := range batch.Tx.VINs {
@@ -202,7 +202,7 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 }
 
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
-func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate, descendantsFee int) error {
+func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate float64, currentFee, requiredFeeRate, descendantsFee int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 
@@ -417,7 +417,7 @@ func (w *batcherWallet) createRBFTx(
 	checkValidity bool,
 	previousFee uint,
 
-	previousFeeRate int,
+	previousFeeRate float64,
 	descendantsFee int,
 	// Depth to limit the recursion
 	depth int,
@@ -536,14 +536,15 @@ func (w *batcherWallet) createRBFTx(
 	weight := baseSize*3 + totalSize
 	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 
-	newFee := ((int(vSize)) * feeRate) + int(previousFee) + int(descendantsFee)
+	newFee := ((int(vSize)) * feeRate)
 	// existing batch
-	if previousFee != 0 {
-		newFee = ((int(vSize)) * 1) + int(previousFee) + int(descendantsFee)
+	if previousFeeRate != 0 {
+		newFee = ((int(vSize)) * 1) + int(previousFee) + int(descendantsFee) + 1
 	}
-	needEstimateWithPrevFeeRate := ((int(vSize)) * previousFeeRate) + 1 + int(descendantsFee)
 
-	newFeeEstimate := max(needEstimateWithPrevFeeRate, newFee)
+	estimatedFee := math.Ceil((float64(previousFeeRate)+0.001)*float64(vSize)) + 1 + float64(descendantsFee)
+
+	newFeeEstimate := int(math.Max(float64(newFee), estimatedFee))
 
 	if newFeeEstimate > int(fee) {
 		totalIn, totalOut := func() (int64, int64) {
