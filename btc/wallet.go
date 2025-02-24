@@ -116,7 +116,7 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire
 	if err != nil {
 		return nil, nil, err
 	}
-	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	feeMode := MinFeeRateMode(feeRate.High, sizer)
 
 	// Build tx
 	tx, err := BuildTx(wal.network, feeMode, nil, utxos, recipients, wal.Address())
@@ -171,7 +171,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 
 	// Build tx
 	sizer := NewSizeEstimator(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(secret)), utxos...)
-	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	feeMode := MinFeeRateMode(feeRate.High, sizer)
 	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 
 	// Build tx
 	sizer := NewSizeEstimator(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxos...)
-	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	feeMode := MinFeeRateMode(feeRate.High, sizer)
 	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
 		return nil, err
@@ -317,7 +317,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	fetcher.AddPrevOut(tx.TxIn[0].PreviousOutPoint, wire.NewTxOut(htlc.Amount, p2trScript))
 	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 	sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
-	feeMode := MinFeeRateMode(feeRate.High*1000, sizer)
+	feeMode := MinFeeRateMode(feeRate.High, sizer)
 	transaction, err := BuildTx(wal.network, feeMode, []UTXO{utxo}, utxos, []Recipient{recipient}, wal.Address())
 	if err != nil {
 		return nil, err
