@@ -439,7 +439,7 @@ func (w *batcherWallet) createRBFTx(
 
 	// Fetch UTXOs for spend requests
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		spendUTXOs, spendUTXOsMap, totalSpendsToMeValue, _, err = getUTXOsFromSpendRequest(spendRequests, w.Address())
+		spendUTXOs, spendUTXOsMap, totalSpendsToMeValue, _, err = getUTXOsFromSpendRequest(spendRequests, w.Address(), &utxos)
 		return err
 	})
 	if err != nil {
@@ -846,23 +846,31 @@ func getRbfSequenceMap(sequencesMap map[string]uint32, coverUtxos UTXOs) map[str
 }
 
 // getUTXOsFromSpendRequest returns UTXOs from spend requests and the total value of the UTXOs
-func getUTXOsFromSpendRequest(spendReq []SpendRequest, selfAddress btcutil.Address) (UTXOs, utxoMap, int64, int64, error) {
+func getUTXOsFromSpendRequest(spendReq []SpendRequest, selfAddress btcutil.Address, avoidUtxos *UTXOs) (UTXOs, utxoMap, int64, int64, error) {
 	utxos := UTXOs{}
 	totalValue := int64(0)
 	utxoMap := make(utxoMap)
 	spendsToMeValue := int64(0)
 
 	for _, req := range spendReq {
-		utxos = append(utxos, req.Utxos...)
-		currentAmount := int64(0)
 		for _, utxo := range req.Utxos {
+			utxoMap[req.ScriptAddress.EncodeAddress()] = append(utxoMap[req.ScriptAddress.EncodeAddress()], utxo)
+			found := false
+			for _, utxo2 := range *avoidUtxos {
+				if utxo.TxID == utxo2.TxID && utxo.Vout == utxo2.Vout {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			utxos = append(utxos, utxo)
 			totalValue += utxo.Amount
-			currentAmount += utxo.Amount
-		}
-		utxoMap[req.ScriptAddress.EncodeAddress()] = req.Utxos
 
-		if req.Recipient == nil || (req.Recipient != nil && req.Recipient.EncodeAddress() == selfAddress.EncodeAddress()) {
-			spendsToMeValue += currentAmount
+			if req.Recipient == nil || (req.Recipient != nil && req.Recipient.EncodeAddress() == selfAddress.EncodeAddress()) {
+				spendsToMeValue += utxo.Amount
+			}
 		}
 	}
 
