@@ -201,11 +201,23 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 	return missingIds
 }
 
+func removeDuplicateSacps(sacps *[][]byte) [][]byte {
+	keys := make(map[string]bool)
+	list := [][]byte{}
+	for _, entry := range *sacps {
+		if _, value := keys[string(entry)]; !value {
+			keys[string(entry)] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
+
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
 func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate, descendantsFee int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
-
+	sacps = removeDuplicateSacps(&sacps)
 	// Get unconfirmed UTXOs to avoid them in the new transaction
 	avoidUtxos, err := w.getUnconfirmedUtxos(c)
 	if err != nil {
