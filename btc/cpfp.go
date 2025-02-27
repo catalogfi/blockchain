@@ -326,7 +326,7 @@ func (w *batcherWallet) buildCPFPTx(c context.Context, utxos []UTXO, spendReques
 	var sacpsInAmount int64
 	var sacpOutAmount int64
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		sacpsInAmount, sacpOutAmount, err = getSACPAmounts(ctx, sacps, w.indexer)
+		sacpsInAmount, sacpOutAmount, _, err = getSACPAmounts(ctx, sacps, w.indexer)
 		return err
 	})
 

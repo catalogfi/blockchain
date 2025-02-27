@@ -445,9 +445,10 @@ func (w *batcherWallet) createRBFTx(
 
 	var sacpsInAmount int64
 	var sacpsOutAmount int64
+	var sacpsUTXOs UTXOs
 	var err error
 	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		sacpsInAmount, sacpsOutAmount, err = getSACPAmounts(ctx, sacps, w.indexer)
+		sacpsInAmount, sacpsOutAmount, sacpsUTXOs, err = getSACPAmounts(ctx, sacps, w.indexer)
 		return err
 	})
 
@@ -465,6 +466,7 @@ func (w *batcherWallet) createRBFTx(
 	}
 
 	utxos = filterDuplicates(utxos, spendUTXOs)
+	utxos = filterDuplicates(utxos, sacpsUTXOs)
 
 	totalExistingValue := int64(0)
 	for _, utxo := range utxos {
@@ -788,6 +790,8 @@ func buildRBFTransaction(utxos UTXOs, sacps [][]byte, sacpsFee int, recipients [
 		sequence, ok := sequencesMap[utxo.TxID+strconv.Itoa(int(utxo.Vout))]
 		if ok {
 			tx.TxIn[len(tx.TxIn)-1].Sequence = sequence
+		} else {
+			tx.TxIn[len(tx.TxIn)-1].Sequence = wire.MaxTxInSequenceNum - 2
 		}
 
 		totalUTXOAmount += utxo.Amount

@@ -454,11 +454,13 @@ func (w *SimpleWallet) CoverUTXOSpendWeight() int {
 // ------------------ Helper functions ------------------
 
 // getSACPAmounts returns the total input and output amounts for the given SACPs
-func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, error) {
+func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int64, int64, UTXOs, error) {
 	tx, _, err := buildTxFromSacps(sacps)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
+
+	utxos := UTXOs{}
 
 	// go through each input and get the amount it holds
 	// add all the inputs and subtract the outputs to get the fee
@@ -466,9 +468,10 @@ func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) 
 	for _, in := range tx.TxIn {
 		txFromIndexer, err := indexer.GetTx(ctx, in.PreviousOutPoint.Hash.String())
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 		totalInputAmount += int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)
+		utxos = append(utxos, UTXO{TxID: txFromIndexer.TxID, Vout: in.PreviousOutPoint.Index, Amount: int64(txFromIndexer.VOUTs[in.PreviousOutPoint.Index].Value)})
 	}
 
 	totalOutputAmount := int64(0)
@@ -476,12 +479,12 @@ func getSACPAmounts(ctx context.Context, sacps [][]byte, indexer IndexerClient) 
 		totalOutputAmount += out.Value
 	}
 
-	return totalInputAmount, totalOutputAmount, nil
+	return totalInputAmount, totalOutputAmount, utxos, nil
 }
 
 // getFeeUsedInSACPs returns the amount of fee used in the given SACPs
 func getFeeUsedInSACPs(ctx context.Context, sacps [][]byte, indexer IndexerClient) (int, error) {
-	totalInputAmount, totalOutputAmount, err := getSACPAmounts(ctx, sacps, indexer)
+	totalInputAmount, totalOutputAmount, _, err := getSACPAmounts(ctx, sacps, indexer)
 	if err != nil {
 		return 0, err
 	}

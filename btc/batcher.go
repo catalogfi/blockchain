@@ -468,7 +468,7 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	var sacpsIn int64
 	var sacpOut int64
 	err = withContextTimeout(ctx, DefaultAPITimeout, func(ctx context.Context) error {
-		sacpsIn, sacpOut, err = getSACPAmounts(ctx, sacps, w.indexer)
+		sacpsIn, sacpOut, _, err = getSACPAmounts(ctx, sacps, w.indexer)
 		return err
 	})
 
