@@ -1,6 +1,7 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -213,11 +214,41 @@ func removeDuplicateSacps(sacps *[][]byte) [][]byte {
 	return list
 }
 
+func removeSacpsFromPrevUtxos(prevUtxos *UTXOs, sacps *[][]byte) error {
+
+	for _, sacp := range *sacps {
+		// generate tx from bytes of sacps
+		var tx wire.MsgTx
+		if err := tx.Deserialize(bytes.NewReader(sacp)); err != nil {
+			return fmt.Errorf("invalid sacp: failed to deserialize")
+		}
+
+		// iterate over all txin and check if it is in prevUtxos by prevhash+index
+		for _, vin := range tx.TxIn {
+			for i, utxo := range *prevUtxos {
+				if utxo.TxID == vin.PreviousOutPoint.Hash.String() && utxo.Vout == vin.PreviousOutPoint.Index {
+					*prevUtxos = append((*prevUtxos)[:i], (*prevUtxos)[i+1:]...)
+					break
+				}
+			}
+		}
+
+	}
+	return nil
+}
+
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
 func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate, descendantsFee int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 	sacps = removeDuplicateSacps(&sacps)
+
+	// remove prevutxos that are also in sacps
+	if err := removeSacpsFromPrevUtxos(&previousUTXOs, &sacps); err != nil {
+		w.logger.Error("failed to remove previousutxo that are sacps", zap.Error(err))
+		return err
+	}
+
 	// Get unconfirmed UTXOs to avoid them in the new transaction
 	avoidUtxos, err := w.getUnconfirmedUtxos(c)
 	if err != nil {
