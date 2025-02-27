@@ -82,6 +82,8 @@ type HTLC struct {
 }
 
 type HTLCWallet interface {
+	// IsInitiated checks if the HTLC is already initiated
+	IsInitiated(ctx context.Context, htlc *HTLC, amount int64) (bool, error)
 	// Initiate sends the amount to the HTLC address
 	Initiate(ctx context.Context, htlc *HTLC, amount int64) (string, error)
 	// Redeem redeems the HTLC with the secret
@@ -183,6 +185,28 @@ func (hw *htlcWallet) GenerateInstantRefundSACP(ctx context.Context, htlc *HTLC,
 	}
 
 	return txBytes, nil
+}
+
+// IsInitiated checks if the HTLC is already initiated
+func (hw *htlcWallet) IsInitiated(ctx context.Context, htlc *HTLC, amount int64) (bool, error) {
+	addr, err := hw.Address(htlc)
+	if err != nil {
+		return false, err
+	}
+	utxos, err := hw.indexer.GetUTXOs(ctx, addr)
+	if err != nil {
+		return false, err
+	}
+
+	var balance int64
+	for _, utxo := range utxos {
+		balance += utxo.Amount
+	}
+
+	if balance >= amount {
+		return true, nil
+	}
+	return false, nil
 }
 
 // Initiate sends the amount to the HTLC address
