@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
@@ -56,17 +55,8 @@ var _ = BeforeSuite(func() {
 	logger, err = loggerConfig.Build()
 	Expect(err).Should(BeNil())
 	indexer = btc.NewElectrsIndexerClient(logger, btctest.DefaultRegtestIndexer, btc.DefaultRetryInterval)
-	config := &rpcclient.ConnConfig{
-		Params:       chaincfg.RegressionNetParams.Name,
-		Host:         btctest.DefaultRegtestHost,
-		User:         btcUsername,
-		Pass:         btcPassword,
-		HTTPPostMode: true,
-		DisableTLS:   true,
-	}
-	client, err = btc.NewClient(config)
-	Expect(err).Should(BeNil())
 
+	client = btc.NewClient(network, btctest.DefaultRegtestHost, btcUsername, btcPassword)
 	addrTypes = []waddrmgr.AddressType{
 		waddrmgr.PubKeyHash,
 		waddrmgr.WitnessPubKey,

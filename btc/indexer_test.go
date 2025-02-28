@@ -69,7 +69,7 @@ var _ = Describe("Indexer client", func() {
 			rawTx, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, rawTx, key, utxos)).Should(Succeed())
-			Expect(client.SubmitTx(ctx, rawTx)).Should(Succeed())
+			Expect(indexer.SubmitTx(ctx, rawTx)).Should(Succeed())
 
 			By("GetAddressTxs()")
 			txs, err := indexer.GetAddressTxs(ctx, addr, "")

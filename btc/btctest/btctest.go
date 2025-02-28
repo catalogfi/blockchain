@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	DefaultRegtestHost    = "0.0.0.0:18443"
+	DefaultRegtestHost    = "http://0.0.0.0:18443"
 	DefaultRegtestIndexer = "http://localhost:30000"
 )
 

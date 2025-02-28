@@ -10,7 +10,6 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -23,31 +22,17 @@ import (
 )
 
 var _ = Describe("bitcoin client", func() {
-	Context("Client initialization", func() {
-		It("should return an error if providing an unknown chain params", func() {
-			config := &rpcclient.ConnConfig{
-				Params:       "",
-				Host:         btctest.DefaultRegtestHost,
-				HTTPPostMode: true,
-				DisableTLS:   true,
-			}
-			_, err := btc.NewClient(config)
-			Expect(err).ShouldNot(BeNil())
-		})
-	})
-
-	Context("regression local testnet", func() {
+	Context("regression testnet", func() {
 		Context("when using the Client", func() {
 			It("should be able to get all the data without any error", func(ctx context.Context) {
 				By("Net()")
 				Expect(reflect.DeepEqual(client.Net(), &chaincfg.RegressionNetParams)).Should(BeTrue())
 
 				By("LatestBlock()")
-				height, hash, err := client.LatestBlock(ctx)
+				info, err := client.GetBlockchainInfo(ctx)
 				Expect(err).To(BeNil())
-				Expect(height).Should(BeNumerically(">=", 100))
-				Expect(len(hash)).Should(Equal(64))
-				Expect(hash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
+				Expect(info.Blocks).Should(BeNumerically(">=", 100))
+				Expect(info.BestBlockHash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
 				By("Create a new tx")
 				key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
@@ -223,21 +208,12 @@ var _ = Describe("bitcoin client", func() {
 	Context("when the server is offline", func() {
 		It("should err out when the context is done", func() {
 			By("Simulate a client pointing to a offline server")
-			config := &rpcclient.ConnConfig{
-				Params:       network.Name,
-				Host:         "0.0.0.0:18444",
-				User:         btcUsername,
-				Pass:         btcPassword,
-				HTTPPostMode: true,
-				DisableTLS:   true,
-			}
-			client, err := btc.NewClient(config)
-			Expect(err).Should(BeNil())
+			client := btc.NewClient(network, "http://0.0.0.0:18444", btcUsername, btcPassword)
 
 			By("LatestBlock()")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			_, _, err = client.LatestBlock(ctx)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			_, err := client.GetBlockchainInfo(ctx)
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("GetRawTransaction()")
@@ -245,37 +221,37 @@ var _ = Describe("bitcoin client", func() {
 			hash, err := chainhash.NewHashFromStr("0000000000000000000000000000000000000000000000000000000000000000")
 			Expect(err).To(BeNil())
 			_, err = client.GetRawTransaction(ctx, hash)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("GetBlock()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 			_, err = client.GetBlock(ctx, hash)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("GetBlockVerbose()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 			_, err = client.GetBlockVerbose(ctx, hash)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("GetBlockByHeight()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 			_, err = client.GetBlockHash(ctx, 1)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("GetTxOut()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 			_, err = client.GetTxOut(ctx, hash, 0)
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 
 			By("SubmitTx()")
 			ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 			err = client.SubmitTx(ctx, new(wire.MsgTx))
-			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
+			Expect(err).ShouldNot(BeNil())
 			cancel()
 		})
 	})

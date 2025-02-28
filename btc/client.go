@@ -1,15 +1,21 @@
 package btc
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -31,8 +37,9 @@ type Client interface {
 	// Net returns the network params.
 	Net() *chaincfg.Params
 
-	// LatestBlock returns the height and hash of the latest block.
-	LatestBlock(ctx context.Context) (int64, string, error)
+	// GetBlockchainInfo returns various state info regarding blockchain processing. Can be used to retrieve the best
+	// block height and hash.
+	GetBlockchainInfo(ctx context.Context) (*btcjson.GetBlockChainInfoResult, error)
 
 	// SubmitTx to the Bitcoin network.
 	SubmitTx(ctx context.Context, tx *wire.MsgTx) error
@@ -60,324 +67,295 @@ type Client interface {
 	GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error)
 }
 
-type client struct {
-	config    *rpcclient.ConnConfig
-	params    *chaincfg.Params
-	rpcClient *rpcclient.Client
+type Request struct {
+	Version string            `json:"jsonrpc"`
+	ID      uint64            `json:"id"`
+	Method  string            `json:"method"`
+	Params  []json.RawMessage `json:"params"`
 }
 
-func NewClient(config *rpcclient.ConnConfig) (Client, error) {
-	c, err := rpcclient.New(config, nil)
+// Response is the raw bytes of a JSON-RPC result, or the error if the response
+// error object was non-null.
+type Response struct {
+	result []byte
+	err    error
+}
+
+// rawResponse is a partially-unmarshaled JSON-RPC response.  For this
+// to be valid (according to JSON-RPC 1.0 spec), ID may not be nil.
+type rawResponse struct {
+	Result json.RawMessage   `json:"result"`
+	Error  *btcjson.RPCError `json:"error"`
+}
+
+func (r rawResponse) Response() Response {
+	if r.Error != nil {
+		return Response{err: r.Error}
+	}
+	return Response{r.Result, nil}
+}
+
+type rpcClient struct {
+	network    *chaincfg.Params
+	url        string
+	user       string
+	password   string
+	httpClient *http.Client
+}
+
+func NewClient(network *chaincfg.Params, url, user, password string) Client {
+	return &rpcClient{
+		network:    network,
+		url:        url,
+		user:       user,
+		password:   password,
+		httpClient: new(http.Client),
+	}
+}
+
+func (client *rpcClient) Net() *chaincfg.Params {
+	return client.network
+}
+
+func (client *rpcClient) GetBlockchainInfo(ctx context.Context) (*btcjson.GetBlockChainInfoResult, error) {
+	method := "getblockchaininfo"
+	result, err := client.send(ctx, method, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res btcjson.GetBlockChainInfoResult
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+func (client *rpcClient) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
+	method := "sendrawtransaction"
+	buff := bytes.NewBuffer([]byte{})
+	if err := tx.Serialize(buff); err != nil {
+		return err
+	}
+	params, err := client.packParams(hex.EncodeToString(buff.Bytes()))
+	if err != nil {
+		return err
+	}
+	_, err = client.send(ctx, method, params)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "txn-mempool-conflict"):
+			return ErrMempoolConflict
+		case strings.Contains(err.Error(), "bad-txns-inputs-missingorspent"):
+			return ErrTxInputsMissingOrSpent
+		case strings.Contains(err.Error(), "Transaction already in block chain"):
+			return ErrAlreadyInChain
+		}
+	}
+	return err
+}
+
+func (client *rpcClient) GetRawTransaction(ctx context.Context, hash *chainhash.Hash) (*btcjson.TxRawResult, error) {
+	method := "getrawtransaction"
+	params, err := client.packParams(hash.String(), true)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
+			return nil, ErrTxNotFound
+		}
+		return nil, err
+	}
+	var res btcjson.TxRawResult
+	if err := json.Unmarshal(result, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (client *rpcClient) GetBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
+	method := "getblockhash"
+	params, err := client.packParams(height)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	var res chainhash.Hash
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+func (client *rpcClient) GetBlock(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+	method := "getblock"
+	params, err := client.packParams(hash.String())
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	var res btcjson.GetBlockVerboseResult
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+func (client *rpcClient) GetBlockVerbose(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error) {
+	method := "getblock"
+	params, err := client.packParams(hash.String(), 2)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	var res btcjson.GetBlockVerboseTxResult
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+func (client *rpcClient) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error) {
+	method := "gettxout"
+	params, err := client.packParams(hash.String(), vout)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	var res *btcjson.GetTxOutResult
+	err = json.Unmarshal(result, &res)
+	return res, err
+}
+
+func (client *rpcClient) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error) {
+	method := "getnetworkinfo"
+	result, err := client.send(ctx, method, nil)
+	if err != nil {
+		return nil, err
+	}
+	var res btcjson.GetNetworkInfoResult
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+func (client *rpcClient) GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error) {
+	method := "getmempoolentry"
+	params, err := client.packParams(txid)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not in mempool") {
+			return nil, ErrTxNotInMempool
+		}
+		return nil, err
+	}
+	var res btcjson.GetMempoolEntryResult
+	err = json.Unmarshal(result, &res)
+	return &res, nil
+}
+
+func (client *rpcClient) send(ctx context.Context, method string, params []json.RawMessage) ([]byte, error) {
+	// Construct the request
+	jReq := Request{
+		Version: "1.0",
+		ID:      rand.Uint64(),
+		Method:  method,
+		Params:  params,
+	}
+	raw, err := json.Marshal(jReq)
 	if err != nil {
 		return nil, err
 	}
 
-	var param *chaincfg.Params
-	switch config.Params {
-	case chaincfg.MainNetParams.Name:
-		param = &chaincfg.MainNetParams
-	case chaincfg.TestNet3Params.Name:
-		param = &chaincfg.TestNet3Params
-	case chaincfg.RegressionNetParams.Name:
-		param = &chaincfg.RegressionNetParams
-	default:
-		return nil, fmt.Errorf("rpcclient.New: Unknown chain %s", config.Params)
-	}
+	// Post the request
+	var (
+		lastErr      error
+		backoff      time.Duration
+		httpResponse *http.Response
+	)
 
-	return &client{
-		config:    config,
-		params:    param,
-		rpcClient: c,
-	}, nil
-}
-
-func (client *client) Net() *chaincfg.Params {
-	return client.params
-}
-
-func (client *client) LatestBlock(ctx context.Context) (int64, string, error) {
-	future := client.rpcClient.GetBlockChainInfoAsync()
-	results := make(chan *btcjson.GetBlockChainInfoResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
+	for i := 0; i < 10; i++ {
+		bodyReader := bytes.NewReader(raw)
+		httpReq, err := http.NewRequest("POST", client.url, bodyReader)
 		if err != nil {
-			errs <- err
-			return
+			return nil, err
 		}
-		results <- result
-	}()
+		httpReq.Close = true
+		httpReq.Header.Set("Content-Type", "application/json")
+		if client.user != "" && client.password != "" {
+			httpReq.SetBasicAuth(client.user, client.password)
+		}
 
-	select {
-	case <-ctx.Done():
-		return 0, "", fmt.Errorf("LatestBlock : %w", ctx.Err())
-	case err := <-errs:
-		return 0, "", err
-	case result := <-results:
-		return int64(result.Blocks), result.BestBlockHash, nil
+		httpResponse, err = client.httpClient.Do(httpReq)
+
+		// Quit the retry loop on success or if we can't retry anymore.
+		if err == nil || i == 10 {
+			break
+		}
+
+		// Save the last error for the case where we backoff further,
+		// retry and get an invalid response but no error. If this
+		// happens the saved last error will be used to enrich the error
+		// message that we pass back to the caller.
+		lastErr = err
+
+		// Backoff sleep otherwise.
+		backoff = 500 * time.Millisecond * time.Duration(i+1)
+		if backoff > 5*time.Second {
+			backoff = 5 * time.Second
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(backoff):
+		}
 	}
-}
-
-func (client *client) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
-	// The SendRawTransactionAsync is not technically asynchronous,
-	// we need to have an extra channel for it.
-	futureChan := make(chan rpcclient.FutureSendRawTransactionResult, 1)
-	go func() {
-		defer close(futureChan)
-		future := client.rpcClient.SendRawTransactionAsync(tx, false)
-		futureChan <- future
-	}()
-
-	var future rpcclient.FutureSendRawTransactionResult
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("SubmitTx : %w", ctx.Err())
-	case future = <-futureChan:
+	if lastErr != nil {
+		return nil, lastErr
 	}
 
-	results := make(chan *chainhash.Hash, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("SubmitTx : %w", ctx.Err())
-	case err := <-errs:
-		// Parse the error based on the error code and message
-		var rpcErr *btcjson.RPCError
-		if errors.As(err, &rpcErr) {
-			switch rpcErr.Code {
-			case btcjson.ErrRPCVerifyAlreadyInChain:
-				return ErrAlreadyInChain
-			case btcjson.ErrRPCTxRejected:
-				if strings.Contains(err.Error(), "txn-mempool-conflict") {
-					return ErrMempoolConflict
-				}
-			case btcjson.ErrRPCTxError:
-				if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
-					return ErrTxInputsMissingOrSpent
-				}
-			}
-		}
-		return err
-	case <-results:
-		return nil
+	// We still want to return an error if for any reason the response
+	// remains empty.
+	if httpResponse == nil {
+		return nil, fmt.Errorf("invalid http POST response (nil), "+
+			"method: %s, id: %d, last error=%v",
+			jReq.Method, jReq.ID, lastErr)
 	}
-}
 
-func (client *client) GetRawTransaction(ctx context.Context, txhash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	future := client.rpcClient.GetRawTransactionVerboseAsync(txhash)
-	results := make(chan *btcjson.TxRawResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
+	// Read the raw bytes and close the response.
+	respBytes, err := io.ReadAll(httpResponse.Body)
+	httpResponse.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("error reading json reply: %v", err)
+	}
 
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetRawTransaction : %w", ctx.Err())
-	case err := <-errs:
-		// Parse the error based on the error code and message
-		var rpcErr *btcjson.RPCError
-		if errors.As(err, &rpcErr) {
-			switch rpcErr.Code {
-			case btcjson.ErrRPCInvalidAddressOrKey:
-				if strings.Contains(err.Error(), "No such mempool or blockchain transaction") {
-					return nil, ErrTxNotFound
-				}
-			}
-		}
-
+	// Try to unmarshal the response as a regular JSON-RPC response.
+	var resp rawResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
 		return nil, err
-	case result := <-results:
-		return result, nil
 	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+	return resp.Result, nil
 }
 
-func (client *client) GetBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
-	future := client.rpcClient.GetBlockHashAsync(height)
-	results := make(chan *chainhash.Hash, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
+func (client *rpcClient) packParams(params ...interface{}) ([]json.RawMessage, error) {
+	rawParams := make([]json.RawMessage, len(params))
+	for i, param := range params {
+		var err error
+		rawParams[i], err = json.Marshal(param)
 		if err != nil {
-			errs <- err
-			return
+			return nil, err
 		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetBlockByHeight : %w", ctx.Err())
-	case err := <-errs:
-		return nil, err
-	case hash := <-results:
-		return hash, nil
 	}
-}
-
-func (client *client) GetBlock(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
-	future := client.rpcClient.GetBlockVerboseAsync(hash)
-	results := make(chan *btcjson.GetBlockVerboseResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetBlockByHash : %w", ctx.Err())
-	case err := <-errs:
-		return nil, err
-	case result := <-results:
-		return result, nil
-	}
-}
-
-func (client *client) GetBlockVerbose(ctx context.Context, hash *chainhash.Hash) (*btcjson.GetBlockVerboseTxResult, error) {
-	future := client.rpcClient.GetBlockVerboseTxAsync(hash)
-	results := make(chan *btcjson.GetBlockVerboseTxResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetBlockByHash : %w", ctx.Err())
-	case err := <-errs:
-		return nil, err
-	case result := <-results:
-		return result, nil
-	}
-}
-
-func (client *client) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error) {
-	future := client.rpcClient.GetTxOutAsync(hash, vout, true)
-	results := make(chan *btcjson.GetTxOutResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetTxOut : %w", ctx.Err())
-	case err := <-errs:
-		return nil, err
-	case result := <-results:
-		return result, nil
-	}
-}
-
-func (client *client) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkInfoResult, error) {
-	future := client.rpcClient.GetNetworkInfoAsync()
-	results := make(chan *btcjson.GetNetworkInfoResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetNetworkInfo : %w", ctx.Err())
-	case err := <-errs:
-		return nil, err
-	case result := <-results:
-		return result, nil
-	}
-}
-
-func (client *client) GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error) {
-	future := client.rpcClient.GetMempoolEntryAsync(txid)
-	results := make(chan *btcjson.GetMempoolEntryResult, 1)
-	errs := make(chan error, 1)
-	go func() {
-		defer close(results)
-		defer close(errs)
-
-		result, err := future.Receive()
-		if err != nil {
-			errs <- err
-			return
-		}
-		results <- result
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("GetMempoolEntry : %w", ctx.Err())
-	case err := <-errs:
-		// Parse the error based on the error code and message
-		var rpcErr *btcjson.RPCError
-		if errors.As(err, &rpcErr) {
-			switch rpcErr.Code {
-			case btcjson.ErrRPCInvalidAddressOrKey:
-				if strings.Contains(err.Error(), "Transaction not in mempool") {
-					return nil, ErrTxNotInMempool
-				}
-			}
-		}
-
-		return nil, err
-	case result := <-results:
-		return result, nil
-	}
+	return rawParams, nil
 }
