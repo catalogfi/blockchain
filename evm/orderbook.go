@@ -85,6 +85,7 @@ type CreateOrder struct {
 	DestinationAsset            string
 	InitiatorSourceAddress      string
 	InitiatorDestinationAddress string
+	UserID                      string
 	SourceAmount                *big.Int
 	DestinationAmount           *big.Int
 	Fee                         *big.Int
@@ -190,6 +191,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		DestinationAsset:            string(values[3].(string)),
 		InitiatorSourceAddress:      values[4].(string),
 		InitiatorDestinationAddress: values[5].(string),
+		UserID:                      values[6].(string),
 		SecretHash:                  values[6].([32]byte),
 		MinDestinationConfirmations: values[7].(*big.Int),
 		Timelock:                    values[8].(*big.Int),
