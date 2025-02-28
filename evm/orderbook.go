@@ -44,6 +44,10 @@ var (
 			Type: stringTy,
 		},
 		{
+			Name: "userID",
+			Type: stringTy,
+		},
+		{
 			Name: "secretHash",
 			Type: bytes32Ty,
 		},
@@ -155,6 +159,7 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 		order.DestinationAsset,
 		order.InitiatorSourceAddress,
 		order.InitiatorDestinationAddress,
+		order.UserID,
 		order.SecretHash,
 		order.MinDestinationConfirmations,
 		order.Timelock,
