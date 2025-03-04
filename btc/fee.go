@@ -200,7 +200,7 @@ func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
 
 	// When including both legacy and segwit inputs
 	if totalSegwit > 0 && legacy > 0 {
-		totalBase += legacy
+		totalSegwit += legacy
 	}
 
 	return totalBase*4 + totalSegwit, nil

@@ -8,6 +8,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
@@ -146,7 +147,7 @@ var _ = Describe("bitcoin fees", func() {
 	})
 
 	Context("estimate transaction fees", func() {
-		It("should return a proper estimate of tx size when spending p2pkh utxos", func(ctx context.Context) {
+		It("should return a proper estimate of tx size when spending utxos from known address types", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Initialization keys")
 				key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
@@ -160,6 +161,7 @@ var _ = Describe("bitcoin fees", func() {
 				sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 
 				edge := 0
+				exact := 0
 				for i := 0; i < 10000; i++ {
 					amount, feeRate := rand.Int63n(10000)+1e7, btctest.RandomFeeRate()
 					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
@@ -178,7 +180,9 @@ var _ = Describe("bitcoin fees", func() {
 						// Most tx should be the same or 1 byte less than the estimation.
 						// A very small chance been 2 or 3 bytes less.
 						switch estWeight - int(actualWeight) {
-						case 0, 4:
+						case 0:
+							exact++
+						case 4:
 						case 8, 12:
 							edge++
 						default:
@@ -188,7 +192,9 @@ var _ = Describe("bitcoin fees", func() {
 						// Most tx should be the same or 1 weight less than the estimation.
 						// A very small chance been 2 or 3 weight less.
 						switch estWeight - int(actualWeight) {
-						case 0, 1:
+						case 0:
+							exact++
+						case 1:
 						case 2, 3:
 							edge++
 						default:
@@ -204,9 +210,67 @@ var _ = Describe("bitcoin fees", func() {
 					}
 				}
 
-				By("Expect the edge cases to be less than 1%")
+				By("Expect the edge cases to be less than 1% ")
 				Expect(edge).Should(BeNumerically("<=", 100))
+				Expect(exact).Should(BeNumerically(">", 0))
 			}
+		})
+
+		It("should return a proper estimate of tx size when spending both legacy and segwit utxos", func(ctx context.Context) {
+			By("Initialization keys")
+			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, nil)
+			Expect(err).To(BeNil())
+			key2, addr2, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.WitnessPubKey, indexer)
+			Expect(err).To(BeNil())
+
+			By("Fetch all utxos from addr1 and addr2")
+			utxos1, err := indexer.GetUTXOs(ctx, addr1)
+			Expect(err).To(BeNil())
+			utxos2, err := indexer.GetUTXOs(ctx, addr2)
+			Expect(err).To(BeNil())
+			sizer := btc.NewSizeEstimatorOfAddrType(waddrmgr.PubKeyHash, utxos1...)
+			sizer.AddUtxos(btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH, utxos2...)
+
+			By("Init the fetcher")
+			pkScript1, err := btc.PkScript(waddrmgr.PubKeyHash, key1.PubKey())
+			Expect(err).To(BeNil())
+			fetcher, err := btc.NewFetcher(pkScript1, utxos1...)
+			Expect(err).To(BeNil())
+			pkScript2, err := btc.PkScript(waddrmgr.WitnessPubKey, key2.PubKey())
+			Expect(err).To(BeNil())
+			Expect(btc.AddUtxosToFetcher(fetcher, pkScript2, utxos2...)).Should(Succeed())
+
+			By("Build and sign the transaction")
+			diff := map[int]int{}
+			for i := 0; i < 10000; i++ {
+				feeMode := btc.MinFeeRateMode(btctest.RandomFeeRate(), sizer)
+				transaction, err := btc.BuildTx(network, feeMode, append(utxos1, utxos2...), nil, nil, addr1)
+				Expect(err).To(BeNil())
+				estWeight, err := sizer.EstimateTxWeight(transaction)
+				Expect(err).To(BeNil())
+
+				sigHashes := txscript.NewTxSigHashes(transaction, fetcher)
+				for i := range transaction.TxIn {
+					if i < len(utxos1) {
+						Expect(btc.SignUtxos(waddrmgr.PubKeyHash, transaction, i, key1, fetcher, sigHashes)).Should(Succeed())
+					} else {
+						Expect(btc.SignUtxos(waddrmgr.WitnessPubKey, transaction, i, key2, fetcher, sigHashes)).Should(Succeed())
+					}
+				}
+				actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))
+				Expect(estWeight - int(actualWeight)).Should(BeNumerically(">=", 0))
+				diff[estWeight-int(actualWeight)]++
+			}
+
+			By("We should have some tx match our estimate, and most of the tx should be within 5 wu of our estimate")
+			Expect(diff[0]).Should(BeNumerically(">", 0))
+			edge := 0
+			for k, v := range diff {
+				if k > 5 {
+					edge += v
+				}
+			}
+			Expect(edge).Should(BeNumerically("<", 200))
 		})
 	})
 })
