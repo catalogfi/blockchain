@@ -2,6 +2,7 @@ package btctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,4 +59,40 @@ func RunOutput(name string, args ...string) ([]byte, error) {
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
+}
+
+type WaitMinedFunc func(ctx context.Context, indexer btc.IndexerClient) error
+
+func WaitMined(ctx context.Context, indexer btc.IndexerClient, f WaitMinedFunc) error {
+	for time.Sleep(time.Second); ; time.Sleep(time.Second) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout : %w", ctx.Err())
+		default:
+		}
+
+		if err := f(ctx, indexer); err == nil {
+			return nil
+		}
+	}
+}
+
+func WaitTx(txid string) WaitMinedFunc {
+	return func(ctx context.Context, indexer btc.IndexerClient) error {
+		_, err := indexer.GetTx(ctx, txid)
+		return err
+	}
+}
+
+func WaitBlock(height uint64) WaitMinedFunc {
+	return func(ctx context.Context, indexer btc.IndexerClient) error {
+		latest, err := indexer.GetTipBlockHeight(ctx)
+		if err != nil {
+			return err
+		}
+		if latest < height {
+			return errors.New("block not mined")
+		}
+		return nil
+	}
 }

@@ -42,7 +42,7 @@ type Wallet interface {
 
 	Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire.MsgTx, error)
 
-	Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire.MsgTx, error)
+	Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error)
 
 	Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error)
 
@@ -142,7 +142,11 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire
 	return tx, irTx, nil
 }
 
-func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire.MsgTx, error) {
+func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) {
+	if len(htlc.Secret()) == 0 {
+		return nil, fmt.Errorf("nil secret")
+	}
+
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -170,7 +174,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 	}
 
 	// Build tx
-	sizer := NewSizeEstimator(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(secret)), utxos...)
+	sizer := NewSizeEstimator(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(htlc.Secret())), utxos...)
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
 	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
@@ -199,7 +203,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (*wire
 		if err != nil {
 			return nil, err
 		}
-		tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig, secret, leaf.Script, ctrBlkBytes)
+		tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig, htlc.Secret(), leaf.Script, ctrBlkBytes)
 	}
 
 	// Submit tx
@@ -527,7 +531,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
 			if action.ActionType == HtlcActionRedeem {
-				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Secret)), utxo)
+				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Htlc.Secret())), utxo)
 			} else if action.ActionType == HtlcActionRefund {
 				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxo)
 			}
@@ -646,7 +650,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		}
 		switch action.ActionType {
 		case HtlcActionRedeem:
-			tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig, action.Secret, leaf.Script, ctrBlkBytes)
+			tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig, action.Htlc.Secret(), leaf.Script, ctrBlkBytes)
 		case HtlcActionRefund:
 			tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig, leaf.Script, ctrBlkBytes)
 		case HtlcActionInstantRefund:

@@ -96,7 +96,6 @@ const (
 type HtlcAction struct {
 	ActionType      HtlcActionType
 	Htlc            *HTLC
-	Secret          []byte
 	InstantRefundTx *wire.MsgTx
 }
 
@@ -107,7 +106,8 @@ type HTLC struct {
 	Timelock        int64
 	Amount          int64
 
-	tree *txscript.IndexedTapScriptTree
+	secret []byte
+	tree   *txscript.IndexedTapScriptTree
 }
 
 func NewHTLC(initiatorPubKey, redeemerPubKey, secretHash []byte, timelock, amount int64) (*HTLC, error) {
@@ -144,6 +144,14 @@ func (htlc *HTLC) Address(network *chaincfg.Params) (btcutil.Address, error) {
 	rootHash := htlc.tree.RootNode.TapHash()
 	outputKey := txscript.ComputeTaprootOutputKey(GardenNums, rootHash[:])
 	return PublicKeyAddress(network, waddrmgr.TaprootPubKey, outputKey)
+}
+
+func (htlc *HTLC) SetSecret(secret []byte) {
+	htlc.secret = secret
+}
+
+func (htlc *HTLC) Secret() []byte {
+	return htlc.secret
 }
 
 func (htlc *HTLC) P2trScript() ([]byte, error) {

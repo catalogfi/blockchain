@@ -203,7 +203,9 @@ var _ = Describe("bitcoin fees", func() {
 					case waddrmgr.TaprootPubKey:
 						// Should be exactly same or 1 weight more
 						switch estWeight - int(actualWeight) {
-						case 0, 1:
+						case 0:
+							exact++
+						case 1:
 						default:
 							Fail("unexpected weight difference")
 						}
