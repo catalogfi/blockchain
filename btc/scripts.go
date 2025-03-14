@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -71,7 +72,6 @@ func RefundLeaf(initiatorPubkey []byte, lockTime uint32) (txscript.TapLeaf, erro
 //
 // pubkeys must be x-only pubkeys of the initiator and the redeemer.
 func MultiSigLeaf(initiatorPubkey, redeemerPubkey []byte) (txscript.TapLeaf, error) {
-
 	script, err := txscript.NewScriptBuilder().
 		AddData(initiatorPubkey).
 		AddOp(txscript.OP_CHECKSIG).
@@ -122,6 +122,26 @@ func HtlcScript(ownerPub, revokerPub, refundSecretHash []byte, waitTime int64) (
 		AddOp(txscript.OP_EQUALVERIFY).
 		AddOp(txscript.OP_CHECKSIG).
 		Script()
+}
+
+func HtlcScriptV2(internalKey *btcec.PublicKey, chain *chaincfg.Params, htlc *HTLC) (btcutil.Address, error) {
+	leaves, err := htlcLeaves(htlc)
+	if err != nil {
+		return nil, err
+	}
+
+	tapScriptTree := txscript.AssembleTaprootScriptTree(leaves.ToArray()...)
+
+	tapScriptRootHash := tapScriptTree.RootNode.TapHash()
+	outputKey := txscript.ComputeTaprootOutputKey(
+		internalKey, tapScriptRootHash[:],
+	)
+
+	addr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), chain)
+	if err != nil {
+		return nil, err
+	}
+	return addr, nil
 }
 
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.

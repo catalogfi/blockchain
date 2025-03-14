@@ -12,16 +12,17 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"go.uber.org/zap"
 )
 
 var (
-	SegwitSpendWeight = txsizes.RedeemP2WPKHInputWitnessWeight
-	DefaultAPITimeout = 5 * time.Second
+	GuardianSpendWeight = 1 + 1 + 1 + 73 + 1 + 73 + 1 + 1 + 1 + 200 // TODO: update Guardian Script Size to the right number
+	SegwitSpendWeight   = txsizes.RedeemP2WPKHInputWitnessWeight
+	DefaultAPITimeout   = 5 * time.Second
 )
+
 var (
 	ErrBatcherStillRunning        = errors.New("batcher is still running")
 	ErrBatcherNotRunning          = errors.New("batcher is not running")
@@ -148,7 +149,6 @@ type batcherWallet struct {
 	wg   sync.WaitGroup
 
 	chainParams *chaincfg.Params
-	address     btcutil.Address
 	privateKey  *secp256k1.PrivateKey
 	logger      *zap.Logger
 
@@ -168,14 +168,8 @@ type Batch struct {
 }
 
 func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
-	address, err := PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, privateKey.PubKey())
-	if err != nil {
-		return nil, err
-	}
-
 	wallet := &batcherWallet{
 		indexer:      indexer,
-		address:      address,
 		privateKey:   privateKey,
 		cache:        cache,
 		logger:       logger,
@@ -242,7 +236,7 @@ func parseStrategy(strategy Strategy) error {
 }
 
 func (w *batcherWallet) Address() btcutil.Address {
-	return w.address
+	return w.sw.Address()
 }
 
 func (w *batcherWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest, to btcutil.Address) ([]byte, error) {
@@ -251,6 +245,14 @@ func (w *batcherWallet) GenerateSACP(ctx context.Context, spendReq SpendRequest,
 
 func (w *batcherWallet) SignSACPTx(tx *wire.MsgTx, idx int, amount int64, leaf txscript.TapLeaf, scriptAddr btcutil.Address, witness [][]byte) ([][]byte, error) {
 	return w.sw.SignSACPTx(tx, idx, amount, leaf, scriptAddr, witness)
+}
+
+func (w *batcherWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error {
+	return w.sw.SignCoverUTXOs(tx, utxos, startingIdx)
+}
+
+func (w *batcherWallet) CoverUTXOSpendWeight() int {
+	return w.sw.CoverUTXOSpendWeight()
 }
 
 // Send creates a batch request , saves it in the cache and returns a tracking id
@@ -440,12 +442,12 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	}
 
 	for _, spend := range *spends {
-		if spend.ScriptAddress == w.address {
+		if spend.ScriptAddress == w.Address() {
 			return ErrBatchParametersNotMet
 		}
 	}
 
-	utxos, err := w.indexer.GetUTXOs(ctx, w.address)
+	utxos, err := w.indexer.GetUTXOs(ctx, w.Address())
 	if err != nil {
 		return err
 	}

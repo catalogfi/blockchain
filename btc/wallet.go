@@ -115,13 +115,73 @@ type SpendRequest struct {
 
 	// UTXO to spend
 	Utxos UTXOs
+
+	// Optional Recipient address
+	Recipient btcutil.Address
 }
 
 type SendRequest struct {
+	// Optional ID of the send request
+	id string
+
 	// Amount to send
 	Amount int64
 	// Recipient address
 	To btcutil.Address
+
+	// Invalidate the previous send request if it exists and make a direct send request
+	// instead of routing through middle script
+	invalidateID string
+
+	// MergeTxHex is the txid of the tx that is being merged
+	mergeTxHex string
+}
+
+func NewSendRequest(id string, amount int64, to btcutil.Address) SendRequest {
+	return SendRequest{
+		id:     id,
+		Amount: amount,
+		To:     to,
+	}
+}
+
+func NewSendRequestWithInvalidateID(id string, amount int64, to btcutil.Address, invalidateID string, mergeTxHex string) SendRequest {
+	return SendRequest{
+		id:           id,
+		Amount:       amount,
+		To:           to,
+		invalidateID: invalidateID,
+		mergeTxHex:   mergeTxHex,
+	}
+}
+
+// InvalidateTxID returns true if the send request has to invalidate the previous send request
+// and returns the txid of the previous send request
+func (sr *SendRequest) InvalidateTxID() (bool, string) {
+	if sr.invalidateID == "" {
+		return false, ""
+	}
+	return true, sr.invalidateID
+}
+
+func (sr *SendRequest) MergeTxHex() (bool, string) {
+	if sr.mergeTxHex == "" {
+		return false, ""
+	}
+	return true, sr.mergeTxHex
+}
+
+// ID returns true if the send request has an ID and returns the ID
+func (sr *SendRequest) ID() (bool, string) {
+	if sr.id == "" {
+		return false, ""
+	}
+	return true, sr.id
+}
+
+// RedirectedSendRequest is a send request that is redirected from a spend request
+type RedirectedSendRequest struct {
+	SendRequest
 }
 
 type Wallet interface {
@@ -167,6 +227,12 @@ type Wallet interface {
 	// Status checks the status of a transaction using its transaction ID (txid).
 	// Returns the transaction and a boolean indicating whether the transaction is submitted or not and an error
 	Status(ctx context.Context, id string) (Transaction, bool, error)
+
+	// Signs cover utxos
+	SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error
+
+	// Weight of the covering UTXO
+	CoverUTXOSpendWeight() int
 }
 
 // SimpleWallet is a Wallet implementation that can send and spend funds.
@@ -273,7 +339,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 	sequenceMap := generateSequenceMap(utxoMap, []SpendRequest{spendRequest})
 
 	// build the transaction with no recipients or sacps
-	tx, _, err := buildTransaction(utxos, nil, nil, to, fee, sequenceMap)
+	tx, _, err := buildTransaction(utxos, nil, nil, nil, to, fee, sequenceMap)
 	if err != nil {
 		return nil, err
 	}
@@ -320,9 +386,27 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	// generate sequence map (used to set sequence number for each input)
 	sequenceMap := generateSequenceMap(utxoMap, spendRequests)
 
+	// generate the recipients for the spend requests
+	extraSendRequests, err := generateSendRequests(spendRequests, utxoMap, sw.Address())
+	if err != nil {
+		return nil, err
+	}
+
+	// if extraSendRequest are added, we might need to add more utxos to cover the fee
+	if len(extraSendRequests) > 0 {
+		var srs []SendRequest
+		for _, sr := range extraSendRequests {
+			srs = append(srs, SendRequest{Amount: sr.Amount, To: sr.To})
+		}
+		spendUTXOs, coverUTXOs, utxoMap, err = getUTXOsForRequests(ctx, sw.indexer, spendRequests, append(sendRequests, srs...), sw.signerAddr, fee, sacpFee)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// build the transaction
 	// Signing index indicates from which index we need to start signing the transaction
-	tx, signingIdx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sacps, sendRequests, sw.signerAddr, int64(fee), sequenceMap)
+	tx, signingIdx, err := buildTransaction(append(spendUTXOs, coverUTXOs...), sacps, sendRequests, extraSendRequests, sw.signerAddr, int64(fee), sequenceMap)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +419,7 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 
 	// Sign the cover inputs
 	// This is a no op if there are no cover utxos
-	err = signSendTx(tx, coverUTXOs, signingIdx+len(spendRequests), sw.signerAddr, sw.privateKey)
+	err = sw.SignCoverUTXOs(tx, coverUTXOs, signingIdx+len(spendRequests))
 	if err != nil {
 		return nil, err
 	}
@@ -357,6 +441,24 @@ func (sw *SimpleWallet) spendAndSend(ctx context.Context, sendRequests []SendReq
 	return tx, nil
 }
 
+func generateSendRequests(spendRequests []SpendRequest, utxoMap utxoMap, currentWallet btcutil.Address) ([]RedirectedSendRequest, error) {
+	sendRequests := []RedirectedSendRequest{}
+	for _, req := range spendRequests {
+		if req.Recipient != nil && req.Recipient.EncodeAddress() != currentWallet.EncodeAddress() {
+			utxos, ok := utxoMap[req.ScriptAddress.EncodeAddress()]
+			if !ok {
+				return nil, ErrNoUTXOsForRequests
+			}
+			var totalAmount int64
+			for _, utxo := range utxos {
+				totalAmount += utxo.Amount
+			}
+			sendRequests = append(sendRequests, RedirectedSendRequest{SendRequest: SendRequest{Amount: totalAmount, To: req.Recipient}})
+		}
+	}
+	return sendRequests, nil
+}
+
 // Status checks the status of a transaction using its transaction ID (txid).
 func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, bool, error) {
 	tx, err := sw.indexer.GetTx(ctx, id)
@@ -368,6 +470,36 @@ func (sw *SimpleWallet) Status(ctx context.Context, id string) (Transaction, boo
 		return Transaction{}, false, err
 	}
 	return tx, true, nil
+}
+
+// Signs the send transaction (p2wpkh spend).
+// Use startingIdx to start signing from a specific index
+func (w *SimpleWallet) SignCoverUTXOs(tx *wire.MsgTx, utxos UTXOs, startingIdx int) error {
+	// get the send signing script
+	script, err := txscript.PayToAddrScript(w.signerAddr)
+	if err != nil {
+		return err
+	}
+
+	// for p2wpkh, we only need to add the signature and pubkey
+	witness := [][]byte{
+		AddSignatureSegwitOp,
+		AddPubkeyCompressedOp,
+	}
+	idx := startingIdx
+	for i := range utxos {
+		fetcher := txscript.NewCannedPrevOutputFetcher(script, utxos[i].Amount)
+		err := signTx(tx, fetcher, utxos[i].Amount, idx, witness, script, nil, txscript.SigHashAll, w.privateKey)
+		if err != nil {
+			return err
+		}
+		idx++
+	}
+	return nil
+}
+
+func (w *SimpleWallet) CoverUTXOSpendWeight() int {
+	return SegwitSpendWeight
 }
 
 // ------------------ Helper functions ------------------
@@ -504,7 +636,7 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 }
 
 // Builds an unsigned transaction with the given utxos, recipients, change address and fee.
-func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
+func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
 
 	tx, idx, err := buildTxFromSacps(sacps)
 	if err != nil {
@@ -541,17 +673,41 @@ func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, cha
 		tx.AddTxOut(wire.NewTxOut(r.Amount, script))
 		totalSendAmount += r.Amount
 	}
+
 	// add change output to the transaction if required
-	if totalUTXOAmount >= totalSendAmount+fee {
-		script, err := txscript.PayToAddrScript(changeAddr)
+	if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
+
+		changeScript, err := txscript.PayToAddrScript(changeAddr)
 		if err != nil {
 			return nil, 0, err
 		}
-		if totalUTXOAmount >= totalSendAmount+fee+DustAmount {
-			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, script))
+
+		if len(redirectedRecipients) > 0 {
+			// first add the redirected recipients
+			fundsLeft := totalUTXOAmount - totalSendAmount
+			feePerRecipient := fee / int64(len(redirectedRecipients))
+			feeCollected := int64(0)
+			for _, r := range redirectedRecipients {
+				recipientScript, err := txscript.PayToAddrScript(r.To)
+				if err != nil {
+					return nil, 0, err
+				}
+
+				if r.Amount < feePerRecipient+DustAmount {
+					tx.AddTxOut(wire.NewTxOut(r.Amount, recipientScript))
+				} else {
+					tx.AddTxOut(wire.NewTxOut(r.Amount-feePerRecipient, recipientScript))
+					feeCollected += feePerRecipient
+				}
+				fundsLeft -= r.Amount
+			}
+			remainingFee := fee - feeCollected
+			if fundsLeft > DustAmount+remainingFee {
+				tx.AddTxOut(wire.NewTxOut(fundsLeft-remainingFee, changeScript))
+			}
+		} else {
+			tx.AddTxOut(wire.NewTxOut(totalUTXOAmount-totalSendAmount-fee, changeScript))
 		}
-	} else if len(recipients) != 0 && len(utxos) != 0 {
-		return nil, 0, ErrInsufficientFunds(totalUTXOAmount, totalSendAmount+fee)
 	}
 
 	// return the transaction
@@ -687,6 +843,10 @@ func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []
 	return nil
 }
 
+func SignTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount int64, index int, witness [][]byte, script []byte, leaf *txscript.TapLeaf, hashType txscript.SigHashType, privateKey *secp256k1.PrivateKey) error {
+	return signTx(tx, prevOutFetcher, amount, index, witness, script, leaf, hashType, privateKey)
+}
+
 // Signs the transaction with the given witness and script.
 // If there are OP Codes in the witness, they are replaced by the actual signature or pubkey.
 func signTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount int64, index int, witness [][]byte, script []byte, leaf *txscript.TapLeaf, hashType txscript.SigHashType, privateKey *secp256k1.PrivateKey) error {
@@ -725,32 +885,6 @@ func signTx(tx *wire.MsgTx, prevOutFetcher txscript.PrevOutputFetcher, amount in
 		}
 	}
 	tx.TxIn[index].Witness = newWitness
-	return nil
-}
-
-// Signs the send transaction (p2wpkh spend).
-// Use startingIdx to start signing from a specific index
-func signSendTx(tx *wire.MsgTx, utxos UTXOs, startingIdx int, scriptAddr btcutil.Address, privateKey *secp256k1.PrivateKey) error {
-	// get the send signing script
-	script, err := txscript.PayToAddrScript(scriptAddr)
-	if err != nil {
-		return err
-	}
-
-	// for p2wpkh, we only need to add the signature and pubkey
-	witness := [][]byte{
-		AddSignatureSegwitOp,
-		AddPubkeyCompressedOp,
-	}
-	idx := startingIdx
-	for i := range utxos {
-		fetcher := txscript.NewCannedPrevOutputFetcher(script, utxos[i].Amount)
-		err := signTx(tx, fetcher, utxos[i].Amount, idx, witness, script, nil, txscript.SigHashAll, privateKey)
-		if err != nil {
-			return err
-		}
-		idx++
-	}
 	return nil
 }
 
@@ -822,9 +956,21 @@ func validateRequests(spendReqs []SpendRequest, sendReqs []SendRequest, sacps []
 
 	}
 
+	dupeIds := make(map[string]int)
+
 	for _, r := range sendReqs {
 		if r.Amount <= DustAmount {
 			return ErrAmountLessThanDust
+		}
+		ok, id := r.ID()
+		if ok {
+			dupeIds[id]++
+		}
+	}
+
+	for _, count := range dupeIds {
+		if count > 1 {
+			return fmt.Errorf("duplicate ids found in send requests")
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -26,12 +27,15 @@ type serializableSpendRequest struct {
 	HashType      txscript.SigHashType
 	Sequence      uint32
 	Utxos         UTXOs
+	Recipient     string
 }
 
 // serializableSendRequest is a serializable version of SendRequest
 type serializableSendRequest struct {
-	Amount int64
-	To     string
+	Amount       int64
+	To           string
+	ID           string
+	InvalidateID string
 }
 
 // serializableBatcherRequest is a serializable version of BatcherRequest
@@ -54,6 +58,10 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 	}
 
 	for i, spend := range req.Spends {
+		var recipient string
+		if spend.Recipient != nil {
+			recipient = spend.Recipient.EncodeAddress()
+		}
 		primitiveReq.Spends[i] = serializableSpendRequest{
 			Witness:       spend.Witness,
 			Script:        spend.Script,
@@ -62,13 +70,18 @@ func serializeBatcherRequest(req BatcherRequest) ([]byte, error) {
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
 			Utxos:         spend.Utxos,
+			Recipient:     recipient,
 		}
 	}
 
 	for i, send := range req.Sends {
+		_, id := send.ID()
+		_, invalidateID := send.InvalidateTxID()
 		primitiveReq.Sends[i] = serializableSendRequest{
-			Amount: send.Amount,
-			To:     send.To.EncodeAddress(),
+			Amount:       send.Amount,
+			To:           send.To.EncodeAddress(),
+			ID:           id,
+			InvalidateID: invalidateID,
 		}
 	}
 	return json.Marshal(primitiveReq)
@@ -95,6 +108,13 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 		if err != nil {
 			return BatcherRequest{}, err
 		}
+		var recipient btcutil.Address
+		if spend.Recipient != "" {
+			recipient, err = parseAddress(spend.Recipient)
+			if err != nil {
+				return BatcherRequest{}, err
+			}
+		}
 		req.Spends[i] = SpendRequest{
 			Witness:       spend.Witness,
 			Script:        spend.Script,
@@ -103,6 +123,7 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 			HashType:      spend.HashType,
 			Sequence:      spend.Sequence,
 			Utxos:         spend.Utxos,
+			Recipient:     recipient,
 		}
 	}
 
@@ -112,8 +133,10 @@ func deserializeBatcherRequest(data []byte) (BatcherRequest, error) {
 			return BatcherRequest{}, err
 		}
 		req.Sends[i] = SendRequest{
-			Amount: send.Amount,
-			To:     addr,
+			Amount:       send.Amount,
+			To:           addr,
+			id:           send.ID,
+			invalidateID: send.InvalidateID,
 		}
 	}
 	return req, nil
@@ -172,11 +195,11 @@ type BatcherCache struct {
 	*batcherCacheKeyManager
 }
 
-func NewBatcherCache(db *leveldb.DB, strategy Strategy) Cache {
+func NewBatcherCache(db *leveldb.DB, id string, strategy Strategy) Cache {
 	return &BatcherCache{
 		db:                     db,
 		strategy:               strategy,
-		batcherCacheKeyManager: &batcherCacheKeyManager{strategy: strategy},
+		batcherCacheKeyManager: &batcherCacheKeyManager{id: id, strategy: strategy},
 	}
 }
 
@@ -399,7 +422,7 @@ func (l *BatcherCache) saveLatestBatch(batch Batch) error {
 	if err != nil {
 		return err
 	}
-	return l.db.Put([]byte(fmt.Sprintf(latestBatchPrefix, l.strategy)), data, nil)
+	return l.db.Put([]byte(l.batcherCacheKeyManager.latestBatchKey()), data, nil)
 }
 
 func (l *BatcherCache) searchRequest(id string) (BatcherRequest, error) {
@@ -473,23 +496,24 @@ func isPending(batch Batch) bool {
 
 // All levelDB keys are managed by this struct
 type batcherCacheKeyManager struct {
+	id       string
 	strategy Strategy
 }
 
 func (b *batcherCacheKeyManager) requestIndexKey(reqID string) []byte {
-	return []byte(fmt.Sprintf(reqIndexPrefix, b.strategy, reqID))
+	return []byte(fmt.Sprintf(reqIndexPrefix, b.id+string(b.strategy), reqID))
 }
 
 func (b *batcherCacheKeyManager) pendingBatchKey(batchID string) []byte {
-	return []byte(fmt.Sprintf(pendingBatchPrefix, b.strategy, batchID))
+	return []byte(fmt.Sprintf(pendingBatchPrefix, b.id+string(b.strategy), batchID))
 }
 
 func (b *batcherCacheKeyManager) batchKey(batchID string) []byte {
-	return []byte(fmt.Sprintf(batchPrefix, b.strategy, batchID))
+	return []byte(fmt.Sprintf(batchPrefix, b.id+string(b.strategy), batchID))
 }
 
 func (b *batcherCacheKeyManager) latestBatchKey() []byte {
-	return []byte(fmt.Sprintf(latestBatchPrefix, b.strategy))
+	return []byte(fmt.Sprintf(latestBatchPrefix, b.id+string(b.strategy)))
 }
 
 func (b *batcherCacheKeyManager) requestKey(reqID string) []byte {
@@ -497,5 +521,5 @@ func (b *batcherCacheKeyManager) requestKey(reqID string) []byte {
 }
 
 func (b *batcherCacheKeyManager) pendingRequestKey(reqID string) []byte {
-	return []byte(fmt.Sprintf(pendingRequestKey, b.strategy, reqID))
+	return []byte(fmt.Sprintf(pendingRequestKey, b.id+string(b.strategy), reqID))
 }

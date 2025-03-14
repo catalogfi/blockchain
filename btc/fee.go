@@ -55,6 +55,33 @@ func EstimateVirtualSize(tx *wire.MsgTx, extraBaseSize, extraSegwitSize int) int
 	return baseSize + (swSize+3)/blockchain.WitnessScaleFactor
 }
 
+func EstimateGuardianFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel, extraSegwitSizePerInput int, extraChangeSize int) (int64, int, error) {
+	baseSize := tx.SerializeSizeStripped() + extraChangeSize
+	totalSize := tx.SerializeSize() + extraChangeSize
+	for _, txIn := range tx.TxIn {
+		if len(txIn.Witness) == 0 {
+			totalSize += extraSegwitSizePerInput
+		}
+	}
+	weight := baseSize*3 + totalSize
+	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
+	fees, err := estimator.FeeSuggestion()
+	if err != nil {
+		return 0, 0, err
+	}
+	feeRate := fees.Medium
+	switch feeLevel {
+	case MediumFee:
+		feeRate = fees.Medium
+	case HighFee:
+		feeRate = fees.High
+	case LowFee:
+		feeRate = fees.Low
+	}
+
+	return int64(vSize * feeRate), vSize, nil
+}
+
 // EstimateFee will return the estimated fee for the given transaction.
 // Tx should be a fully signed segwit transaction.
 func EstimateSegwitFee(tx *wire.MsgTx, estimator FeeEstimator, feeLevel FeeLevel) (int, error) {
@@ -184,7 +211,7 @@ func NewBlockstreamFeeEstimator(params *chaincfg.Params, url string, ttl time.Du
 }
 
 func (f *blockstreamFeeEstimator) FeeSuggestion() (FeeSuggestion, error) {
-	if f.params.Name == "mainnet" && f.url != "" {
+	if f.url != "" {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 

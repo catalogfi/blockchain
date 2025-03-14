@@ -41,7 +41,7 @@ var _ = Describe("BatcherCache", Ordered, func() {
 		db, err = leveldb.OpenFile(dbPath, nil)
 		Expect(err).To(BeNil())
 
-		cache = btc.NewBatcherCache(db, btc.CPFP)
+		cache = btc.NewBatcherCache(db, "", btc.CPFP)
 	})
 
 	AfterAll(func() {
