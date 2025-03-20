@@ -22,9 +22,10 @@ type sigOptions struct {
 
 func defaultSigOptions() *sigOptions {
 	return &sigOptions{
-		compressed:     true,
-		sighashType:    txscript.SigHashAll,
-		ignoredIndexes: map[int]struct{}{},
+		compressed:        true,
+		sighashType:       txscript.SigHashAll,
+		tapScriptRootHash: nil,
+		ignoredIndexes:    map[int]struct{}{},
 	}
 }
 
@@ -46,9 +47,11 @@ func WithTapScriptRootHash(hash []byte) SigOptions {
 	}
 }
 
-func WithIgnoredIndex(index int) SigOptions {
+func WithIgnoredIndex(indexes ...int) SigOptions {
 	return func(o *sigOptions) {
-		o.ignoredIndexes[index] = struct{}{}
+		for _, index := range indexes {
+			o.ignoredIndexes[index] = struct{}{}
+		}
 	}
 }
 
@@ -86,7 +89,8 @@ func PayToWitnessTaprootScript(rawKey []byte) ([]byte, error) {
 	return txscript.NewScriptBuilder().AddOp(txscript.OP_1).AddData(rawKey).Script()
 }
 
-func SignUtxos(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *btcec.PrivateKey, fetcher *txscript.MultiPrevOutFetcher, sigHashes *txscript.TxSigHashes, sigOpts ...SigOptions) error {
+// SignInput signs the input of the `tx` at index `index` with the private key.
+func SignInput(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *btcec.PrivateKey, fetcher *txscript.MultiPrevOutFetcher, sigHashes *txscript.TxSigHashes, sigOpts ...SigOptions) error {
 	// Parse the options
 	opts := defaultSigOptions()
 	for _, sigOpt := range sigOpts {
@@ -105,7 +109,6 @@ func SignUtxos(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *bt
 		}
 		tx.TxIn[index].SignatureScript = sigScript
 	case waddrmgr.WitnessPubKey:
-		// sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, opts.sighashType, key)
 		if err != nil {
 			return err
@@ -128,6 +131,7 @@ func SignUtxos(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *bt
 	return nil
 }
 
+// PkScript returns the pkScript basing on the addr type.
 func PkScript(addrType waddrmgr.AddressType, key *btcec.PublicKey) ([]byte, error) {
 	switch addrType {
 	case waddrmgr.PubKeyHash:
@@ -141,6 +145,7 @@ func PkScript(addrType waddrmgr.AddressType, key *btcec.PublicKey) ([]byte, erro
 	}
 }
 
+// SignTx signs the entire transaction `tx` with the private key.
 func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey, utxos UTXOs, sigOpts ...SigOptions) error {
 	opts := defaultSigOptions()
 	for _, sigOpt := range sigOpts {
@@ -148,17 +153,11 @@ func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey
 	}
 
 	// Calculate the pkScript basing on the addr type
-	var pkScript []byte
-	var err error
-	switch addrType {
-	case waddrmgr.TaprootPubKey:
-		tapKey := txscript.ComputeTaprootOutputKey(key.PubKey(), opts.tapScriptRootHash)
-		pkScript, err = PkScript(addrType, tapKey)
-	case waddrmgr.PubKeyHash, waddrmgr.WitnessPubKey:
-		pkScript, err = PkScript(addrType, key.PubKey())
-	default:
-		return fmt.Errorf("unknown address type: %v", addrType)
+	externalKey := key.PubKey()
+	if addrType == waddrmgr.TaprootPubKey {
+		externalKey = txscript.ComputeTaprootOutputKey(key.PubKey(), opts.tapScriptRootHash)
 	}
+	pkScript, err := PkScript(addrType, externalKey)
 	if err != nil {
 		return err
 	}
@@ -172,7 +171,7 @@ func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey
 
 	// Sign each utxo
 	for i := range tx.TxIn {
-		if err := SignUtxos(addrType, tx, i, key, fetcher, sigHashes, sigOpts...); err != nil {
+		if err := SignInput(addrType, tx, i, key, fetcher, sigHashes, sigOpts...); err != nil {
 			return err
 		}
 	}

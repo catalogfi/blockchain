@@ -15,24 +15,6 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 )
 
-type ExecuteOpts func(*executeOpts)
-
-type executeOpts struct {
-	rbfTxid string
-}
-
-func defaultExecuteOpts() *executeOpts {
-	return &executeOpts{
-		rbfTxid: "",
-	}
-}
-
-func WithRbfTxid(txid string) ExecuteOpts {
-	return func(o *executeOpts) {
-		o.rbfTxid = txid
-	}
-}
-
 type Wallet interface {
 	PublicKey() *btcec.PublicKey
 
@@ -48,7 +30,7 @@ type Wallet interface {
 
 	InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx) (*wire.MsgTx, error)
 
-	Execute(ctx context.Context, actions []HtlcAction, opts ...ExecuteOpts) (*wire.MsgTx, error)
+	Execute(ctx context.Context, actions []HtlcAction, prevTxid string) (*wire.MsgTx, error)
 }
 
 type wallet struct {
@@ -346,7 +328,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 			initiatorSig := tx.TxIn[i].Witness[0]
 			transaction.TxIn[i].Witness = append(wire.TxWitness{}, redeemerSig, initiatorSig, leaf.Script, ctrBlkBytes)
 		} else {
-			if err := SignUtxos(wal.addrType, transaction, i, wal.internalKey, fetcher, sigHashes); err != nil {
+			if err := SignInput(wal.addrType, transaction, i, wal.internalKey, fetcher, sigHashes); err != nil {
 				return nil, err
 			}
 		}
@@ -359,15 +341,9 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	return transaction, nil
 }
 
-func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ...ExecuteOpts) (*wire.MsgTx, error) {
+func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid string) (*wire.MsgTx, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
-
-	// Parse extra execution options
-	opts := defaultExecuteOpts()
-	for _, exeOpt := range exeOpts {
-		exeOpt(opts)
-	}
 
 	// Fetch wallet utxos which are confirmed
 	walUtxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
@@ -385,8 +361,8 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 	var replacedTx Transaction
 	var conflictUtxo *UTXO
 	inputsMap, outputsMaps := map[string]bool{}, map[string]bool{} // make sure no double executions
-	if opts.rbfTxid != "" {
-		replacedTx, err = wal.indexer.GetTx(ctx, opts.rbfTxid)
+	if prevTxid != "" {
+		replacedTx, err = wal.indexer.GetTx(ctx, prevTxid)
 		if err != nil {
 			return nil, err
 		}
@@ -632,7 +608,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, exeOpts ..
 		// Rest utxos should be the wallet utxos or from new actions.
 		action, ok := inputActions[tx.TxIn[i].PreviousOutPoint.String()]
 		if !ok {
-			if err := SignUtxos(wal.addrType, tx, i, wal.internalKey, fetcher, sigHashes); err != nil {
+			if err := SignInput(wal.addrType, tx, i, wal.internalKey, fetcher, sigHashes); err != nil {
 				return nil, err
 			}
 			continue

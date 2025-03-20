@@ -112,7 +112,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlc,
 						},
 					}
-					_, err = wal1.Execute(ctx, actions1)
+					_, err = wal1.Execute(ctx, actions1, "")
 					Expect(err).Should(BeNil())
 					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 
@@ -123,7 +123,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlc,
 						},
 					}
-					_, err = wal2.Execute(ctx, actions2)
+					_, err = wal2.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
 				}
 			})
@@ -146,7 +146,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlc,
 						},
 					}
-					_, err = wal1.Execute(ctx, actions1)
+					_, err = wal1.Execute(ctx, actions1, "")
 					Expect(err).Should(BeNil())
 
 					By("Mine expiry number of blocks")
@@ -163,7 +163,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlc,
 						},
 					}
-					_, err = wal1.Execute(ctx, actions2)
+					_, err = wal1.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
 				}
 			})
@@ -194,7 +194,7 @@ var _ = Describe("Wallet", func() {
 							InstantRefundTx: irTx,
 						},
 					}
-					_, err = wal2.Execute(ctx, actions2)
+					_, err = wal2.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
 				}
 			})
@@ -230,7 +230,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlcs1[i],
 						})
 					}
-					_, err = wal1.Execute(ctx, actions1)
+					_, err = wal1.Execute(ctx, actions1, "")
 					Expect(err).Should(BeNil())
 
 					By("Mine expiry number of blocks")
@@ -248,7 +248,7 @@ var _ = Describe("Wallet", func() {
 							Htlc:       htlcs2[i],
 						})
 					}
-					_, err = wal2.Execute(ctx, actions2)
+					_, err = wal2.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
 					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
 
@@ -291,7 +291,7 @@ var _ = Describe("Wallet", func() {
 
 						}
 					}
-					_, err = wal1.Execute(ctx, actions3)
+					_, err = wal1.Execute(ctx, actions3, "")
 					Expect(err).Should(BeNil())
 				}
 
@@ -326,12 +326,12 @@ var _ = Describe("Wallet", func() {
 					})
 
 					By("Execute all actions one by one using rbf")
-					opts := []btc.ExecuteOpts{}
+					prevTxid := ""
 					for i := 0; i < len(actions); i++ {
-						tx, err := wal1.Execute(ctx, []btc.HtlcAction{actions[i]}, opts...)
+						tx, err := wal1.Execute(ctx, []btc.HtlcAction{actions[i]}, prevTxid)
 						Expect(err).Should(BeNil())
 						time.Sleep(1 * time.Second)
-						opts = []btc.ExecuteOpts{btc.WithRbfTxid(tx.TxHash().String())}
+						prevTxid = tx.TxHash().String()
 					}
 				}
 			})
@@ -354,17 +354,17 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 
 					By("Initiate one htlc")
-					tx1, err := wal1.Execute(ctx, init1)
+					tx1, err := wal1.Execute(ctx, init1, "")
 					Expect(err).Should(BeNil())
 					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Redeem one htlc with higher amount")
-					tx2, err := wal1.Execute(ctx, redeem, btc.WithRbfTxid(tx1.TxHash().String()))
+					tx2, err := wal1.Execute(ctx, redeem, tx1.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx2: %s", tx2.TxHash().String())
 
 					By("Initiate another htlc")
-					tx3, err := wal1.Execute(ctx, init2, btc.WithRbfTxid(tx2.TxHash().String()))
+					tx3, err := wal1.Execute(ctx, init2, tx2.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx3: %s", tx3.TxHash().String())
 
@@ -402,14 +402,14 @@ var _ = Describe("Wallet", func() {
 					By("Initiate one htlc")
 					inits1, err := btctest.PrepareActions(ctx, 1, wal1, wal2, indexer, btc.HtlcActionInitiate)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, inits1)
+					tx1, err := wal1.Execute(ctx, inits1, "")
 					Expect(err).Should(BeNil())
 					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Initiate again with duplicate actions")
 					inits2, err := btctest.PrepareActions(ctx, 1, wal1, wal2, indexer, btc.HtlcActionInitiate)
 					Expect(err).Should(BeNil())
-					tx2, err := wal1.Execute(ctx, append(inits1, append(inits2, inits2...)...), btc.WithRbfTxid(tx1.TxHash().String()))
+					tx2, err := wal1.Execute(ctx, append(inits1, append(inits2, inits2...)...), tx1.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx2: %s", tx2.TxHash().String())
 				}
@@ -427,12 +427,12 @@ var _ = Describe("Wallet", func() {
 					By("Redeem one htlc")
 					redeems, err := btctest.PrepareActions(ctx, 2, wal2, wal1, indexer, btc.HtlcActionRedeem)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, redeems[:1])
+					tx1, err := wal1.Execute(ctx, redeems[:1], "")
 					Expect(err).Should(BeNil())
 					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Redeem again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(redeems, redeems...), btc.WithRbfTxid(tx1.TxHash().String()))
+					tx2, err := wal1.Execute(ctx, append(redeems, redeems...), tx1.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx2: %s", tx2.TxHash().String())
 				}
@@ -450,12 +450,12 @@ var _ = Describe("Wallet", func() {
 					By("Refund one htlc")
 					refunds, err := btctest.PrepareActions(ctx, 2, wal1, wal2, indexer, btc.HtlcActionRefund)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, refunds[:1])
+					tx1, err := wal1.Execute(ctx, refunds[:1], "")
 					Expect(err).Should(BeNil())
 					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Refund again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(refunds, refunds...), btc.WithRbfTxid(tx1.TxHash().String()))
+					tx2, err := wal1.Execute(ctx, append(refunds, refunds...), tx1.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx2: %s", tx2.TxHash().String())
 				}
@@ -473,12 +473,12 @@ var _ = Describe("Wallet", func() {
 					By("Instant refunds one htlc")
 					instantRefunds, err := btctest.PrepareActions(ctx, 2, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, instantRefunds[:1])
+					tx1, err := wal1.Execute(ctx, instantRefunds[:1], "")
 					Expect(err).Should(BeNil())
 					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Instant refunds again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), btc.WithRbfTxid(tx1.TxHash().String()))
+					tx2, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), tx1.TxHash().String())
 					Expect(err).Should(BeNil())
 					color.Green("tx2: %s", tx2.TxHash().String())
 				}

@@ -1,8 +1,7 @@
 # Test setup
-The test is mainly relying on local regression testnet. It's highly recommended to use 
-[merry](https://merry.dev/) to easily set up a local testing environment. The `testutil`
-package has some helper functions to use in the tests. You can check out the `btc.go` file in the 
-`testutil` package for more details. 
+Tests are using a local regression network. You need to start  
+[merry](https://merry.dev/) to easily setup the testing environment. The `btctest`
+package has some helper functions to use for the tests. 
 
 There are some env variables need to be set before running all the tests. It's recommended to have 
 a `.env` file and source it before running the tests. The test will first check if these variables 

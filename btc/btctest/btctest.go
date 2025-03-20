@@ -159,7 +159,7 @@ func PrepareActions(ctx context.Context, n int, wal1, wal2 btc.Wallet, indexer b
 	}
 
 	if len(initiatorActions) != 0 {
-		_, err := wal1.Execute(ctx, initiatorActions)
+		_, err := wal1.Execute(ctx, initiatorActions, "")
 		if err != nil {
 			return nil, err
 		}

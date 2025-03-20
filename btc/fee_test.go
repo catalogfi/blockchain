@@ -254,9 +254,9 @@ var _ = Describe("bitcoin fees", func() {
 				sigHashes := txscript.NewTxSigHashes(transaction, fetcher)
 				for i := range transaction.TxIn {
 					if i < len(utxos1) {
-						Expect(btc.SignUtxos(waddrmgr.PubKeyHash, transaction, i, key1, fetcher, sigHashes)).Should(Succeed())
+						Expect(btc.SignInput(waddrmgr.PubKeyHash, transaction, i, key1, fetcher, sigHashes)).Should(Succeed())
 					} else {
-						Expect(btc.SignUtxos(waddrmgr.WitnessPubKey, transaction, i, key2, fetcher, sigHashes)).Should(Succeed())
+						Expect(btc.SignInput(waddrmgr.WitnessPubKey, transaction, i, key2, fetcher, sigHashes)).Should(Succeed())
 					}
 				}
 				actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))

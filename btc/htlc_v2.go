@@ -160,28 +160,12 @@ func (htlc *HTLC) P2trScript() ([]byte, error) {
 	return txscript.PayToTaprootScript(outputKey)
 }
 
-// func (htlc *HTLC) Initiated(utxos []UTXO) (bool, uint64, error) {
-// 	if len(utxos) > MaxInitiationUtxoNumber {
-// 		return false, 0, fmt.Errorf("too many utxos for initiation")
-// 	}
-//
-// 	total, blockHeight := int64(0), uint64(0)
-// 	for _, utxo := range utxos {
-// 		if utxo.Status != nil && utxo.Status.Confirmed {
-// 			total += utxo.Amount
-// 			if *utxo.Status.BlockHeight > blockHeight {
-// 				blockHeight = *utxo.Status.BlockHeight
-// 			}
-// 		}
-// 	}
-// 	return total >= htlc.Amount, blockHeight, nil
-// }
-
 // Redeemable checks the utxos to see if the htlc is redeemable. This means there's a single confirmed utxo which has
 // enough amount to cover the htlc amount. We currently don't allow initiation of HTLCs with multiple utxos. The given
-// utxos must be associated with the htlc address.
+// utxos must be from the htlc address.
 func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
 	for _, utxo := range utxos {
+		// todo : do we need to force the amount to be equal?
 		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
 			return true, *utxo.Status.BlockHeight, nil
 		}
@@ -194,6 +178,7 @@ func (htlc *HTLC) Redeemable(utxos []UTXO) (bool, uint64, error) {
 // utxo with enough amount first and then check if it's expired for refunding.
 func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
 	for _, utxo := range utxos {
+		// todo : do we need to force the amount to be equal?
 		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount >= htlc.Amount {
 			if latest-*utxo.Status.BlockHeight+1 >= uint64(htlc.Timelock) {
 				return true
@@ -203,6 +188,7 @@ func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
 	return false
 }
 
+// Utxo finds the initiation utxo of the htlc.
 func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
 	addr, err := htlc.Address(network)
 	if err != nil {
@@ -241,7 +227,6 @@ func (htlc *HTLC) Leaf(action HtlcActionType) (txscript.TapLeaf, txscript.Contro
 }
 
 // HtlcActionFromWitness determines the type of HTLC (Hashed Timelock Contract) action based on the provided witness.
-// The witness is a stack of items provided in scripts during transaction validation.
 // It returns the corresponding HtlcActionType and an error if the witness does not match any known HTLC action types.
 func HtlcActionFromWitness(witness wire.TxWitness) (HtlcActionType, error) {
 	switch len(witness) {
@@ -250,7 +235,10 @@ func HtlcActionFromWitness(witness wire.TxWitness) (HtlcActionType, error) {
 		if ok {
 			return HtlcActionInstantRefund, nil
 		}
-		return HtlcActionRedeem, nil
+		ok, _ = IsRedeemLeaf(witness[2])
+		if ok {
+			return HtlcActionRedeem, nil
+		}
 	case 3: // refund
 		ok, _ := IsRefundLeaf(witness[1])
 		if ok {
@@ -261,9 +249,7 @@ func HtlcActionFromWitness(witness wire.TxWitness) (HtlcActionType, error) {
 }
 
 // RedeemLeaf is one of the leaf scripts in the HTLC script which can be spent by revealing the secret
-// by the redeemer.
-//
-// redeemerPubKey must be x-only public key of the redeemer.
+// by the redeemer. `redeemerPubKey` must be x-only public key of the redeemer.
 func RedeemLeaf(redeemerPubKey, secretHash []byte) (txscript.TapLeaf, error) {
 	script, err := txscript.NewScriptBuilder().
 		AddOp(txscript.OP_SHA256).
@@ -279,9 +265,7 @@ func RedeemLeaf(redeemerPubKey, secretHash []byte) (txscript.TapLeaf, error) {
 }
 
 // RefundLeaf is one of the leaf scripts in the HTLC script which can be spent by the initiator
-// after the lock time.
-//
-// initiatorPubKey must be x-only public key of the initiator.
+// after the lock time. `initiatorPubKey` must be x-only public key of the initiator.
 func RefundLeaf(initiatorPubKey []byte, lockTime int64) (txscript.TapLeaf, error) {
 	if lockTime > math.MaxUint16 {
 		return txscript.TapLeaf{}, ErrInvalidLockTime
@@ -300,9 +284,8 @@ func RefundLeaf(initiatorPubKey []byte, lockTime int64) (txscript.TapLeaf, error
 	return txscript.NewBaseTapLeaf(script), nil
 }
 
-// InstantRefundLeaf is a 2 on 2 multisig leaf script
-//
-// pubkeys must be x-only pubkeys of the initiator and the redeemer.
+// InstantRefundLeaf is a 2 on 2 multisig leaf script. This is used for fast refunds when both parties agree.
+// both the `initiatorPubKey` and `redeemerPubKey` must be x-only pubkeys.
 func InstantRefundLeaf(initiatorPubKey, redeemerPubKey []byte) (txscript.TapLeaf, error) {
 	script, err := txscript.NewScriptBuilder().
 		AddData(initiatorPubKey).
@@ -420,39 +403,9 @@ func IsMultiSigLeaf(script []byte) (bool, string) {
 	return tokenizer.Done(), refunderPubkey
 }
 
-// NewInstantRefundTx builds a new tx to redeem an HTLC instantly using the instantRefund branch. The instant refund tx
-// will contain only one input and one output, the input amount should be equal or slightly more than the output amount.
-// The output will be sent to the target address. Initiator's signature will be added to the witness.
-func NewInstantRefundTx(network *chaincfg.Params, key *btcec.PrivateKey, htlc *HTLC, utxo UTXO, recipient Recipient) (*wire.MsgTx, error) {
-	tx, err := BuildTx(network, GaslessMode(), []UTXO{utxo}, nil, []Recipient{recipient}, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Sign the tx
-	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
-	script, err := htlc.P2trScript()
-	if err != nil {
-		return nil, err
-	}
-	fetcher, err := NewFetcher(script, utxo)
-	if err != nil {
-		return nil, err
-	}
-	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-	for i, input := range tx.TxIn {
-		out := fetcher.FetchPrevOutput(input.PreviousOutPoint)
-		sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, i, out.Value, out.PkScript, leaf, SigHashSingleAnyoneCanPay, key)
-		if err != nil {
-			return nil, err
-		}
-
-		tx.TxIn[i].Witness = append(tx.TxIn[i].Witness, sig)
-	}
-
-	return tx, nil
-}
-
+// ValidateInstantRefundTx checks if the given tx is a valid instant refund tx of the htlc.
+// It assumes the tx will only have one input and one output. The input amount needs to equal the
+// htlc amount. Input's witness stack will only contain one item which is the initiator's signature.
 func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Params) (UTXO, Recipient, error) {
 	if len(tx.TxIn) != 1 {
 		return UTXO{}, Recipient{}, errors.New("invalid number of inputs")
@@ -460,10 +413,10 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	if len(tx.TxOut) != 1 {
 		return UTXO{}, Recipient{}, errors.New("invalid number of outputs")
 	}
-	// todo : we assume the witness only has one element which is the user's signature
 	if len(tx.TxIn[0].Witness) != 1 {
 		return UTXO{}, Recipient{}, errors.New("invalid witness length")
 	}
+	sigBytes := tx.TxIn[0].Witness[0]
 	if tx.TxOut[0].Value > htlc.Amount {
 		return UTXO{}, Recipient{}, errors.New("invalid output amount")
 	}
@@ -480,7 +433,6 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	if err != nil {
 		return UTXO{}, Recipient{}, err
 	}
-	sigBytes := tx.TxIn[0].Witness[0]
 	if len(sigBytes) == schnorr.SignatureSize+1 {
 		sigBytes = sigBytes[:len(sigBytes)-1]
 	}
@@ -496,8 +448,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 		return UTXO{}, Recipient{}, errors.New("invalid signature")
 	}
 
-	// Parse input and output
-	// todo : we assume the instant refund tx is the same as htlc amount, watcher ?
+	// Parse the input's utxo and output address from the tx
 	utxo := UTXO{
 		TxID:   tx.TxIn[0].PreviousOutPoint.Hash.String(),
 		Vout:   tx.TxIn[0].PreviousOutPoint.Index,

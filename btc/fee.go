@@ -85,34 +85,12 @@ func AddUtxosToFetcher(fetcher *txscript.MultiPrevOutFetcher, script []byte, utx
 	return nil
 }
 
-// TotalFee returns the total amount fees used by the given tx.
-func TotalFee(tx *wire.MsgTx, fetcher txscript.PrevOutputFetcher) int {
-	fees := int64(0)
-	for _, in := range tx.TxIn {
-		output := fetcher.FetchPrevOutput(in.PreviousOutPoint)
-		fees += output.Value
-	}
-	for _, out := range tx.TxOut {
-		fees -= out.Value
-	}
-	return int(fees)
-}
-
 // SizeEstimator collects estimated signature size of UTXOs, it then can be used to estimate the transaction size for
 // fee purpose.
 type SizeEstimator struct {
 	mu            *sync.Mutex
 	baseSizeMap   map[string]int
 	segwitSizeMap map[string]int
-}
-
-// NewEmptySizeEstimator returns an empty SizeEstimator
-func NewEmptySizeEstimator() *SizeEstimator {
-	return &SizeEstimator{
-		mu:            new(sync.Mutex),
-		baseSizeMap:   make(map[string]int),
-		segwitSizeMap: make(map[string]int),
-	}
 }
 
 // NewSizeEstimator returns an SizeEstimator with some preload UTXOs.
