@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/fatih/color"
@@ -81,6 +82,19 @@ func WaitTx(txid string) WaitMinedFunc {
 	return func(ctx context.Context, indexer btc.IndexerClient) error {
 		_, err := indexer.GetTx(ctx, txid)
 		return err
+	}
+}
+
+func WaitFunds(addr btcutil.Address) WaitMinedFunc {
+	return func(ctx context.Context, indexer btc.IndexerClient) error {
+		utxos, err := indexer.GetUTXOs(ctx, addr)
+		if err != nil {
+			return err
+		}
+		if len(utxos) == 0 {
+			return fmt.Errorf("utxo not found")
+		}
+		return nil
 	}
 }
 

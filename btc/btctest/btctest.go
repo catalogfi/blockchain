@@ -51,7 +51,7 @@ func NewBtcAddrWithFunds(network *chaincfg.Params, addrType waddrmgr.AddressType
 	if err != nil {
 		return nil, nil, err
 	}
-	txid, err := Faucet(addr.EncodeAddress())
+	_, err = Faucet(addr.EncodeAddress())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -59,7 +59,7 @@ func NewBtcAddrWithFunds(network *chaincfg.Params, addrType waddrmgr.AddressType
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		err = WaitMined(ctx, indexer, WaitTx(txid.String()))
+		err = WaitMined(ctx, indexer, WaitFunds(addr))
 		return key, addr, err
 	}
 	return key, addr, nil

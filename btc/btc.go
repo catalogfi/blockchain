@@ -99,7 +99,6 @@ func NewRecipient(to string, amount int64) Recipient {
 func (recipient Recipient) ToTxOut(network *chaincfg.Params) (*wire.TxOut, error) {
 	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
 	if err != nil {
-		log.Printf("adress = %v err = %v", recipient.To, err)
 		return nil, err
 	}
 	toScript, err := txscript.PayToAddrScript(toAddress)
@@ -134,11 +133,11 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// FeeMode is a function type that calculates the required fees for a given transaction under different scenario.
+// FeeMode defines the rules on how to calculate the fees when building a transaction. It can be called after a tx is
+// build and it will return the minimum fees(in sats) required by this mode.
 type FeeMode func(tx *wire.MsgTx) (int64, error)
 
-// MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be greater than or equal
-// to the given `feeRate` (sats/kvb).
+// MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be at lease the given `feeRate`
 func MinFeeRateMode(feeRate SatoshiPerKb, sizer *SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vs, err := sizer.EstimateTxVirtualSize(tx)
@@ -164,8 +163,12 @@ func GaslessMode() FeeMode {
 }
 
 // RbfMode computes the required fees for a transaction to be replace-by-fee (RBF) compliant.
-// It considers the minimum fee rate, previous fee rate, and previous fees to calculate the maximum
-// fees needed for the transaction. Both `minFeeRate` and `prevFeeRate` will be in sats/kvb.
+// `minFeeRate` is an optional parameter which set the minimum fee rate you want to use, similar to `MinFeeRateMode`.
+// Use 0 if you don't want to have a minimum fee rate.
+// `prevFeeRate` is the maximum fee rate of all directly conflicting transactions. The new fee rate has to be greater
+// than this according to the mempool policy.
+// `prevFees`is the sum of fees of paid by the original transactions. This includes teh replacement transaction and all
+// its descendants.
 func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vsize, err := sizer.EstimateTxVirtualSize(tx)
@@ -174,8 +177,7 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEs
 		}
 		fees1 := math.Ceil(float64((prevFeeRate.Int()+1)*vsize) / 1000)
 		fees2 := math.Ceil(float64(prevFees) + float64(vsize))
-		fees3 := math.Ceil(float64(minFeeRate.Int() * vsize / 1000))
-		log.Printf("prevFees=%v, prevFeeRate= %v, fees1=%v, fees2=%v, fees3=%v", prevFees, prevFeeRate, fees1, fees2, fees3)
+		fees3 := math.Ceil(float64(minFeeRate.Int()*vsize) / 1000)
 		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
 	}
 }
@@ -184,6 +186,7 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEs
 // fees. `inputs` will be a list of utxos that guaranteed to be included in the transaction. `utxos` is a list of
 // transaction will be picked to cover the output amount and fees. The `recipients` includes a list of target addresses
 // and the associated amounts to be sent.  If there's any change, it will be sent back to the `changeAddr`.
+// If `changeAddr` is nil, change will be spent as fees.
 func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	totalIn, totalOut := int64(0), int64(0)
@@ -209,9 +212,16 @@ func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, rec
 		totalOut += recipient.Amount
 	}
 
+	// Keep adding utxos to make sure it has enough input to cover the output + fees.
 	for i := -1; i < len(utxos); i++ {
 		// Add the utxo to the transaction input
 		if i >= 0 {
+			// Skip utxos that are too small
+			// Todo : we might want a better way to do this, since sometimes a utxo with (DustAmount +1) could be
+			// uneconomical to spend depending on the fee rate.
+			if utxos[i].Amount < DustAmount {
+				continue
+			}
 			txin, err := utxos[i].ToTxIn()
 			if err != nil {
 				return nil, err

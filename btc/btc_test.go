@@ -2,7 +2,6 @@ package btc_test
 
 import (
 	"context"
-	"log"
 	"math/rand"
 	"time"
 
@@ -20,7 +19,7 @@ import (
 
 var _ = Describe("Bitcoin", func() {
 	Context("Build transaction", func() {
-		Context("Using a minimum fee rate mode", func() {
+		Context("MinFeeRateMode", func() {
 			It("should build a transaction with min fee rate", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Initialize keys and addresses")
@@ -51,12 +50,12 @@ var _ = Describe("Bitcoin", func() {
 					actualFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 					Expect(actualFeeRate).Should(BeNumerically(">=", feeRate))
 					Expect(actualFeeRate - feeRate).Should(BeNumerically("<=", 1000))
-					By(color.GreenString("Expected fee rate = %v, actual fee rate = %v", feeRate, actualFeeRate))
+					By(color.GreenString("Expected fee rate = %v, actual fee rate = %v, diff = %v", feeRate, actualFeeRate, feeRate-actualFeeRate))
 				}
 			})
 		})
 
-		Context("Using a fixed fee mode", func() {
+		Context("FixedFeesMode", func() {
 			It("should build a transaction with fixed fee", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Initialize keys and addresses")
@@ -87,271 +86,453 @@ var _ = Describe("Bitcoin", func() {
 			})
 		})
 
-		Context("Using a rbf fee mode", func() {
-			// todo : restruct the test so that it tests all cases restricted by different rules
-			//  has descendants/ low fee rates / high fee rates
-			It("should rbf a tx using minimum extra fees", func(ctx context.Context) {
-				for _, addrType := range addrTypes {
-					By("Initialize keys and addresses")
-					key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
-					Expect(err).To(BeNil())
-					fundingTx, err := btctest.Faucet(addr1.EncodeAddress())
-					Expect(err).To(BeNil())
-					Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(fundingTx.String()))).Should(Succeed())
-					_, addr2, err := btctest.NewBtcKey(network, addrType)
-					Expect(err).To(BeNil())
+		Context("RbfMode", func() {
+			Context("No descendants", func() {
+				It("should rbf a tx using minimum extra fees when not providing a required fee rate", func(ctx context.Context) {
+					feeRates := []btc.SatoshiPerKb{1e3, 100e3}
+					for _, addrType := range addrTypes {
+						for _, feeRate := range feeRates {
+							By("Initialize keys and addresses")
+							key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+							Expect(err).To(BeNil())
+							fundingTx, err := btctest.Faucet(addr1.EncodeAddress())
+							Expect(err).To(BeNil())
+							Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(fundingTx.String()))).Should(Succeed())
+							_, addr2, err := btctest.NewBtcKey(network, addrType)
+							Expect(err).To(BeNil())
 
-					By("Construct a transaction which sends money from addr1 to addr2")
-					utxos, err := indexer.GetUTXOs(ctx, addr1)
-					Expect(err).To(BeNil())
-					amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
-					sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
-					feeMode := btc.MinFeeRateMode(feeRate, sizer)
-					tx1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
-					Expect(err).To(BeNil())
+							By("Construct a transaction which sends money from addr1 to addr2")
+							utxos, err := indexer.GetUTXOs(ctx, addr1)
+							Expect(err).To(BeNil())
+							amount := int64(1e7)
+							recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+							sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
+							feeMode := btc.MinFeeRateMode(feeRate, sizer)
+							tx1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+							Expect(err).To(BeNil())
 
-					By("Sign and submit the fund tx")
-					Expect(btc.SignTx(addrType, tx1, key1, utxos)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
-					By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+							By("Sign and submit the fund tx")
+							Expect(btc.SignTx(addrType, tx1, key1, utxos)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+							By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
-					By("Build a new tx which replacing tx1")
-					query, err := indexer.GetTx(ctx, tx1.TxHash().String())
-					Expect(err).To(BeNil())
-					vsize := (query.Weight + 3) / 4
-					prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
-					feeMode1 := btc.RbfMode(feeRate, prevFeeRate, query.Fee, sizer)
-					tx2, err := btc.BuildTx(network, feeMode1, utxos, nil, recipients, addr1)
-					Expect(err).To(BeNil())
+							By("Build a new tx which replacing tx1")
+							query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+							Expect(err).To(BeNil())
+							vsize := (query.Weight + 3) / 4
+							prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+							feeMode1 := btc.RbfMode(0, prevFeeRate, query.Fee, sizer)
+							tx2, err := btc.BuildTx(network, feeMode1, utxos, nil, recipients, addr1)
+							Expect(err).To(BeNil())
 
-					if addrType == waddrmgr.TaprootPubKey {
-						By("Tx should be rejected if we pay one sat less in fee")
-						tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value + 1
-						Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
-						Expect(indexer.SubmitTx(ctx, tx2)).ShouldNot(Succeed())
-						tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value - 1
+							if addrType == waddrmgr.TaprootPubKey {
+								By("Tx should be rejected if we pay one sat less in fee")
+								tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value + 1
+								Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+								Expect(indexer.SubmitTx(ctx, tx2)).ShouldNot(Succeed())
+								tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value - 1
+							}
+
+							By("Replacement tx should be accepted")
+							Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+							By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+						}
 					}
+				})
 
-					By("Replacement tx should be accepted")
-					Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
-					By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
-				}
+				It("should consider the fee rate when providing a non-zero value", func(ctx context.Context) {
+					for _, addrType := range addrTypes {
+						By("Initialize keys and addresses")
+						key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+						Expect(err).To(BeNil())
+						fundingTx, err := btctest.Faucet(addr1.EncodeAddress())
+						Expect(err).To(BeNil())
+						Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(fundingTx.String()))).Should(Succeed())
+						_, addr2, err := btctest.NewBtcKey(network, addrType)
+						Expect(err).To(BeNil())
+
+						By("Construct a transaction which sends money from addr1 to addr2")
+						utxos, err := indexer.GetUTXOs(ctx, addr1)
+						Expect(err).To(BeNil())
+						amount, feeRate := int64(1e7), btctest.RandomFeeRate()
+						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
+						feeMode := btc.MinFeeRateMode(feeRate, sizer)
+						tx1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+						Expect(err).To(BeNil())
+
+						By("Sign and submit the fund tx")
+						Expect(btc.SignTx(addrType, tx1, key1, utxos)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+
+						By("Build a new tx which replacing tx1 and require a minimum fee rate")
+						query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize := (query.Weight + 3) / 4
+						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+						minFeerate := prevFeeRate + 20e3
+						feeMode1 := btc.RbfMode(minFeerate, prevFeeRate, query.Fee, sizer)
+						tx2, err := btc.BuildTx(network, feeMode1, utxos, nil, recipients, addr1)
+						Expect(err).To(BeNil())
+
+						By("Replacement tx should be accepted")
+						Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+
+						By("The actual fee rate should not be less than the given fee rate")
+						query2, err := indexer.GetTx(ctx, tx2.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize2 := (query2.Weight + 3) / 4
+						actualFeeRate := btc.NewSatoshiPerKb(query2.Fee, vsize2)
+						Expect(actualFeeRate).Should(BeNumerically(">=", minFeerate))
+						Expect(actualFeeRate - minFeerate).Should(BeNumerically("<=", 1000))
+						By(color.GreenString("Expected fee rate = %v, actual fee rate = %v, diff = %v", minFeerate, actualFeeRate, actualFeeRate-minFeerate))
+					}
+				})
 			})
 
-			It("should work when the replaced tx has descendants", func(ctx context.Context) {
-				By("Initialize keys and addresses")
-				addrType := waddrmgr.TaprootPubKey
-				feeRates := []btc.SatoshiPerKb{1e3, 5e3, 10e3, 20e3, 50e3, 100e3}
-				for _, feeRate := range feeRates {
-					key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-					Expect(err).To(BeNil())
-					key2, addr2, err := btctest.NewBtcKey(network, addrType)
-					Expect(err).To(BeNil())
+			Context("With descendants", func() {
+				It("should rbf the tx when the fee is restricted by the fee bandwidth", func(ctx context.Context) {
+					By("Initialize keys and addresses")
+					for _, addrType := range addrTypes {
+						key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+						Expect(err).To(BeNil())
+						key2, addr2, err := btctest.NewBtcKey(network, addrType)
+						Expect(err).To(BeNil())
 
-					By("Construct a transaction which sends money from addr1 to addr2")
-					utxos1, err := indexer.GetUTXOs(ctx, addr1)
-					Expect(err).To(BeNil())
-					amount := int64(1e7)
-					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
-					sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
-					feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-					tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
-					Expect(err).To(BeNil())
+						By("Construct a transaction which sends money from addr1 to addr2")
+						utxos1, err := indexer.GetUTXOs(ctx, addr1)
+						Expect(err).To(BeNil())
+						amount, feeRate := int64(1e7), btc.SatoshiPerKb(100e3)
+						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
+						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
+						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
 
-					By("Sign and submit the fund tx1")
-					Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
-					By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+						By("Sign and submit the fund tx1")
+						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
-					By("Create a descendant tx of tx1 with a higher fee rate")
-					time.Sleep(5 * time.Second)
-					utxos2, err := indexer.GetUTXOs(ctx, addr2)
-					Expect(err).To(BeNil())
-					sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
-					feeMode2 := btc.MinFeeRateMode(feeRate+10000, sizer2)
-					tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
-					Expect(err).To(BeNil())
+						By("Create a descendant tx of tx1 with a lower fee rate")
+						time.Sleep(5 * time.Second)
+						utxos2, err := indexer.GetUTXOs(ctx, addr2)
+						Expect(err).To(BeNil())
+						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
+						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(1e3), sizer2)
+						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						Expect(err).To(BeNil())
 
-					By("Sign and submit the fund tx2")
-					Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
-					By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+						By("Sign and submit the fund tx2")
+						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
-					By("Build a new tx which replacing tx1")
-					entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
-					Expect(err).To(BeNil())
-					prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
-					Expect(err).To(BeNil())
-					prevFeeRate := btc.NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
-					feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-					tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients, addr1)
-					Expect(err).To(BeNil())
+						By("Build a new tx which replacing tx1")
+						entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+						Expect(err).To(BeNil())
+						query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize := (query.Weight + 3) / 4
+						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
+						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
 
-					By("Tx should be rejected if we pay one sat less in fee")
-					tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-					Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
+						if addrType == waddrmgr.TaprootPubKey {
+							By("Tx should be rejected if we pay one sat less in fee")
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
+							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
+						}
 
-					By("Replacement tx should be accepted by pumping 1 sat in fee")
-					tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
-					Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
-					Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
-					By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
-				}
-			})
+						By("Replacement tx should be accepted")
+						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
+					}
+				})
 
-			It("should work when the replaced tx has descendants", func(ctx context.Context) {
-				By("Initialize keys and addresses")
-				addrType := waddrmgr.TaprootPubKey
-				feeRate := btc.SatoshiPerKb(20e3)
-				key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-				Expect(err).To(BeNil())
-				key2, addr2, err := btctest.NewBtcKey(network, addrType)
-				Expect(err).To(BeNil())
+				It("should rbf the tx when the fee is restricted by the fee rate", func(ctx context.Context) {
+					By("Initialize keys and addresses")
+					for _, addrType := range addrTypes {
+						key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+						Expect(err).To(BeNil())
+						key2, addr2, err := btctest.NewBtcKey(network, addrType)
+						Expect(err).To(BeNil())
 
-				By("Construct a transaction which sends money from addr1 to addr2")
-				utxos1, err := indexer.GetUTXOs(ctx, addr1)
-				Expect(err).To(BeNil())
-				amount := int64(1e7)
-				recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
-				sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
-				feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-				tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
-				Expect(err).To(BeNil())
+						By("Construct a transaction which sends money from addr1 to addr2")
+						utxos1, err := indexer.GetUTXOs(ctx, addr1)
+						Expect(err).To(BeNil())
+						amount, feeRate := int64(1e7), btc.SatoshiPerKb(100e3)
+						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
+						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
+						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
 
-				By("Sign and submit the fund tx1")
-				Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
-				Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
-				By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+						By("Sign and submit the fund tx1")
+						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
-				By("Create a descendant tx of tx1 with a lower fee rate")
-				time.Sleep(5 * time.Second)
-				utxos2, err := indexer.GetUTXOs(ctx, addr2)
-				Expect(err).To(BeNil())
-				sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
-				feeMode2 := btc.MinFeeRateMode(feeRate-10000, sizer2)
-				tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
-				Expect(err).To(BeNil())
+						By("Create a descendant tx of tx1 with a lower fee rate")
+						time.Sleep(5 * time.Second)
+						utxos2, err := indexer.GetUTXOs(ctx, addr2)
+						Expect(err).To(BeNil())
+						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
+						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(1e3), sizer2)
+						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						Expect(err).To(BeNil())
 
-				By("Sign and submit the fund tx2")
-				Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
-				Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
-				By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+						By("Sign and submit the fund tx2")
+						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
-				By("Build a new tx which replacing tx1")
-				entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
-				Expect(err).To(BeNil())
-				prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
-				Expect(err).To(BeNil())
-				// prevFeeRate := btc.NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
-				// prevFeeRateSelf := feeRate
-				// if prevFeeRate < prevFeeRateSelf {
-				// 	prevFeeRate = prevFeeRateSelf
-				// }
+						By("Build a new tx which replacing tx1")
+						entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+						Expect(err).To(BeNil())
+						query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize := (query.Weight + 3) / 4
+						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
+						recipients1 := make([]btc.Recipient, 20)
+						for i := 0; i < 20; i++ {
+							recipients1[i] = btc.NewRecipient(addr2.EncodeAddress(), amount/10)
+						}
+						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients1, addr1)
+						Expect(err).To(BeNil())
 
-				prevFeeRate := feeRate
+						if addrType == waddrmgr.TaprootPubKey {
+							By("Tx should be rejected if we pay one sat less in fee")
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
+							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
+						}
 
-				recipients1 := make([]btc.Recipient, 20)
-				for i := 0; i < 20; i++ {
-					recipients1[i] = btc.NewRecipient(addr2.EncodeAddress(), amount/10)
-				}
-				feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-				tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients1, addr1)
-				Expect(err).To(BeNil())
+						By("Replacement tx should be accepted")
+						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
+					}
+				})
 
-				By("Tx should be rejected if we pay one sat less in fee")
-				tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-				Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
-				err = indexer.SubmitTx(ctx, tx3)
-				Expect(err).ShouldNot(BeNil())
-				log.Println(err)
+				It("should rbf the tx when the fee is restricted by the fee bandwidth", func(ctx context.Context) {
+					By("Initialize keys and addresses")
+					for _, addrType := range addrTypes {
+						key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+						Expect(err).To(BeNil())
+						key2, addr2, err := btctest.NewBtcKey(network, addrType)
+						Expect(err).To(BeNil())
 
-				By("Replacement tx should be accepted by pumping 1 sat in fee")
-				tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
-				Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
-				Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
-				By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
+						By("Construct a transaction which sends money from addr1 to addr2")
+						utxos1, err := indexer.GetUTXOs(ctx, addr1)
+						Expect(err).To(BeNil())
+						amount, feeRate := int64(1e7), btc.SatoshiPerKb(1e3)
+						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
+						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
+						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
+
+						By("Sign and submit the fund tx1")
+						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+
+						By("Create a descendant tx of tx1 with a lower fee rate")
+						time.Sleep(5 * time.Second)
+						utxos2, err := indexer.GetUTXOs(ctx, addr2)
+						Expect(err).To(BeNil())
+						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
+						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(100e3), sizer2)
+						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						Expect(err).To(BeNil())
+
+						By("Sign and submit the fund tx2")
+						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+
+						By("Build a new tx which replacing tx1")
+						entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+						Expect(err).To(BeNil())
+						query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize := (query.Weight + 3) / 4
+						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
+						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
+
+						if addrType == waddrmgr.TaprootPubKey {
+							By("Tx should be rejected if we pay one sat less in fee")
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
+							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
+						}
+
+						By("Replacement tx should be accepted")
+						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
+					}
+				})
+
+				It("should rbf the tx when the fee is restricted by the fee rate", func(ctx context.Context) {
+					By("Initialize keys and addresses")
+					for _, addrType := range addrTypes {
+						key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+						Expect(err).To(BeNil())
+						key2, addr2, err := btctest.NewBtcKey(network, addrType)
+						Expect(err).To(BeNil())
+
+						By("Construct a transaction which sends money from addr1 to addr2")
+						utxos1, err := indexer.GetUTXOs(ctx, addr1)
+						Expect(err).To(BeNil())
+						amount, feeRate := int64(1e7), btc.SatoshiPerKb(50e3)
+						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
+						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
+						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						Expect(err).To(BeNil())
+
+						By("Sign and submit the fund tx1")
+						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
+
+						By("Create a descendant tx of tx1 with a lower fee rate")
+						time.Sleep(5 * time.Second)
+						utxos2, err := indexer.GetUTXOs(ctx, addr2)
+						Expect(err).To(BeNil())
+						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
+						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(55e3), sizer2)
+						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						Expect(err).To(BeNil())
+
+						By("Sign and submit the fund tx2")
+						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
+
+						By("Build a new tx which replacing tx1")
+						entry, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+						Expect(err).To(BeNil())
+						query, err := indexer.GetTx(ctx, tx1.TxHash().String())
+						Expect(err).To(BeNil())
+						vsize := (query.Weight + 3) / 4
+						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
+						recipients1 := make([]btc.Recipient, 20)
+						for i := 0; i < 20; i++ {
+							recipients1[i] = btc.NewRecipient(addr2.EncodeAddress(), amount/10)
+						}
+						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
+						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients1, addr1)
+						Expect(err).To(BeNil())
+
+						if addrType == waddrmgr.TaprootPubKey {
+							By("Tx should be rejected if we pay one sat less in fee")
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
+							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
+							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
+						}
+
+						By("Replacement tx should be accepted")
+						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
+						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
+					}
+				})
 			})
 		})
 
 		Context("OP_RETURN", func() {
 			It("should be able to build an OP_RETURN tx", func(ctx context.Context) {
-				addrType := waddrmgr.TaprootPubKey
-				key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-				Expect(err).To(BeNil())
-				_, addr2, err := btctest.NewBtcKey(network, addrType)
-				Expect(err).To(BeNil())
+				for _, addrType := range addrTypes {
+					By("Initialize keys and addresses")
+					key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+					Expect(err).To(BeNil())
 
-				By("Construct a transaction which sends money from addr1 to addr2")
+					By("Construct a transaction which sends money from addr1 to addr2")
+					utxos, err := indexer.GetUTXOs(ctx, addr1)
+					Expect(err).To(BeNil())
+					feeRate := btctest.RandomFeeRate()
+					sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
+					feeMode := btc.MinFeeRateMode(feeRate, sizer)
+					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, nil, addr1)
+					Expect(err).To(BeNil())
+
+					By("Construct a message in the OP_RETURN script")
+					message := "hello world!"
+					script, err := txscript.NewScriptBuilder().
+						AddOp(txscript.OP_RETURN).
+						AddData([]byte(message)).
+						Script()
+					Expect(err).To(BeNil())
+
+					transaction.TxOut = append(transaction.TxOut, &wire.TxOut{
+						Value:    0,
+						PkScript: script,
+					})
+
+					By("Sign and submit the fund tx")
+					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+					Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
+					By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
+				}
+			})
+		})
+
+		Context("Utxo selection", func() {
+			It("should not use a utxo if its uneconomical", func(ctx context.Context) {
+				By("Initialize keys and addresses")
+				addrType := waddrmgr.TaprootPubKey
+				_, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, nil)
+				Expect(err).To(BeNil())
+				fundingTx, err := btctest.Faucet(addr1.EncodeAddress())
+				Expect(err).To(BeNil())
+				Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(fundingTx.String()))).Should(Succeed())
+
+				By("Manually modify one of the utxo value and try use it to build a tx")
 				utxos, err := indexer.GetUTXOs(ctx, addr1)
 				Expect(err).To(BeNil())
+				Expect(len(utxos)).Should(Equal(2))
+				utxos[0].Amount = btc.DustAmount - 1
+
+				By("Try using the utxo set to build a tx")
 				amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-				recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+				recipients := []btc.Recipient{btc.NewRecipient(addr1.EncodeAddress(), amount)}
 				sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 				feeMode := btc.MinFeeRateMode(feeRate, sizer)
 				transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
 				Expect(err).To(BeNil())
 
-				// message := "happy marriage!ెళ్లి శుభాకాంక్షలు!新婚快乐!"
-				message := "Sus,happy marriage!పెళ్లి శుభాకాంక్షలు!"
-				script, err := txscript.NewScriptBuilder().
-					AddOp(txscript.OP_RETURN).
-					AddData([]byte(message)).
-					Script()
-				Expect(err).To(BeNil())
-
-				transaction.TxOut = append(transaction.TxOut, &wire.TxOut{
-					Value:    0,
-					PkScript: script,
-				})
-
-				By("Sign and submit the fund tx")
-				Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
-				Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
-				By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
-
+				By("The built tx should not use the uneconomical utxo")
+				for _, input := range transaction.TxIn {
+					if input.PreviousOutPoint.String() == utxos[0].String() {
+						Fail("The new tx should not use the utxo which is less than the dust amount")
+					}
+				}
 			})
 		})
-		// It("should not use a utxo if its uneconomical", func(ctx context.Context) {
-		// 	By("Initialize keys and addresses")
-		// 	addrType := waddrmgr.TaprootPubKey
-		// 	privKey1, p2trAddr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
-		// 	Expect(err).To(BeNil())
-		// 	_, p2trAddr2, err := btctest.NewBtcKey(network, addrType)
-		// 	Expect(err).To(BeNil())
-		//
-		// 	By("Create a utxo which is less than the dust amount")
-		// 	utxos, err := indexer.GetUTXOs(ctx, p2trAddr1)
-		// 	Expect(err).To(BeNil())
-		// 	recipients := btc.SingleRecipient(p2trAddr1.EncodeAddress(), btc.DustAmount)
-		// 	sizer := btc.NewSizeEstimator(utxos, btc.BaseSizeP2TR, btc.SegwitSizeP2TR)
-		// 	transaction, err := btc.BuildTx(network, 3, nil, utxos, sizer, recipients, p2trAddr1)
-		// 	Expect(err).To(BeNil())
-		// 	Expect(btc.SignTx(addrType, transaction, privKey1, utxos)).Should(Succeed())
-		// 	Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
-		// 	Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
-		//
-		// 	By("Construct a transaction try using the dust amount")
-		// 	utxos1, err := indexer.GetUTXOs(ctx, p2trAddr1)
-		// 	Expect(err).To(BeNil())
-		// 	sort.Slice(utxos1, func(i, j int) bool {
-		// 		return utxos1[i].Amount < utxos1[j].Amount
-		// 	})
-		// 	Expect(utxos1[0].TxID).Should(Equal(transaction.TxHash().String()))
-		// 	amount, feeRate := int64(1e7), 3
-		// 	recipients1 := btc.SingleRecipient(p2trAddr2.EncodeAddress(), amount)
-		// 	sizer1 := btc.NewSizeEstimator(utxos1, btc.BaseSizeP2TR, btc.SegwitSizeP2TR)
-		// 	transaction1, err := btc.BuildTx(network, feeRate, nil, utxos1, sizer1, recipients1, p2trAddr1)
-		// 	Expect(err).To(BeNil())
-		//
-		// 	By("The new tx should not use the uneconomical utxo")
-		// 	for _, input := range transaction1.TxIn {
-		// 		if input.PreviousOutPoint.String() == utxos1[0].String() {
-		// 			Fail("The new tx should not use the utxo which is less than the dust amount")
-		// 		}
-		// 	}
-		// })
 	})
 })
