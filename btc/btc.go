@@ -99,6 +99,7 @@ func NewRecipient(to string, amount int64) Recipient {
 func (recipient Recipient) ToTxOut(network *chaincfg.Params) (*wire.TxOut, error) {
 	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
 	if err != nil {
+		log.Printf("adress = %v err = %v", recipient.To, err)
 		return nil, err
 	}
 	toScript, err := txscript.PayToAddrScript(toAddress)
@@ -174,6 +175,7 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEs
 		fees1 := math.Ceil(float64((prevFeeRate.Int()+1)*vsize) / 1000)
 		fees2 := math.Ceil(float64(prevFees) + float64(vsize))
 		fees3 := math.Ceil(float64(minFeeRate.Int() * vsize / 1000))
+		log.Printf("prevFees=%v, prevFeeRate= %v, fees1=%v, fees2=%v, fees3=%v", prevFees, prevFeeRate, fees1, fees2, fees3)
 		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
 	}
 }
