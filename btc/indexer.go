@@ -20,7 +20,10 @@ import (
 )
 
 const (
-	DefaultElectrsIndexerURL = "http://0.0.0.0:30000"
+	// AddressTransactionsLimit is the max number of transactions returned when calling `GetAddressTxs`. Usually we need
+	// to query again if the result contains this number of transactions.
+	// See https://github.com/Blockstream/esplora/blob/master/API.md
+	AddressTransactionsLimit = 50
 
 	DefaultRetryInterval = 5 * time.Second
 )

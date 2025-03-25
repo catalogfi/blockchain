@@ -87,10 +87,7 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire
 	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 
 	// Recipients
-	htlcAddr, err := htlc.Address(wal.network)
-	if err != nil {
-		return nil, nil, err
-	}
+	htlcAddr := htlc.Address(wal.network)
 	recipients := []Recipient{NewRecipient(htlcAddr.EncodeAddress(), htlc.Amount)}
 
 	// Fees
@@ -133,10 +130,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	defer wal.mu.Unlock()
 
 	// Make sure the HTLC is redeemable
-	addr, err := htlc.Address(wal.network)
-	if err != nil {
-		return nil, err
-	}
+	addr := htlc.Address(wal.network)
 	utxos, err := wal.indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return nil, err
@@ -200,10 +194,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	defer wal.mu.Unlock()
 
 	// Make sure the HTLC is refundable
-	addr, err := htlc.Address(wal.network)
-	if err != nil {
-		return nil, err
-	}
+	addr := htlc.Address(wal.network)
 	utxos, err := wal.indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return nil, err
@@ -484,10 +475,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 	// Parse the actions
 	inputActions := map[string]HtlcAction{}
 	for _, action := range actions {
-		addr, err := action.Htlc.Address(wal.network)
-		if err != nil {
-			return nil, err
-		}
+		addr := action.Htlc.Address(wal.network)
 		switch action.ActionType {
 		case HtlcActionInitiate:
 			if ok := outputsMaps[addr.String()]; ok {

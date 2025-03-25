@@ -137,13 +137,19 @@ func NewHTLC(initiatorPubKey, redeemerPubKey, secretHash []byte, timelock, amoun
 	}, nil
 }
 
-func (htlc *HTLC) Address(network *chaincfg.Params) (btcutil.Address, error) {
+// Address returns the address of the htlc script. We panic for the error since it shouldn't happen, this will make
+// things easier for the caller.
+func (htlc *HTLC) Address(network *chaincfg.Params) btcutil.Address {
 	if htlc.tree == nil {
-		return nil, fmt.Errorf("empty htlc tree")
+		panic(fmt.Errorf("empty htlc tree"))
 	}
 	rootHash := htlc.tree.RootNode.TapHash()
 	outputKey := txscript.ComputeTaprootOutputKey(GardenNums, rootHash[:])
-	return PublicKeyAddress(network, waddrmgr.TaprootPubKey, outputKey)
+	addr, err := PublicKeyAddress(network, waddrmgr.TaprootPubKey, outputKey)
+	if err != nil {
+		panic(err)
+	}
+	return addr
 }
 
 func (htlc *HTLC) SetSecret(secret []byte) {
@@ -190,10 +196,7 @@ func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
 
 // Utxo finds the initiation utxo of the htlc.
 func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
-	addr, err := htlc.Address(network)
-	if err != nil {
-		return UTXO{}, err
-	}
+	addr := htlc.Address(network)
 	utxos, err := indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return UTXO{}, err
