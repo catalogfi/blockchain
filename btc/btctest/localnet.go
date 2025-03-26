@@ -30,28 +30,36 @@ func Faucet(addr string) (*chainhash.Hash, error) {
 	return chainhash.NewHashFromStr(txid)
 }
 
-// NewBlock will mine a new block in the reg testnet. This is useful when we need to test something with confirmations.
-// It uses the `merry faucet` command to generate a new block, the receiver address is a dummy address
-// which shouldn't affect our testing
-func NewBlock() error {
-	_, err := RunOutput("merry", "faucet", "--to", dummyAddr)
-	color.Green("Mined a new block")
-	return err
+// NewBlock will mine `n` new block in the reg testnet. It uses the `merry faucet` command to generate a new block, the
+// receiver address is a dummy address which shouldn't affect our testing
+func NewBlock(n int) error {
+	for i := 0; i < n; i++ {
+		_, err := RunOutput("merry", "faucet", "--to", dummyAddr)
+		if err != nil {
+			return err
+		}
+	}
+	color.Green(fmt.Sprintf("Mined %v new block", n))
+	return nil
 }
 
 // NewBlockWaitMined does the same thing as NewBlock, but it will wait until the block been detected by the indexer.
-func NewBlockWaitMined(indexer btc.IndexerClient) error {
-	res, err := RunOutput("merry", "faucet", "--to", dummyAddr)
-	if err != nil {
-		return err
+func NewBlockWaitMined(n int, indexer btc.IndexerClient) error {
+	for i := 0; i < n; i++ {
+		res, err := RunOutput("merry", "faucet", "--to", dummyAddr)
+		if err != nil {
+			return err
+		}
+		if i == n-1 {
+			// todo : maybe it's better to use a regex to parse it. we might configure the node in a different port.
+			txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return WaitMined(ctx, indexer, WaitTx(txid))
+		}
 	}
-	// todo : maybe it's better to use a regex to parse it. we might configure the node in a different port.
-	txid := strings.TrimSpace(strings.TrimPrefix(string(res), "Successfully submitted at http://localhost:5050/tx/"))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	return WaitMined(ctx, indexer, WaitTx(txid))
+	return nil
 }
 
 // RunOutput the command and catch the output

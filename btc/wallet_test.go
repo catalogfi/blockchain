@@ -31,10 +31,9 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 				_, _, err = wal1.Initiate(ctx, htlc)
 				Expect(err).Should(BeNil())
-				Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+				Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 				_, err = wal2.Redeem(ctx, htlc)
 				Expect(err).Should(BeNil())
-
 			}
 		})
 
@@ -54,11 +53,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 
 				By("Mine expiry number of blocks")
-				for i := 0; i < int(timelock)-1; i++ {
-					err = btctest.NewBlock()
-					Expect(err).Should(BeNil())
-				}
-				Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+				Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
 
 				By("Refund an HTLC")
 				_, err = wal1.Refund(ctx, htlc)
@@ -82,7 +77,7 @@ var _ = Describe("Wallet", func() {
 				Expect(err).Should(BeNil())
 
 				By("Mine a new block")
-				Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+				Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 
 				By("Use the instant refund leaf to refund the HTLC")
 				_, err = wal2.InstantRefund(ctx, htlc, irTx)
@@ -114,7 +109,7 @@ var _ = Describe("Wallet", func() {
 					}
 					_, err = wal1.Execute(ctx, actions1, "")
 					Expect(err).Should(BeNil())
-					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+					Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 
 					By("Redeem an HTLC")
 					actions2 := []btc.HtlcAction{
@@ -150,11 +145,7 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 
 					By("Mine expiry number of blocks")
-					for i := 0; i < int(timelock)-1; i++ {
-						err = btctest.NewBlock()
-						Expect(err).Should(BeNil())
-					}
-					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+					Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
 
 					By("Refund an HTLC")
 					actions2 := []btc.HtlcAction{
@@ -184,7 +175,7 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 
 					By("Mine a new block")
-					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+					Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 
 					By("Use the instant refund leaf to refund the HTLC")
 					actions2 := []btc.HtlcAction{
@@ -234,11 +225,7 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 
 					By("Mine expiry number of blocks")
-					for i := 0; i < int(timelock)-1; i++ {
-						err = btctest.NewBlock()
-						Expect(err).Should(BeNil())
-					}
-					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+					Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
 
 					By("Init another two batch of htlcs for redeem and instant refunds")
 					actions2 := make([]btc.HtlcAction, 0, batch)
@@ -250,7 +237,7 @@ var _ = Describe("Wallet", func() {
 					}
 					_, err = wal2.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
-					Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+					Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 
 					By("Construct instant refunds txs")
 					instantRefunds := make([]*wire.MsgTx, batch)

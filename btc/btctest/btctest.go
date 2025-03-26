@@ -166,17 +166,15 @@ func PrepareActions(ctx context.Context, n int, wal1, wal2 btc.Wallet, indexer b
 
 		// Mining certain blocks to make the
 		if miningBlocks {
-			for i := 0; i < int(timelock)-1; i++ {
-				if err := NewBlock(); err != nil {
-					return nil, err
-				}
+			if err := NewBlock(int(timelock) - 1); err != nil {
+				return nil, err
 			}
 		}
 	}
 
 	if actionType != btc.HtlcActionInitiate {
 		// Mine a new block and wait for it to be confirmed
-		if err := NewBlockWaitMined(indexer); err != nil {
+		if err := NewBlockWaitMined(1, indexer); err != nil {
 			return nil, err
 		}
 	}

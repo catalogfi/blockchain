@@ -144,7 +144,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).Should(BeNil())
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+			Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = client.SubmitTx(ctx, transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())

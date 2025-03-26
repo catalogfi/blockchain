@@ -107,7 +107,7 @@ var _ = Describe("Indexer client", func() {
 			time.Sleep(time.Second)
 
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
-			Expect(btctest.NewBlockWaitMined(indexer)).Should(Succeed())
+			Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 			err = indexer.SubmitTx(ctx, transaction)
 			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
 
