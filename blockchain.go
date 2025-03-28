@@ -10,22 +10,21 @@ type Name string
 // Name of all supported chains.
 // format = ("%v_%v", chain, network), all lower cases and network will be omitted if it's mainnet
 const (
-	Bitcoin          Name = "bitcoin"
-	BitcoinTestnet   Name = "bitcoin_testnet"
-	BitcoinRegtest   Name = "bitcoin_regtest"
+	Bitcoin         Name = "bitcoin"
+	BitcoinTestnet3 Name = "bitcoin_testnet3"
+	BitcoinTestnet4 Name = "bitcoin_testnet4"
+	BitcoinSignet   Name = "bitcoin_signet"
+	BitcoinRegtest  Name = "bitcoin_regtest"
+
 	Ethereum         Name = "ethereum"
 	EthereumSepolia  Name = "ethereum_sepolia"
 	EthereumLocalnet Name = "ethereum_localnet"
+
 	Arbitrum         Name = "arbitrum"
 	ArbitrumLocalnet Name = "arbitrum_localnet"
+
 	PolygonZK        Name = "polygonzk"
 	PolygonZKTestnet Name = "polygonzk_testnet"
-
-	// TODO : uncomment this when we start supporting them
-	// Optimism         Name = "optimism"
-	// Polygon          Name = "polygon"
-	// Avalanche        Name = "avalanche"
-	// BNB              Name = "bnb"
 )
 
 type Type string
@@ -65,15 +64,6 @@ type Chain interface {
 
 	// Network returns which network type of this chain.
 	Network() Network
-
-	// Validate address and return error if the address is invalid for the given chain
-	ValidateAddress(string) error
-}
-
-type Asset interface {
-	String() string
-
-	Chain() Chain
 }
 
 func ChainFromName(name Name) Chain {
@@ -86,7 +76,7 @@ func ChainFromName(name Name) Chain {
 
 func ParseChainName(name Name) (Chain, error) {
 	switch name {
-	case Bitcoin, BitcoinTestnet, BitcoinRegtest:
+	case Bitcoin, BitcoinTestnet3, BitcoinTestnet4, BitcoinSignet, BitcoinRegtest:
 		return NewUtxoChain(name), nil
 	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, ArbitrumLocalnet, PolygonZK, PolygonZKTestnet:
 		return NewEvmChain(name), nil

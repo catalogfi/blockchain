@@ -208,7 +208,7 @@ var _ = Describe("bitcoin client", func() {
 	Context("when the server is offline", func() {
 		It("should err out when the context is done", func() {
 			By("Simulate a client pointing to a offline server")
-			client := btc.NewClient(network, "http://0.0.0.0:18444", btcUsername, btcPassword)
+			client := btc.NewClient(network, "http://0.0.0.0:18444", "", "")
 
 			By("LatestBlock()")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)

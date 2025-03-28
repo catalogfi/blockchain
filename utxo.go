@@ -11,7 +11,7 @@ type UtxoChain struct {
 
 func NewUtxoChain(name Name) UtxoChain {
 	switch name {
-	case Bitcoin, BitcoinTestnet, BitcoinRegtest:
+	case Bitcoin, BitcoinTestnet3, BitcoinTestnet4, BitcoinSignet, BitcoinRegtest:
 		return UtxoChain{name}
 	default:
 		panic("unknown utxoChain network")
@@ -23,7 +23,7 @@ func (chain UtxoChain) Name() Name {
 }
 
 func (chain UtxoChain) IsTestnet() bool {
-	return chain.name == BitcoinTestnet || chain.name == BitcoinRegtest
+	return chain.name != Bitcoin
 }
 
 func (chain UtxoChain) Type() Type {
@@ -34,7 +34,7 @@ func (chain UtxoChain) Network() Network {
 	switch chain.name {
 	case Bitcoin:
 		return NetworkMainnet
-	case BitcoinTestnet:
+	case BitcoinTestnet3, BitcoinTestnet4, BitcoinSignet:
 		return NetworkTestnet
 	case BitcoinRegtest:
 		return NetworkLocalnet
@@ -47,8 +47,12 @@ func (chain UtxoChain) Params() *chaincfg.Params {
 	switch chain.name {
 	case Bitcoin:
 		return &chaincfg.MainNetParams
-	case BitcoinTestnet:
+	case BitcoinTestnet3:
 		return &chaincfg.TestNet3Params
+	case BitcoinTestnet4:
+		return &chaincfg.TestNet4Params
+	case BitcoinSignet:
+		return &chaincfg.SigNetParams
 	case BitcoinRegtest:
 		return &chaincfg.RegressionNetParams
 	default:
@@ -59,8 +63,4 @@ func (chain UtxoChain) Params() *chaincfg.Params {
 func (chain UtxoChain) ValidateAddress(address string) error {
 	_, err := btcutil.DecodeAddress(address, chain.Params())
 	return err
-}
-
-type UtxoAsset interface {
-	Asset
 }
