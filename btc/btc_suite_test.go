@@ -17,9 +17,7 @@ import (
 
 var (
 	// Envs
-	btcUsername string
-	btcPassword string
-	debug       string
+	debug string
 
 	// Vars
 	network   *chaincfg.Params
@@ -37,12 +35,6 @@ func TestBtc(t *testing.T) {
 var _ = BeforeSuite(func() {
 	By("Check if required ENVs are set.")
 	By("You may want to disable some assertion when forcing running a specific test.")
-
-	var ok bool
-	btcUsername, ok = os.LookupEnv("BTC_REGNET_USERNAME")
-	Expect(ok).Should(BeTrue())
-	btcPassword, ok = os.LookupEnv("BTC_REGNET_PASSWORD")
-	Expect(ok).Should(BeTrue())
 	debug = os.Getenv("debug")
 
 	By("Initialise some variables used across tests")
@@ -56,7 +48,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).Should(BeNil())
 	indexer = btc.NewElectrsIndexerClient(logger, btctest.DefaultRegtestIndexer, btc.DefaultRetryInterval)
 
-	client = btc.NewClient(network, btctest.DefaultRegtestHost, btcUsername, btcPassword)
+	client = btc.NewClient(network, btctest.DefaultRegtestHost, btctest.RegressionRpcUsername, btctest.RegressionRpcPassword)
 	addrTypes = []waddrmgr.AddressType{
 		waddrmgr.PubKeyHash,
 		waddrmgr.WitnessPubKey,

@@ -15,6 +15,11 @@ import (
 	"github.com/fatih/color"
 )
 
+var (
+	RegressionRpcUsername = "admin1"
+	RegressionRpcPassword = "123"
+)
+
 var dummyAddr = "mwt4FeMsGv6Ua3WrfuhypPtqDUse9CoJev"
 
 // Faucet funds the given address using the `merry faucet` command. It will transfer 1 BTC to the target address and
