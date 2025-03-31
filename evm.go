@@ -23,9 +23,9 @@ func (chain EvmChain) Type() Type {
 
 func (chain EvmChain) Network() Network {
 	switch chain.name {
-	case Ethereum, Arbitrum, PolygonZK:
+	case Ethereum, Arbitrum, Base:
 		return NetworkTestnet
-	case EthereumSepolia, PolygonZKTestnet:
+	case EthereumSepolia, BaseSepolia:
 		return NetworkMainnet
 	case EthereumLocalnet, ArbitrumLocalnet:
 		return NetworkLocalnet
@@ -46,10 +46,10 @@ func (chain EvmChain) ChainID() *big.Int {
 		return big.NewInt(31338)
 	case Arbitrum:
 		return big.NewInt(42161)
-	case PolygonZK:
-		return big.NewInt(1101)
-	case PolygonZKTestnet:
-		return big.NewInt(2442)
+	case Base:
+		return big.NewInt(8453)
+	case BaseSepolia:
+		return big.NewInt(84532)
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))
 	}
@@ -59,7 +59,7 @@ func (chain EvmChain) L2() bool {
 	switch chain.name {
 	case Ethereum, EthereumSepolia, EthereumLocalnet:
 		return false
-	case Arbitrum, ArbitrumLocalnet, PolygonZK, PolygonZKTestnet:
+	case Arbitrum, ArbitrumLocalnet, ArbitrumSepolia, Base, BaseSepolia:
 		return true
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))

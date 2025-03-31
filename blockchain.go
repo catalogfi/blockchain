@@ -20,11 +20,12 @@ const (
 	EthereumSepolia  Name = "ethereum_sepolia"
 	EthereumLocalnet Name = "ethereum_localnet"
 
-	Arbitrum         Name = "arbitrum"
-	ArbitrumLocalnet Name = "arbitrum_localnet"
+	Base        Name = "base"
+	BaseSepolia Name = "base_sepolia"
 
-	PolygonZK        Name = "polygonzk"
-	PolygonZKTestnet Name = "polygonzk_testnet"
+	Arbitrum         Name = "arbitrum"
+	ArbitrumSepolia  Name = "arbitrum_sepolia"
+	ArbitrumLocalnet Name = "arbitrum_localnet"
 )
 
 type Type string
@@ -78,7 +79,7 @@ func ParseChainName(name Name) (Chain, error) {
 	switch name {
 	case Bitcoin, BitcoinTestnet3, BitcoinTestnet4, BitcoinSignet, BitcoinRegtest:
 		return NewUtxoChain(name), nil
-	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, ArbitrumLocalnet, PolygonZK, PolygonZKTestnet:
+	case Ethereum, EthereumSepolia, EthereumLocalnet, Arbitrum, ArbitrumSepolia, ArbitrumLocalnet, Base, BaseSepolia:
 		return NewEvmChain(name), nil
 	default:
 		return nil, fmt.Errorf("unsupported chain = %v", name)
