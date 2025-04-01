@@ -464,6 +464,21 @@ func (l *BatcherCache) ReadPendingRequests(_ context.Context) ([]BatcherRequest,
 	}
 	return requests, nil
 }
+func (l *BatcherCache) UpdatePendingRequests(_ context.Context, updatedRequests ...BatcherRequest) error {
+	batch := new(leveldb.Batch)
+	if len(updatedRequests) == 0 {
+		return ErrStoreNothingToUpdate
+	}
+
+	for _, req := range updatedRequests {
+		data, err := serializeBatcherRequest(req)
+		if err != nil {
+			return err
+		}
+		batch.Put(l.pendingRequestKey(req.ID), data)
+	}
+	return l.db.Write(batch, nil)
+}
 
 func (l *BatcherCache) SaveRequest(_ context.Context, req BatcherRequest) error {
 	data, err := serializeBatcherRequest(req)

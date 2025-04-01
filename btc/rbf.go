@@ -253,6 +253,9 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		return w.indexer.SubmitTx(ctx, tx)
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+			return w.handleSpentInputs(c, spendRequests, sacps)
+		}
 		return err
 	}
 
@@ -283,6 +286,139 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	}
 
 	return nil
+
+}
+
+// handleSpentInputs removes spent inputs in spend request and sacps from pending requests in cache
+func (w *batcherWallet) handleSpentInputs(ctx context.Context, spendRequests []SpendRequest, sacps [][]byte) error {
+	w.logger.Info("handling spent inputs", zap.Int("spend_requests", len(spendRequests)), zap.Int("sacps", len(sacps)))
+
+	spentSpendUTXOs, err := w.getSpentUTXOs(ctx, spendRequests)
+
+	w.logger.Info("spent utxos from spend requests", zap.Any("spent_utxos", spentSpendUTXOs))
+	if err != nil {
+		return fmt.Errorf("error fetching spent UTXOs from spend requests: %w", err)
+	}
+
+	spentSACPUTXOs, err := w.getSpentSACPUTXOs(ctx, sacps)
+
+	w.logger.Info("spent utxos from sacps", zap.Any("spent_utxos", spentSACPUTXOs))
+
+	if err != nil {
+		return fmt.Errorf("error fetching spent UTXOs from SACPs: %w", err)
+	}
+
+	if len(spentSpendUTXOs) == 0 && len(spentSACPUTXOs) == 0 {
+		return nil // No spent UTXOs to process
+	}
+
+	pendingRequests, err := w.cache.ReadPendingRequests(ctx)
+	if err != nil {
+		w.logger.Error("failed to read pending requests", zap.Error(err))
+		return err
+	}
+
+	updatedRequests := w.filterSpentUTXOs(pendingRequests, spentSpendUTXOs, spentSACPUTXOs)
+
+	return w.cache.UpdatePendingRequests(ctx, updatedRequests...)
+}
+
+func (w *batcherWallet) getSpentUTXOs(ctx context.Context, spendRequests []SpendRequest) (map[string]bool, error) {
+	spentUTXOs := make(map[string]bool)
+	for _, spendReq := range spendRequests {
+		for _, utxo := range spendReq.Utxos {
+			spent, err := w.isUTXOSpent(ctx, utxo.TxID, utxo.Vout)
+			if err != nil {
+				return nil, err
+			}
+			if spent {
+				spentUTXOs[fmt.Sprintf("%s%d", utxo.TxID, utxo.Vout)] = true
+			}
+		}
+	}
+	return spentUTXOs, nil
+}
+
+func (w *batcherWallet) getSpentSACPUTXOs(ctx context.Context, sacps [][]byte) (map[string]bool, error) {
+	spentUTXOs := make(map[string]bool)
+	tx, _, err := buildTxFromSacps(sacps)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build transaction from SACPs: %w", err)
+	}
+
+	for _, txIn := range tx.TxIn {
+		spent, err := w.isUTXOSpent(ctx, txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
+		if err != nil {
+			w.logger.Error("failed to get out spend", zap.Error(err), zap.String("txid", txIn.PreviousOutPoint.Hash.String()))
+			continue
+		}
+		if spent {
+			spentUTXOs[fmt.Sprintf("%s%d", txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)] = true
+		}
+	}
+	return spentUTXOs, nil
+}
+
+func (w *batcherWallet) isUTXOSpent(ctx context.Context, txID string, vout uint32) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultAPITimeout)
+	defer cancel()
+
+	spent, err := w.indexer.GetOutSpend(ctx, txID, vout)
+	if err != nil {
+		w.logger.Error("failed to get out spend status", zap.Error(err), zap.String("txid", txID))
+		return false, err
+	}
+	return spent, nil
+}
+
+func (w *batcherWallet) filterSpentUTXOs(pendingRequests []BatcherRequest, spentSpendUTXOs, spentSACPUTXOs map[string]bool) []BatcherRequest {
+	for i, req := range pendingRequests {
+		pendingRequests[i].Spends = w.filterSpendRequests(req.Spends, spentSpendUTXOs)
+		pendingRequests[i].SACPs = w.filterSACPs(req.SACPs, spentSACPUTXOs)
+	}
+	return pendingRequests
+}
+
+func (w *batcherWallet) filterSpendRequests(spendRequests []SpendRequest, spentUTXOs map[string]bool) []SpendRequest {
+	var validSpends []SpendRequest
+	for _, spendReq := range spendRequests {
+		var newUTXOs []UTXO
+		for _, utxo := range spendReq.Utxos {
+			if !spentUTXOs[fmt.Sprintf("%s%d", utxo.TxID, utxo.Vout)] {
+				newUTXOs = append(newUTXOs, utxo)
+			}
+		}
+		if len(newUTXOs) > 0 {
+			spendReq.Utxos = newUTXOs
+			validSpends = append(validSpends, spendReq)
+		}
+	}
+	return validSpends
+}
+
+func (w *batcherWallet) filterSACPs(sacps [][]byte, spentUTXOs map[string]bool) [][]byte {
+	var validSACPs [][]byte
+	for _, sacp := range sacps {
+		btcTx, err := btcutil.NewTxFromBytes(sacp)
+		if err != nil {
+			w.logger.Error("failed to create BTC tx from bytes", zap.Error(err))
+			continue
+		}
+		if !w.isSACPSpent(btcTx.MsgTx(), spentUTXOs) {
+			validSACPs = append(validSACPs, sacp)
+		}
+	}
+	return validSACPs
+}
+
+func (w *batcherWallet) isSACPSpent(tx *wire.MsgTx, spentUTXOs map[string]bool) bool {
+	for _, txIn := range tx.TxIn {
+		key := fmt.Sprintf("%s%d", txIn.PreviousOutPoint.Hash.String(), txIn.PreviousOutPoint.Index)
+		if spentUTXOs[key] {
+			return true
+		}
+	}
+	return false
 }
 
 // updateRBF updates the fee rate of the latest RBF batch transaction

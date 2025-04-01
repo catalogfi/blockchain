@@ -97,6 +97,10 @@ type Cache interface {
 
 	// ReadRequest reads a request based on its ID.	// ReadRequests reads multiple requests based on their IDs.
 	ReadRequests(ctx context.Context, id ...string) ([]BatcherRequest, error)
+
+	// UpdatePendingRequests updates multiple pending requests.
+	UpdatePendingRequests(ctx context.Context, updatedRequests ...BatcherRequest) error
+
 	// ReadPendingRequests reads all pending requests.
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
 	// SaveRequest saves a request.
