@@ -464,20 +464,17 @@ func (l *BatcherCache) ReadPendingRequests(_ context.Context) ([]BatcherRequest,
 	}
 	return requests, nil
 }
-func (l *BatcherCache) UpdatePendingRequests(_ context.Context, updatedRequests ...BatcherRequest) error {
-	batch := new(leveldb.Batch)
+func (l *BatcherCache) UpdatePendingRequests(ctx context.Context, updatedRequests ...BatcherRequest) error {
 	if len(updatedRequests) == 0 {
 		return ErrStoreNothingToUpdate
 	}
 
 	for _, req := range updatedRequests {
-		data, err := serializeBatcherRequest(req)
-		if err != nil {
+		if err := l.SaveRequest(ctx, req); err != nil {
 			return err
 		}
-		batch.Put(l.pendingRequestKey(req.ID), data)
 	}
-	return l.db.Write(batch, nil)
+	return nil
 }
 
 func (l *BatcherCache) SaveRequest(_ context.Context, req BatcherRequest) error {
