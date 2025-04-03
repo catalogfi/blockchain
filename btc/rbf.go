@@ -253,6 +253,17 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		return w.indexer.SubmitTx(ctx, tx)
 	})
 	if err != nil {
+		// bad-txns-inputs-missingorspent
+		// when we get this error, which means a spend or an SACP request in our requests has been spent externally
+		//
+		// we filter out those requests and try again in the next iteration
+		if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+			w.logger.Info("handling spent inputs")
+			rmErr := w.handleSpentInputs(pendingRequests)
+			if rmErr != nil {
+				return rmErr
+			}
+		}
 		return err
 	}
 
@@ -283,6 +294,92 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	}
 
 	return nil
+}
+
+// handleSpentInputs removes the inputs which have been already spent externally
+func (w *batcherWallet) handleSpentInputs(pendingBatcherRequests []BatcherRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*DefaultAPITimeout)
+	defer cancel()
+
+	for _, request := range pendingBatcherRequests {
+		newRequest, needToUpdateSpends, err := w.removeSpentSpends(ctx, request)
+		if err != nil {
+			return fmt.Errorf("failed to remove spent spend requests : %w", err)
+		}
+		newRequest, needToUpdateSACPs, err := w.removeSpentSACPs(ctx, newRequest)
+		if err != nil {
+			return fmt.Errorf("failed to remove spent sacps requests : %w", err)
+		}
+		w.logger.Warn("needToUpdateSpends", zap.Bool("need", needToUpdateSpends))
+		if needToUpdateSpends || needToUpdateSACPs {
+			err := w.cache.SaveRequest(ctx, newRequest)
+			if err != nil {
+				return fmt.Errorf("failed to save the request: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func (w *batcherWallet) removeSpentSpends(ctx context.Context, request BatcherRequest) (BatcherRequest, bool, error) {
+	unspentSpendRequests := []SpendRequest{}
+	needAnUpdate := false
+	w.logger.Info("checking for spent spend requests")
+	for _, req := range request.Spends {
+		unspentUTXOs := []UTXO{}
+		for _, utxo := range req.Utxos {
+			w.logger.Info("Getting spends", zap.String("txid", utxo.TxID))
+			spent, err := w.indexer.GetOutSpend(ctx, utxo.TxID, utxo.Vout)
+			if err != nil {
+				return BatcherRequest{}, false, fmt.Errorf("failed to get out spend of a tx %s: %w", utxo.TxID, err)
+			}
+			w.logger.Info("spent", zap.Bool("s", spent))
+			if !spent {
+				unspentUTXOs = append(unspentUTXOs, utxo)
+			}
+		}
+		r := req
+		if len(unspentUTXOs) != len(req.Utxos) {
+			// some utxos have been spent, update the request with unspentUTXOS
+			r.Utxos = unspentUTXOs
+			needAnUpdate = true
+		}
+		if len(unspentUTXOs) != 0 {
+			unspentSpendRequests = append(unspentSpendRequests, r)
+		}
+	}
+	fmt.Println("lendkjndj", len(unspentSpendRequests))
+	request.Spends = unspentSpendRequests
+
+	return request, needAnUpdate, nil
+}
+
+func (w *batcherWallet) removeSpentSACPs(ctx context.Context, request BatcherRequest) (BatcherRequest, bool, error) {
+	needToUpdate := false
+	newSACPs := [][]byte{}
+
+	for _, sacp := range request.SACPs {
+		var err error
+		var spent bool
+		tx, _, err := buildTxFromSacps([][]byte{sacp})
+		if err != nil {
+			return BatcherRequest{}, false, fmt.Errorf("failed to build tx from sacps : %w", err)
+		}
+		for _, input := range tx.TxIn {
+			txHash := input.PreviousOutPoint.Hash.String()
+			vout := input.PreviousOutPoint.Index
+			spent, err = w.indexer.GetOutSpend(ctx, txHash, vout)
+			if err != nil {
+				return BatcherRequest{}, false, fmt.Errorf("failed to get the out spend of the txid %s : %w", txHash, err)
+			}
+		}
+		if !spent {
+			newSACPs = append(newSACPs, sacp)
+		}
+	}
+
+	request.SACPs = newSACPs
+	return request, needToUpdate, nil
 }
 
 // updateRBF updates the fee rate of the latest RBF batch transaction

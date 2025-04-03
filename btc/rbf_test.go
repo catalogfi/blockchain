@@ -28,6 +28,23 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	indexer := localnet.BTCIndexer()
 
+	pk1, err := btcec.NewPrivateKey()
+	Expect(err).To(BeNil())
+	address1, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk1.PubKey())
+	Expect(err).To(BeNil())
+
+	pk2, err := btcec.NewPrivateKey()
+	Expect(err).To(BeNil())
+
+	pk3, err := btcec.NewPrivateKey()
+	Expect(err).To(BeNil())
+
+	address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
+	Expect(err).To(BeNil())
+
+	pk4, err := btcec.NewPrivateKey()
+	Expect(err).To(BeNil())
+
 	privateKey, err := btcec.NewPrivateKey()
 	Expect(err).To(BeNil())
 
@@ -37,8 +54,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	var wallet btc.BatcherWallet
 	var wallet2 btc.BatcherWallet
+	var wallet3 btc.BatcherWallet
 	var cache btc.Cache
 	var cache2 btc.Cache
+	var cache3 btc.Cache
 
 	faucet, err := btc.NewSimpleWallet(privateKey, chainParams, indexer, mockFeeEstimator, btc.HighFee)
 	Expect(err).To(BeNil())
@@ -60,24 +79,16 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	p2wshSigCheckScript2, p2wshSigCheckScriptAddr2, err := sigCheckScript(*chainParams, privateKey)
 	Expect(err).To(BeNil())
 
+	p2wshSigCheckScript3, p2wshSigCheckScriptAddr3, err := sigCheckScript(*chainParams, privateKey)
+	Expect(err).To(BeNil())
+
+	p2wshSigCheckScript4, p2wshSigCheckScriptAddr4, err := sigCheckScript(*chainParams, pk4)
+	Expect(err).To(BeNil())
+
 	randAddr, err := randomP2wpkhAddress(*chainParams)
 	Expect(err).To(BeNil())
 
 	var sacp []byte
-
-	pk1, err := btcec.NewPrivateKey()
-	Expect(err).To(BeNil())
-	address1, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk1.PubKey())
-	Expect(err).To(BeNil())
-
-	pk2, err := btcec.NewPrivateKey()
-	Expect(err).To(BeNil())
-
-	pk3, err := btcec.NewPrivateKey()
-	Expect(err).To(BeNil())
-
-	address2, err := btc.PublicKeyAddress(chainParams, waddrmgr.WitnessPubKey, pk2.PubKey())
-	Expect(err).To(BeNil())
 
 	dbPath := "./testrbf"
 
@@ -88,9 +99,12 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		cache = btc.NewBatcherCache(db, "", btc.RBF)
 		cache2 = btc.NewBatcherCache(db, "2", btc.RBF)
+		cache3 = btc.NewBatcherCache(db, "3", btc.RBF)
+
 		bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, chainParams, cache2, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+		wallet3, _ = btc.NewBatcherWallet(pk4, indexer, mockFeeEstimator, chainParams, cache3, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
@@ -121,6 +135,14 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 				Amount: defaultAmount,
 				To:     p2wshSigCheckScriptAddr2,
 			},
+			{
+				Amount: defaultAmount,
+				To:     p2wshSigCheckScriptAddr3,
+			},
+			{
+				Amount: defaultAmount,
+				To:     p2wshSigCheckScriptAddr4,
+			},
 		}, nil, nil)
 		Expect(err).To(BeNil())
 		fmt.Println("funded scripts", "txid :", faucetTx)
@@ -143,6 +165,37 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		err := wallet.Stop()
 		Expect(err).To(BeNil())
+	})
+
+	It("should be able to send funds", func() {
+		req := []btc.SendRequest{
+			{
+				Amount: defaultAmount,
+				To:     wallet.Address(),
+			},
+		}
+
+		id, err := wallet.Send(context.Background(), req, nil, nil)
+		Expect(err).To(BeNil())
+
+		var tx btc.Transaction
+		var ok bool
+
+		for {
+			fmt.Println("waiting for tx", id)
+			tx, ok, err = wallet.Status(context.Background(), id)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+		// to address
+		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+
+		time.Sleep(10 * time.Second)
 	})
 
 	It("should be able to send funds in smaller amounts", func() {
@@ -197,23 +250,57 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		}
 	})
 
-	It("should be able to send funds", func() {
-		req := []btc.SendRequest{
-			{
-				Amount: defaultAmount,
-				To:     wallet.Address(),
+	It("should be able to handle spent spend requests", func() {
+		spendRequest1 := btc.SpendRequest{
+			Witness: [][]byte{
+				btc.AddSignatureSegwitOp,
+				p2wshSigCheckScript3,
 			},
+			Script:        p2wshSigCheckScript3,
+			ScriptAddress: p2wshSigCheckScriptAddr3,
+			HashType:      txscript.SigHashAll,
 		}
 
-		id, err := wallet.Send(context.Background(), req, nil, nil)
+		spendRequest2 := btc.SpendRequest{
+			Witness: [][]byte{
+				btc.AddSignatureSegwitOp,
+				p2wshSigCheckScript4,
+			},
+			Script:        p2wshSigCheckScript4,
+			ScriptAddress: p2wshSigCheckScriptAddr4,
+			HashType:      txscript.SigHashAll,
+		}
+
+		id, err := wallet3.Send(context.Background(), nil, []btc.SpendRequest{spendRequest1, spendRequest2}, nil)
 		Expect(err).To(BeNil())
+		Expect(id).ToNot(BeEmpty())
+
+		id2, err := wallet.Send(context.Background(), nil, []btc.SpendRequest{spendRequest1}, nil)
+		Expect(err).To(BeNil())
+		Expect(id2).ToNot(BeEmpty())
 
 		var tx btc.Transaction
 		var ok bool
+		for {
+			fmt.Println("waiting for tx in the test", id)
+			tx, ok, err = wallet.Status(context.Background(), id2)
+			Expect(err).To(BeNil())
+			if ok {
+				Expect(tx).ShouldNot(BeNil())
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+		Expect(tx.TxID).NotTo(BeEmpty())
+		fmt.Println(tx.TxID, "gfjvkhiujokp")
+		err = localnet.MineBitcoinBlocks(1, indexer)
+		Expect(err).To(BeNil())
+
+		go wallet3.Start(context.Background())
 
 		for {
 			fmt.Println("waiting for tx", id)
-			tx, ok, err = wallet.Status(context.Background(), id)
+			tx, ok, err = wallet3.Status(context.Background(), id)
 			Expect(err).To(BeNil())
 			if ok {
 				Expect(tx).ShouldNot(BeNil())
@@ -222,10 +309,8 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 			time.Sleep(5 * time.Second)
 		}
 
-		// to address
-		Expect(tx.VOUTs[0].ScriptPubKeyAddress).Should(Equal(wallet.Address().EncodeAddress()))
+		fmt.Println(tx.TxID)
 
-		time.Sleep(10 * time.Second)
 	})
 
 	It("should be able to update fee with RBF", func() {

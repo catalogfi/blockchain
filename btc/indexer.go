@@ -82,6 +82,9 @@ type IndexerClient interface {
 	// GetTx returns the tx details with the given id.
 	GetTx(ctx context.Context, txid string) (Transaction, error)
 
+	// GetOutSpend returns the spending status of a transaction output.
+	GetOutSpend(ctx context.Context, txid string, vout uint32) (bool, error)
+
 	// GetTxHex returns the raw tx hex
 	GetTxHex(ctx context.Context, txid string) (string, error)
 
@@ -151,6 +154,41 @@ func (client *electrsIndexerClient) GetAddressTxs(ctx context.Context, address b
 	}
 
 	return txs, nil
+}
+
+// GetOutSpend returns the spending status of a transaction output.
+func (client *electrsIndexerClient) GetOutSpend(ctx context.Context, txid string, vout uint32) (bool, error) {
+	// GET /tx/:txid/outspend/:vout
+	endpoint, err := url.JoinPath(client.url, "tx", txid, "outspend", strconv.Itoa(int(vout)))
+	if err != nil {
+		return false, err
+	}
+
+	type OutSpent struct {
+		Spent bool `json:"spent"`
+	}
+	var outSpent OutSpent
+	err = retry(client.logger, ctx, client.retryInterval, func() error {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetOutSpend : %v", string(errMsg))
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&outSpent); err != nil {
+			return fmt.Errorf("failed to decode outSpent: %w", err)
+		}
+		return nil
+	})
+	return outSpent.Spent, err
 }
 
 // GetUTXOs implements the IndexerClient basing on the electrs indexer API.

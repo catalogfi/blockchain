@@ -470,6 +470,7 @@ func (l *BatcherCache) SaveRequest(_ context.Context, req BatcherRequest) error 
 	if err != nil {
 		return err
 	}
+	fmt.Println("dkjdjn", len(req.Spends))
 	return l.db.Put(l.pendingRequestKey(req.ID), data, nil)
 }
 

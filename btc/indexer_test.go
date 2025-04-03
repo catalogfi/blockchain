@@ -29,6 +29,11 @@ var _ = Describe("Indexer client", func() {
 			txid, err := localnet.FundBTC(addr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
+
+			By("GetOutSpend()")
+			spent, err := indexer.GetOutSpend(context.Background(), txid.String(), 0)
+			Expect(spent, false)
+
 			utxos, err := indexer.GetUTXOs(context.Background(), addr)
 			Expect(err).To(BeNil())
 			Expect(len(utxos)).Should(BeNumerically(">=", 1))
