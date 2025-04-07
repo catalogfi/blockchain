@@ -2,6 +2,8 @@ package btc_test
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"math/rand"
 	"time"
 
@@ -533,6 +535,37 @@ var _ = Describe("Bitcoin", func() {
 					}
 				}
 			})
+		})
+	})
+
+	Context("Tx serialization", func() {
+		It("should serialize a tx into a readable json format", func(ctx context.Context) {
+			By("Initialize keys and addresses")
+			addrType := waddrmgr.TaprootPubKey
+			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
+			Expect(err).To(BeNil())
+			_, addr2, err := btctest.NewBtcKey(network, addrType)
+			Expect(err).To(BeNil())
+
+			By("Construct a transaction which sends money from addr1 to addr2")
+			utxos, err := indexer.GetUTXOs(ctx, addr1)
+			Expect(err).To(BeNil())
+			amount, feeRate := int64(1e7), btctest.RandomFeeRate()
+			recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+			sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
+			feeMode := btc.MinFeeRateMode(feeRate, sizer)
+			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+			Expect(err).To(BeNil())
+
+			By("Sign and submit the fund tx")
+			Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+
+			By("Decode the tx")
+			rawTxResult, err := btc.CreateTxRawResult(network, transaction)
+			Expect(err).To(BeNil())
+			raw, err := json.MarshalIndent(rawTxResult, "", "  ")
+			Expect(err).To(BeNil())
+			log.Println(string(raw))
 		})
 	})
 })

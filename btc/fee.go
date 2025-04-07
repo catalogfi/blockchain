@@ -255,7 +255,7 @@ type mempoolFeeEstimator struct {
 
 func NewMempoolFeeEstimator(params *chaincfg.Params, url string, ttl time.Duration) FeeEstimator {
 	switch params.Name {
-	case chaincfg.MainNetParams.Name, chaincfg.TestNet3Params.Name:
+	case chaincfg.MainNetParams.Name, chaincfg.TestNet3Params.Name, chaincfg.TestNet4Params.Name, chaincfg.SigNetParams.Name:
 		// do nothing
 	default:
 		panic("unsupported network")

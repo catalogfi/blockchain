@@ -2,15 +2,19 @@ package btc
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -266,4 +270,140 @@ func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, rec
 	log.Printf("have %v utxos, total in = %v, total out = %v", len(utxos), totalIn, totalOut)
 
 	return nil, fmt.Errorf("funds not enough")
+}
+
+// messageToHex serializes a message to the wire protocol encoding using the
+// latest protocol version and returns a hex-encoded string of the result.
+// Copied from https://github.com/btcsuite/btcd/rpcserver.go and modified
+func messageToHex(msg wire.Message) (string, error) {
+	maxProtocolVersion := uint32(70002)
+	var buf bytes.Buffer
+	if err := msg.BtcEncode(&buf, maxProtocolVersion, wire.WitnessEncoding); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(buf.Bytes()), nil
+}
+
+// createVinList returns a slice of JSON objects for the inputs of the passed
+// transaction.
+// Copied from https://github.com/btcsuite/btcd/rpcserver.go
+func createVinList(mtx *wire.MsgTx) []btcjson.Vin {
+	// Coinbase transactions only have a single txin by definition.
+	vinList := make([]btcjson.Vin, len(mtx.TxIn))
+	if blockchain.IsCoinBaseTx(mtx) {
+		txIn := mtx.TxIn[0]
+		vinList[0].Coinbase = hex.EncodeToString(txIn.SignatureScript)
+		vinList[0].Sequence = txIn.Sequence
+		vinList[0].Witness = txIn.Witness.ToHexStrings()
+		return vinList
+	}
+
+	for i, txIn := range mtx.TxIn {
+		// The disassembled string will contain [error] inline
+		// if the script doesn't fully parse, so ignore the
+		// error here.
+		disbuf, _ := txscript.DisasmString(txIn.SignatureScript)
+
+		vinEntry := &vinList[i]
+		vinEntry.Txid = txIn.PreviousOutPoint.Hash.String()
+		vinEntry.Vout = txIn.PreviousOutPoint.Index
+		vinEntry.Sequence = txIn.Sequence
+		vinEntry.ScriptSig = &btcjson.ScriptSig{
+			Asm: disbuf,
+			Hex: hex.EncodeToString(txIn.SignatureScript),
+		}
+
+		if mtx.HasWitness() {
+			vinEntry.Witness = txIn.Witness.ToHexStrings()
+		}
+	}
+
+	return vinList
+}
+
+// createVoutList returns a slice of JSON objects for the outputs of the passed
+// transaction.
+// Copied from https://github.com/btcsuite/btcd/rpcserver.go
+func createVoutList(mtx *wire.MsgTx, chainParams *chaincfg.Params, filterAddrMap map[string]struct{}) []btcjson.Vout {
+	voutList := make([]btcjson.Vout, 0, len(mtx.TxOut))
+	for i, v := range mtx.TxOut {
+		// The disassembled string will contain [error] inline if the
+		// script doesn't fully parse, so ignore the error here.
+		disbuf, _ := txscript.DisasmString(v.PkScript)
+
+		// Ignore the error here since an error means the script
+		// couldn't parse and there is no additional information about
+		// it anyways.
+		scriptClass, addrs, reqSigs, _ := txscript.ExtractPkScriptAddrs(
+			v.PkScript, chainParams)
+
+		// Encode the addresses while checking if the address passes the
+		// filter when needed.
+		passesFilter := len(filterAddrMap) == 0
+		encodedAddrs := make([]string, len(addrs))
+		for j, addr := range addrs {
+			encodedAddr := addr.EncodeAddress()
+			encodedAddrs[j] = encodedAddr
+
+			// No need to check the map again if the filter already
+			// passes.
+			if passesFilter {
+				continue
+			}
+			if _, exists := filterAddrMap[encodedAddr]; exists {
+				passesFilter = true
+			}
+		}
+
+		if !passesFilter {
+			continue
+		}
+
+		var vout btcjson.Vout
+		vout.N = uint32(i)
+		vout.Value = btcutil.Amount(v.Value).ToBTC()
+		vout.ScriptPubKey.Addresses = encodedAddrs
+		vout.ScriptPubKey.Asm = disbuf
+		vout.ScriptPubKey.Hex = hex.EncodeToString(v.PkScript)
+		vout.ScriptPubKey.Type = scriptClass.String()
+		vout.ScriptPubKey.ReqSigs = int32(reqSigs)
+
+		// Address is defined when there's a single well-defined
+		// receiver address. To spend the output a signature for this,
+		// and only this, address is required.
+		if len(encodedAddrs) == 1 && reqSigs <= 1 {
+			vout.ScriptPubKey.Address = encodedAddrs[0]
+		}
+
+		voutList = append(voutList, vout)
+	}
+
+	return voutList
+}
+
+// CreateTxRawResult converts the passed transaction and associated parameters
+// to a raw transaction JSON object.
+// Copied from https://github.com/btcsuite/btcd/rpcserver.go and modified
+func CreateTxRawResult(chainParams *chaincfg.Params, mtx *wire.MsgTx) (*btcjson.TxRawResult, error) {
+
+	mtxHex, err := messageToHex(mtx)
+	if err != nil {
+		return nil, err
+	}
+
+	txReply := &btcjson.TxRawResult{
+		Hex:      mtxHex,
+		Txid:     mtx.TxHash().String(),
+		Hash:     mtx.WitnessHash().String(),
+		Size:     int32(mtx.SerializeSize()),
+		Vsize:    int32(mempool.GetTxVirtualSize(btcutil.NewTx(mtx))),
+		Weight:   int32(blockchain.GetTransactionWeight(btcutil.NewTx(mtx))),
+		Vin:      createVinList(mtx),
+		Vout:     createVoutList(mtx, chainParams, nil),
+		Version:  uint32(mtx.Version),
+		LockTime: mtx.LockTime,
+	}
+
+	return txReply, nil
 }
