@@ -63,6 +63,15 @@ type Status struct {
 	BlockTime   *uint64 `json:"block_time"`
 }
 
+type OutSpend struct {
+	Spent bool `json:"spent"`
+
+	// Following fields will be non-nil when `Spent` is true
+	TxID   *string `json:"txid"`
+	Vout   *int    `json:"vout"`
+	Status *Status `json:"status"`
+}
+
 // IndexerClient provides some rpc functions which usually cannot be achieved by the standard bitcoin json-rpc methods.
 // The actual implementation will normally rely on an indexer, or third-party API sitting in front of the indexer.
 type IndexerClient interface {
@@ -84,6 +93,9 @@ type IndexerClient interface {
 
 	// GetTxHex returns the raw tx hex
 	GetTxHex(ctx context.Context, txid string) (string, error)
+
+	// GetOutSpends returns the outspend of the given txid.
+	GetOutSpends(ctx context.Context, txid string) ([]OutSpend, error)
 
 	// SubmitTx submits the given tx to the blockchain. The tx needs to be signed.
 	SubmitTx(ctx context.Context, tx *wire.MsgTx) error
@@ -332,6 +344,39 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 	return tx, nil
 }
 
+func (client *electrsIndexerClient) GetOutSpends(ctx context.Context, txid string) ([]OutSpend, error) {
+	endpoint, err := url.JoinPath(client.url, "tx", txid, "outspends")
+	if err != nil {
+		return nil, err
+	}
+
+	// Send the request
+	var outSpends []OutSpend
+	if err := retry(client.logger, ctx, client.retryInterval, func() error {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetOutSpends : %v", string(errMsg))
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&outSpends); err != nil {
+			return fmt.Errorf("failed to decode outspend: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return outSpends, nil
+}
 func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
 	endpoint, err := url.JoinPath(client.url, "tx")
 	if err != nil {

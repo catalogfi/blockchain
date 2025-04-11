@@ -66,6 +66,11 @@ var _ = Describe("Indexer client", func() {
 			Expect(tx.TxID).Should(Equal(txid.String()))
 			Expect(tx.Status.Confirmed).Should(BeTrue())
 
+			By("GetOutSpends()")
+			outSpends, err := indexer.GetOutSpends(context.Background(), txid.String())
+			Expect(err).To(BeNil())
+			Expect(len(outSpends)).Should(BeNumerically(">=", 1))
+
 			By("GetTxHex()")
 			txHex, err := indexer.GetTxHex(context.Background(), txid.String())
 			Expect(err).To(BeNil())
