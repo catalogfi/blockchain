@@ -215,7 +215,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	}
 
 	// Build tx
-	sizer := NewSizeEstimator(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxos...)
+	sizer := NewSizeEstimator(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(htlc.Timelock), utxos...)
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
 	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
@@ -447,7 +447,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			case HtlcActionRedeem:
 				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(witness[1])), utxo)
 			case HtlcActionRefund:
-				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxo)
+				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(int64(vin.Sequence)), utxo)
 			case HtlcActionInstantRefund:
 				sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
 			}
@@ -497,7 +497,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			if action.ActionType == HtlcActionRedeem {
 				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Htlc.Secret())), utxo)
 			} else if action.ActionType == HtlcActionRefund {
-				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund, utxo)
+				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(action.Htlc.Timelock), utxo)
 			}
 
 			// Add utxo to the fetcher

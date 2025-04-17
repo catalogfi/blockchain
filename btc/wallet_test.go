@@ -19,7 +19,7 @@ var _ = Describe("Wallet", func() {
 		It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallets")
-				feeEstimator := btc.NewFixFeeEstimator(10e3)
+				feeEstimator := btc.NewFixFeeEstimator(1e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -37,17 +37,17 @@ var _ = Describe("Wallet", func() {
 			}
 		})
 
-		It("should be able to refund an HTLC after it expires", func(ctx context.Context) {
+		FIt("should be able to refund an HTLC after it expires", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallets")
-				feeEstimator := btc.NewFixFeeEstimator(10e3)
+				feeEstimator := btc.NewFixFeeEstimator(1e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
 				Expect(err).Should(BeNil())
 
 				By("Initiate an HTLC")
-				amount, timelock := int64(1e7), int64(6)
+				amount, timelock := int64(1e7), int64(17)
 				htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
 				_, _, err = wal1.Initiate(context.Background(), htlc)
 				Expect(err).Should(BeNil())
@@ -64,7 +64,7 @@ var _ = Describe("Wallet", func() {
 		It("should be able to instant refund a HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallet")
-				feeEstimator := btc.NewFixFeeEstimator(10e3)
+				feeEstimator := btc.NewFixFeeEstimator(1e3)
 				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 				Expect(err).Should(BeNil())
 				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)

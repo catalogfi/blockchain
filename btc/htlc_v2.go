@@ -79,7 +79,20 @@ var (
 	// SegwitSizeHtlcRedeem = stack number + stack size * 4 + signature + secret + script size + control block
 	SegwitSizeHtlcRedeem = func(secretSize int) int { return 1 + 4 + 64 + secretSize + 69 + 65 }
 	// SegwitSizeHtlcRefund = stack number + stack size * 3 + signature + script size + control block
-	SegwitSizeHtlcRefund = 1 + 3 + 64 + 37 + 97
+	SegwitSizeHtlcRefund = func(timelock int64) int {
+		timelockSize := 0
+		switch {
+		case timelock <= 16:
+			timelockSize = 1
+		case timelock < 128:
+			timelockSize = 2
+		case timelock < 32768:
+			timelockSize = 3
+		default:
+			timelockSize = 4
+		}
+		return 1 + 3 + 64 + (36 + timelockSize) + 97
+	}
 	// SegwitSizeHtlcInstantRefund = stack number + stack size * 4 + signature1 + signature2 + script size + control block
 	SegwitSizeHtlcInstantRefund = 1 + 4 + 64 + 65 + 70 + 97
 )
