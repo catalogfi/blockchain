@@ -37,7 +37,7 @@ var _ = Describe("Wallet", func() {
 			}
 		})
 
-		FIt("should be able to refund an HTLC after it expires", func(ctx context.Context) {
+		It("should be able to refund an HTLC after it expires", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallets")
 				feeEstimator := btc.NewFixFeeEstimator(1e3)
