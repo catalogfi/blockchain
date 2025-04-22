@@ -110,6 +110,7 @@ type HtlcAction struct {
 	ActionType      HtlcActionType
 	Htlc            *HTLC
 	InstantRefundTx *wire.MsgTx
+	RefundTo        btcutil.Address
 }
 
 type HTLC struct {

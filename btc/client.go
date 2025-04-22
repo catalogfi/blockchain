@@ -22,7 +22,11 @@ import (
 var (
 	ErrTxNotFound = errors.New("no such mempool or blockchain transaction")
 
-	ErrAlreadyInChain = errors.New("transaction already in block chain")
+	// replaced by ErrAlreadyInUtxoSet in v28.0
+	// see https://github.com/bitcoin/bitcoin/blob/master/doc/release-notes/release-notes-28.0.md
+	// ErrAlreadyInChain = errors.New("transaction already in block chain")
+
+	ErrAlreadyInUtxoSet = errors.New("Transaction outputs already in utxo set")
 
 	ErrTxInputsMissingOrSpent = errors.New("bad-txns-inputs-missingorspent")
 
@@ -145,8 +149,8 @@ func (client *rpcClient) SubmitTx(ctx context.Context, tx *wire.MsgTx) error {
 			return ErrMempoolConflict
 		case strings.Contains(err.Error(), "bad-txns-inputs-missingorspent"):
 			return ErrTxInputsMissingOrSpent
-		case strings.Contains(err.Error(), "Transaction already in block chain"):
-			return ErrAlreadyInChain
+		case strings.Contains(err.Error(), "Transaction already in block chain") || strings.Contains(err.Error(), "Transaction outputs already in utxo set"):
+			return ErrAlreadyInUtxoSet
 		}
 	}
 	return err

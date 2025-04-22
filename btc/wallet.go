@@ -26,7 +26,7 @@ type Wallet interface {
 
 	Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error)
 
-	Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error)
+	Refund(ctx context.Context, htlc *HTLC, target btcutil.Address) (*wire.MsgTx, error)
 
 	InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx) (*wire.MsgTx, error)
 
@@ -189,7 +189,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	return tx, nil
 }
 
-func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) {
+func (wal *wallet) Refund(ctx context.Context, htlc *HTLC, target btcutil.Address) (*wire.MsgTx, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -217,7 +217,10 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	// Build tx
 	sizer := NewSizeEstimator(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(htlc.Timelock), utxos...)
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
-	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
+	if target == nil {
+		target = wal.addr
+	}
+	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, target)
 	if err != nil {
 		return nil, err
 	}
@@ -507,6 +510,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			}
 			if err := AddUtxosToFetcher(fetcher, fromScript, utxo); err != nil {
 				return nil, err
+			}
+
+			// If we want to refund to a different address
+			if action.ActionType == HtlcActionRefund && action.RefundTo != nil {
+				recipients = append(recipients, NewRecipient(action.RefundTo.String(), action.Htlc.Amount))
 			}
 		case HtlcActionInstantRefund:
 			utxo, recipient, err := ValidateInstantRefundTx(action.Htlc, action.InstantRefundTx, wal.network)

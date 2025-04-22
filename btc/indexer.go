@@ -315,7 +315,9 @@ func (client *electrsIndexerClient) SubmitTx(ctx context.Context, tx *wire.MsgTx
 			errMessage := strings.ToLower(string(data))
 			switch {
 			case strings.Contains(errMessage, "transaction already in block chain"):
-				return NewNoRetryError(ErrAlreadyInChain)
+				return NewNoRetryError(ErrAlreadyInUtxoSet)
+			case strings.Contains(errMessage, "transaction outputs already in utxo set"):
+				return NewNoRetryError(ErrAlreadyInUtxoSet)
 			case strings.Contains(errMessage, "bad-txns-inputs-missingorspent"):
 				return NewNoRetryError(ErrTxInputsMissingOrSpent)
 			case strings.Contains(errMessage, "txn-mempool-conflict"):

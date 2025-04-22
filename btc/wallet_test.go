@@ -2,6 +2,7 @@ package btc_test
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -56,8 +57,48 @@ var _ = Describe("Wallet", func() {
 				Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
 
 				By("Refund an HTLC")
-				_, err = wal1.Refund(ctx, htlc)
+				_, err = wal1.Refund(ctx, htlc, nil)
 				Expect(err).Should(BeNil())
+			}
+		})
+
+		It("should be able to refund an HTLC to a different address", func(ctx context.Context) {
+			for _, addrType := range addrTypes {
+				By("Init keys and wallets")
+				feeEstimator := btc.NewFixFeeEstimator(1e3)
+				wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+				Expect(err).Should(BeNil())
+				wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+				Expect(err).Should(BeNil())
+				_, addr3, err := btctest.NewBtcKey(network, addrType)
+				Expect(err).Should(BeNil())
+
+				By("Initiate an HTLC")
+				amount, timelock := int64(1e7), int64(17)
+				htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
+				_, _, err = wal1.Initiate(context.Background(), htlc)
+				Expect(err).Should(BeNil())
+
+				By("Mine expiry number of blocks")
+				Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
+
+				By("Refund an HTLC")
+				tx, err := wal1.Refund(ctx, htlc, addr3)
+				Expect(err).Should(BeNil())
+
+				By("Target address should have the balance")
+				Eventually(func() error {
+					utxos, err := indexer.GetUTXOs(ctx, addr3)
+					if err != nil {
+						return err
+					}
+					for _, utxo := range utxos {
+						if utxo.TxID == tx.TxHash().String() {
+							return nil
+						}
+					}
+					return fmt.Errorf("not found")
+				}, 10*time.Second, 1*time.Second).Should(Succeed())
 			}
 		})
 
@@ -156,6 +197,59 @@ var _ = Describe("Wallet", func() {
 					}
 					_, err = wal1.Execute(ctx, actions2, "")
 					Expect(err).Should(BeNil())
+				}
+			})
+
+			It("should be able to refund an HTLC to a different address", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+					_, addr3, err := btctest.NewBtcKey(network, addrType)
+					Expect(err).Should(BeNil())
+
+					By("Initiate an HTLC")
+					amount, timelock := int64(1e7), int64(6)
+					htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
+					actions1 := []btc.HtlcAction{
+						{
+							ActionType: btc.HtlcActionInitiate,
+							Htlc:       htlc,
+						},
+					}
+					_, err = wal1.Execute(ctx, actions1, "")
+					Expect(err).Should(BeNil())
+
+					By("Mine expiry number of blocks")
+					Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
+
+					By("Refund an HTLC")
+					actions2 := []btc.HtlcAction{
+						{
+							ActionType: btc.HtlcActionRefund,
+							Htlc:       htlc,
+							RefundTo:   addr3,
+						},
+					}
+					tx, err := wal1.Execute(ctx, actions2, "")
+					Expect(err).Should(BeNil())
+
+					By("Target address should have the balance")
+					Eventually(func() error {
+						utxos, err := indexer.GetUTXOs(ctx, addr3)
+						if err != nil {
+							return err
+						}
+						for _, utxo := range utxos {
+							if utxo.TxID == tx.TxHash().String() && utxo.Amount == htlc.Amount {
+								return nil
+							}
+						}
+						return fmt.Errorf("not found")
+					}, 10*time.Second, 1*time.Second).Should(Succeed())
 				}
 			})
 

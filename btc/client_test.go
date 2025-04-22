@@ -147,7 +147,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 			time.Sleep(1 * time.Second)
 			err = client.SubmitTx(ctx, transaction)
-			Expect(errors.Is(err, btc.ErrAlreadyInChain)).Should(BeTrue())
+			Expect(errors.Is(err, btc.ErrAlreadyInUtxoSet)).Should(BeTrue())
 
 			By("Try construct a new transaction spending the same input")
 			recipients1 := []btc.Recipient{
