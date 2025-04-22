@@ -39,6 +39,10 @@ var (
 			Type: stringTy,
 		},
 		{
+			Name: "userID",
+			Type: stringTy,
+		},
+		{
 			Name: "secretHash",
 			Type: bytes32Ty,
 		},
@@ -80,6 +84,7 @@ type CreateOrder struct {
 	DestinationAsset            string
 	InitiatorSourceAddress      string
 	InitiatorDestinationAddress string
+	UserID                      string
 	SourceAmount                *big.Int
 	DestinationAmount           *big.Int
 	Fee                         *big.Int
@@ -113,6 +118,7 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 		order.DestinationAsset,
 		order.InitiatorSourceAddress,
 		order.InitiatorDestinationAddress,
+		order.UserID,
 		order.SecretHash,
 		order.MinDestinationConfirmations,
 		order.Timelock,
@@ -138,7 +144,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		return nil, err
 	}
 
-	if len(values) != 14 {
+	if len(values) != 15 {
 		return nil, errors.New("invalid number of values unpacked")
 	}
 
@@ -149,13 +155,14 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		DestinationAsset:            string(values[3].(string)),
 		InitiatorSourceAddress:      values[4].(string),
 		InitiatorDestinationAddress: values[5].(string),
-		SecretHash:                  values[6].([32]byte),
-		MinDestinationConfirmations: values[7].(*big.Int),
-		Timelock:                    values[8].(*big.Int),
-		SourceAmount:                values[9].(*big.Int),
-		DestinationAmount:           values[10].(*big.Int),
-		Fee:                         values[11].(*big.Int),
-		Nonce:                       values[12].(*big.Int),
-		AdditionalData:              values[13].([]byte),
+		UserID:                      values[6].(string),
+		SecretHash:                  values[7].([32]byte),
+		MinDestinationConfirmations: values[8].(*big.Int),
+		Timelock:                    values[9].(*big.Int),
+		SourceAmount:                values[10].(*big.Int),
+		DestinationAmount:           values[11].(*big.Int),
+		Fee:                         values[12].(*big.Int),
+		Nonce:                       values[13].(*big.Int),
+		AdditionalData:              values[14].([]byte),
 	}, nil
 }
