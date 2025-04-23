@@ -193,19 +193,13 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC, target btcutil.Addres
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
-	// Make sure the HTLC is refundable
-	addr := htlc.Address(wal.network)
-	utxos, err := wal.indexer.GetUTXOs(ctx, addr)
+	// Find all utxos which are confirmed and refundable
+	utxos, err := htlc.RefundableUtxos(ctx, wal.network, wal.indexer)
 	if err != nil {
 		return nil, err
 	}
-	latest, err := wal.indexer.GetTipBlockHeight(ctx)
-	if err != nil {
-		return nil, err
-	}
-	refundable := htlc.Refundable(utxos, latest)
-	if !refundable {
-		return nil, fmt.Errorf("HTLC is not refundable")
+	if len(utxos) == 0 {
+		return nil, fmt.Errorf("no utxo to refund")
 	}
 
 	// Fees
@@ -490,25 +484,33 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			if ok := inputsMap[addr.EncodeAddress()]; ok {
 				continue
 			}
-			utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
-			if err != nil {
-				return nil, err
-			}
-			inputs = append(inputs, utxo)
-			inputsMap[addr.String()] = true
-			inputActions[utxo.String()] = action
+
+			var htlcUtxos []UTXO
 			if action.ActionType == HtlcActionRedeem {
+				utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
+				if err != nil {
+					return nil, err
+				}
+				htlcUtxos = []UTXO{utxo}
 				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Htlc.Secret())), utxo)
 			} else if action.ActionType == HtlcActionRefund {
-				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(action.Htlc.Timelock), utxo)
+				htlcUtxos, err = action.Htlc.RefundableUtxos(ctx, wal.network, wal.indexer)
+				if err != nil {
+					return nil, err
+				}
+				sizer.AddUtxos(BaseSizeHtlcRefund, SegwitSizeHtlcRefund(action.Htlc.Timelock), htlcUtxos...)
 			}
-
+			inputs = append(inputs, htlcUtxos...)
+			inputsMap[addr.String()] = true
+			for _, utxo := range htlcUtxos {
+				inputActions[utxo.String()] = action
+			}
 			// Add utxo to the fetcher
 			fromScript, err := action.Htlc.P2trScript()
 			if err != nil {
 				return nil, err
 			}
-			if err := AddUtxosToFetcher(fetcher, fromScript, utxo); err != nil {
+			if err := AddUtxosToFetcher(fetcher, fromScript, htlcUtxos...); err != nil {
 				return nil, err
 			}
 

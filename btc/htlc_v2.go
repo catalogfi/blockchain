@@ -224,6 +224,30 @@ func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer In
 	return UTXO{}, fmt.Errorf("not initiated")
 }
 
+func (htlc *HTLC) RefundableUtxos(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) ([]UTXO, error) {
+	addr := htlc.Address(network)
+	utxos, err := indexer.GetUTXOs(ctx, addr)
+	if err != nil {
+		return nil, err
+	}
+	if len(utxos) == 0 {
+		return nil, fmt.Errorf("no refundable utxo")
+	}
+	refundableUtxos := make([]UTXO, 0, len(utxos))
+	latest, err := indexer.GetTipBlockHeight(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, utxo := range utxos {
+		if utxo.Status != nil && utxo.Status.Confirmed && utxo.Amount > DustAmount {
+			if latest-*utxo.Status.BlockHeight+1 >= uint64(htlc.Timelock) {
+				refundableUtxos = append(refundableUtxos, utxo)
+			}
+		}
+	}
+	return refundableUtxos, nil
+}
+
 // Leaf returns the tapLeaf associated with given action.
 func (htlc *HTLC) Leaf(action HtlcActionType) (txscript.TapLeaf, txscript.ControlBlock) {
 	var leaf txscript.TapLeaf
