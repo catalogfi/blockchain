@@ -502,9 +502,12 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			}
 			inputs = append(inputs, htlcUtxos...)
 			inputsMap[addr.String()] = true
+			amount := int64(0)
 			for _, utxo := range htlcUtxos {
 				inputActions[utxo.String()] = action
+				amount += utxo.Amount
 			}
+
 			// Add utxo to the fetcher
 			fromScript, err := action.Htlc.P2trScript()
 			if err != nil {
@@ -516,7 +519,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 
 			// If we want to refund to a different address
 			if action.ActionType == HtlcActionRefund && action.RefundTo != nil {
-				recipients = append(recipients, NewRecipient(action.RefundTo.String(), action.Htlc.Amount))
+				recipients = append(recipients, NewRecipient(action.RefundTo.String(), amount))
 			}
 		case HtlcActionInstantRefund:
 			utxo, recipient, err := ValidateInstantRefundTx(action.Htlc, action.InstantRefundTx, wal.network)
