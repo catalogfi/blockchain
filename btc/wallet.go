@@ -1,6 +1,7 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -487,6 +488,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 
 			var htlcUtxos []UTXO
 			if action.ActionType == HtlcActionRedeem {
+				if !bytes.Equal(wal.PublicKey().SerializeCompressed(), action.Htlc.RedeemerPubKey) {
+					return nil, fmt.Errorf("cannot redeem the htlc with a different key")
+				}
 				utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
 				if err != nil {
 					return nil, err
@@ -494,6 +498,9 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 				htlcUtxos = []UTXO{utxo}
 				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Htlc.Secret())), utxo)
 			} else if action.ActionType == HtlcActionRefund {
+				if !bytes.Equal(wal.PublicKey().SerializeCompressed(), action.Htlc.InitiatorPubKey) {
+					return nil, fmt.Errorf("cannot refund the htlc with a different key")
+				}
 				htlcUtxos, err = action.Htlc.RefundableUtxos(ctx, wal.network, wal.indexer)
 				if err != nil {
 					return nil, err

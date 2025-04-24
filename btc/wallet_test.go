@@ -3,6 +3,7 @@ package btc_test
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"time"
 
@@ -193,6 +194,48 @@ var _ = Describe("Wallet", func() {
 						{
 							ActionType: btc.HtlcActionRefund,
 							Htlc:       htlc,
+						},
+					}
+					_, err = wal1.Execute(ctx, actions2, "")
+					Expect(err).Should(BeNil())
+				}
+			})
+
+			It("should be able to refund an HTLC after it expires", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(10e3)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+					_, addr3, err := btctest.NewBtcKey(network, addrType)
+					Expect(err).Should(BeNil())
+					log.Print("addr3 = ", addr3.EncodeAddress())
+
+					By("Initiate an HTLC")
+					amount, timelock := int64(1e7), int64(6)
+					htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
+					Expect(err).Should(BeNil())
+					htlc.Amount -= 1000
+					actions1 := []btc.HtlcAction{
+						{
+							ActionType: btc.HtlcActionInitiate,
+							Htlc:       htlc,
+						},
+					}
+					_, err = wal1.Execute(ctx, actions1, "")
+					Expect(err).Should(BeNil())
+
+					By("Mine expiry number of blocks")
+					Expect(btctest.NewBlockWaitMined(int(timelock), indexer)).Should(Succeed())
+
+					By("Refund an HTLC")
+					actions2 := []btc.HtlcAction{
+						{
+							ActionType: btc.HtlcActionRefund,
+							Htlc:       htlc,
+							RefundTo:   addr3,
 						},
 					}
 					_, err = wal1.Execute(ctx, actions2, "")
