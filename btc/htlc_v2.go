@@ -458,6 +458,9 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	}
 	sigBytes := tx.TxIn[0].Witness[0]
 	amount := tx.TxOut[0].Value
+	if amount < DustAmount {
+		return UTXO{}, Recipient{}, errors.New("amount lower than dust amount")
+	}
 
 	// Verify signature
 	script, err := htlc.P2trScript()
