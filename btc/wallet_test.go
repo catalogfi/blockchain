@@ -299,7 +299,7 @@ var _ = Describe("Wallet", func() {
 			It("should be able to instant refund an HTLC", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
-					feeEstimator := btc.NewFixFeeEstimator(10e3)
+					feeEstimator := btc.NewFixFeeEstimator(1e3)
 					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
 					Expect(err).Should(BeNil())
 					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
@@ -309,6 +309,46 @@ var _ = Describe("Wallet", func() {
 					amount, timelock := int64(1e7), int64(6)
 					htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
 					_, irTx, err := wal1.Initiate(ctx, htlc)
+					Expect(err).Should(BeNil())
+
+					By("Mine a new block")
+					Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
+
+					By("Use the instant refund leaf to refund the HTLC")
+					actions2 := []btc.HtlcAction{
+						{
+							ActionType:      btc.HtlcActionInstantRefund,
+							Htlc:            htlc,
+							InstantRefundTx: irTx,
+						},
+					}
+					_, err = wal2.Execute(ctx, actions2, "")
+					Expect(err).Should(BeNil())
+				}
+			})
+
+			It("should be able to instant refund with a different value ", func(ctx context.Context) {
+				for _, addrType := range addrTypes {
+					By("Init keys and wallets")
+					feeEstimator := btc.NewFixFeeEstimator(1e3)
+					wal1, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, false)
+					Expect(err).Should(BeNil())
+					wal2, err := btctest.NewWallet(network, addrType, indexer, client, feeEstimator, true)
+					Expect(err).Should(BeNil())
+
+					By("Initiate an HTLC and fund it with a different amount")
+					amount, timelock := int64(1e7), int64(6)
+					htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
+					htlcAddr := htlc.Address(network)
+					_, err = btctest.Faucet(htlcAddr.EncodeAddress())
+					Expect(err).Should(BeNil())
+					time.Sleep(5 * time.Second)
+
+					By("Create the instant refund tx")
+					utxos, err := indexer.GetUTXOs(ctx, htlcAddr)
+					Expect(err).Should(BeNil())
+					Expect(len(utxos)).Should(Equal(1))
+					irTx, err := wal1.InstantRefundTx(utxos[0], htlc)
 					Expect(err).Should(BeNil())
 
 					By("Mine a new block")

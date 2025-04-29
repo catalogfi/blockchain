@@ -650,7 +650,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 }
 
 func (wal *wallet) InstantRefundTx(utxo UTXO, htlc *HTLC) (*wire.MsgTx, error) {
-	recipient := NewRecipient(wal.addr.EncodeAddress(), htlc.Amount)
+	recipient := NewRecipient(wal.addr.EncodeAddress(), utxo.Amount)
 	irTx, err := BuildTx(wal.network, GaslessMode(), []UTXO{utxo}, nil, []Recipient{recipient}, nil)
 	if err != nil {
 		return nil, err

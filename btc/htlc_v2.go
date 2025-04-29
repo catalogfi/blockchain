@@ -444,9 +444,8 @@ func IsMultiSigLeaf(script []byte) (bool, string) {
 	return tokenizer.Done(), refunderPubkey
 }
 
-// ValidateInstantRefundTx checks if the given tx is a valid instant refund tx of the htlc.
-// It assumes the tx will only have one input and one output. The input amount needs to equal the
-// htlc amount. Input's witness stack will only contain one item which is the initiator's signature.
+// ValidateInstantRefundTx checks if the given tx is a valid instant refund tx of the htlc. It assumes the tx will only
+// have one input and one output. Input's witness stack will only contain one item which is the initiator's signature.
 func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Params) (UTXO, Recipient, error) {
 	if len(tx.TxIn) != 1 {
 		return UTXO{}, Recipient{}, errors.New("invalid number of inputs")
@@ -458,16 +457,14 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 		return UTXO{}, Recipient{}, errors.New("invalid witness length")
 	}
 	sigBytes := tx.TxIn[0].Witness[0]
-	if tx.TxOut[0].Value > htlc.Amount {
-		return UTXO{}, Recipient{}, errors.New("invalid output amount")
-	}
+	amount := tx.TxOut[0].Value
 
 	// Verify signature
 	script, err := htlc.P2trScript()
 	if err != nil {
 		return UTXO{}, Recipient{}, err
 	}
-	fetcher := txscript.NewCannedPrevOutputFetcher(script, htlc.Amount)
+	fetcher := txscript.NewCannedPrevOutputFetcher(script, amount)
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
 	tapSigHashes, err := txscript.CalcTapscriptSignaturehash(sigHashes, SigHashSingleAnyoneCanPay, tx, 0, fetcher, leaf)
@@ -493,7 +490,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	utxo := UTXO{
 		TxID:   tx.TxIn[0].PreviousOutPoint.Hash.String(),
 		Vout:   tx.TxIn[0].PreviousOutPoint.Index,
-		Amount: htlc.Amount,
+		Amount: amount,
 	}
 	_, addrs, _, err := txscript.ExtractPkScriptAddrs(tx.TxOut[0].PkScript, network)
 	if err != nil {
