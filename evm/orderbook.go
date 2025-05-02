@@ -191,7 +191,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		return nil, err
 	}
 
-	if len(values) != 15 {
+	if len(values) != 16 {
 		return nil, errors.New("invalid number of values unpacked")
 	}
 
