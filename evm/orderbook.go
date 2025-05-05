@@ -76,6 +76,10 @@ var (
 			Type: uint256Ty,
 		},
 		{
+			Name: "integratorFees",
+			Type: bytesTy,
+		},
+		{
 			Name: "additionalData",
 			Type: bytesTy,
 		},
@@ -97,6 +101,7 @@ type CreateOrder struct {
 	MinDestinationConfirmations *big.Int
 	Timelock                    *big.Int
 	SecretHash                  [32]byte
+	IntegratorFees              []byte
 	AdditionalData              []byte
 }
 
@@ -167,6 +172,7 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 		order.DestinationAmount,
 		order.Fee,
 		order.Nonce,
+		order.IntegratorFees,
 		order.AdditionalData,
 	)
 	if err != nil {
@@ -185,7 +191,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		return nil, err
 	}
 
-	if len(values) != 15 {
+	if len(values) != 16 {
 		return nil, errors.New("invalid number of values unpacked")
 	}
 
@@ -204,6 +210,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		DestinationAmount:           values[11].(*big.Int),
 		Fee:                         values[12].(*big.Int),
 		Nonce:                       values[13].(*big.Int),
-		AdditionalData:              values[14].([]byte),
+		IntegratorFees:              values[14].([]byte),
+		AdditionalData:              values[15].([]byte),
 	}, nil
 }
