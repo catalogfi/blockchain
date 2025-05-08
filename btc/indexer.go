@@ -63,6 +63,10 @@ type Status struct {
 	BlockTime   *uint64 `json:"block_time"`
 }
 
+type OutSpent struct {
+	Spent bool `json:"spent"`
+}
+
 // IndexerClient provides some rpc functions which usually cannot be achieved by the standard bitcoin json-rpc methods.
 // The actual implementation will normally rely on an indexer, or third-party API sitting in front of the indexer.
 type IndexerClient interface {
@@ -90,6 +94,9 @@ type IndexerClient interface {
 
 	// FeeEstimate returns the estimate fees for different confirmation time.
 	FeeEstimate(ctx context.Context) (FeeSuggestion, error)
+
+	// GetOutSpend returns the spending status of a transaction output.
+	GetOutSpend(ctx context.Context, txid string, vout uint32) (bool, error)
 }
 
 type electrsIndexerClient struct {
@@ -419,6 +426,36 @@ func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggest
 		return nil
 	})
 	return fees, err
+}
+func (client *electrsIndexerClient) GetOutSpend(ctx context.Context, txid string, vout uint32) (bool, error) {
+	// GET /tx/:txid/outspend/:vout
+	endpoint, err := url.JoinPath(client.url, "tx", txid, "outspend", strconv.Itoa(int(vout)))
+	if err != nil {
+		return false, err
+	}
+	// Send the request
+	var outSpent OutSpent
+	err = retry(client.logger, ctx, client.retryInterval, func() error {
+		resp, err := http.Get(endpoint)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			errMsg, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+			}
+			return fmt.Errorf("GetOutSpend : %v", string(errMsg))
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&outSpent); err != nil {
+			return fmt.Errorf("failed to decode UTXOs: %w", err)
+		}
+		return nil
+	})
+	return outSpent.Spent, err
 }
 
 func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {

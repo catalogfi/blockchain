@@ -177,6 +177,16 @@ func (m *mockCache) DeletePendingBatches(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockCache) UpdatePendingRequests(ctx context.Context, updatedRequests ...btc.BatcherRequest) error {
+	if len(updatedRequests) == 0 {
+		return fmt.Errorf("UpdatePendingRequests, empty requests")
+	}
+	for _, request := range updatedRequests {
+		m.requests[request.ID] = request
+	}
+	return nil
+}
+
 type mockFeeEstimator struct {
 	fee int
 }

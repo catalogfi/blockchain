@@ -70,6 +70,7 @@ var _ = Describe("Indexer client", func() {
 			txHex, err := indexer.GetTxHex(context.Background(), txid.String())
 			Expect(err).To(BeNil())
 			Expect(txHex).ShouldNot(BeEmpty())
+
 			txBytes, err := hex.DecodeString(txHex)
 			Expect(err).To(BeNil())
 			Expect(txBytes).ShouldNot(BeEmpty())
@@ -95,6 +96,11 @@ var _ = Describe("Indexer client", func() {
 				rawTx.TxIn[i].SignatureScript = sigScript
 			}
 			Expect(client.SubmitTx(context.Background(), rawTx)).Should(Succeed())
+
+			By("GetOutspend()")
+			outspendstatus, err := indexer.GetOutSpend(context.Background(), btcTx.Hash().String(), 0)
+			Expect(err).To(BeNil())
+			Expect(outspendstatus).Should(BeFalse())
 
 			By("FeeEstimate()")
 			By("    --local env should not have enough data for the estimate")
