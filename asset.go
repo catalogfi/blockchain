@@ -210,7 +210,7 @@ var (
 var (
 	// Mainnet
 
-	AssetHyperHyperEvm = Asset{
+	AssetHypeHyperEvm = Asset{
 		Chain:    NewEvmChain(HyperEvm),
 		Address:  Native,
 		Decimals: 18,
@@ -264,7 +264,7 @@ func HtlcContractAddress(asset Asset) common.Address {
 		}
 	case asset.Chain.Name() == Bera:
 		switch asset.Symbol {
-		case AssetLbtcBase.Symbol:
+		case AssetLbtcBera.Symbol:
 			return common.HexToAddress("0x39f3294352208905fc6ebf033954E6c6455CdB4C")
 		}
 	case asset.Chain.Name() == HyperEvm:
