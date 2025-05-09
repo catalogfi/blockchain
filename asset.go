@@ -97,6 +97,12 @@ var (
 		Decimals: 18,
 		Symbol:   "ETH",
 	}
+	AssetWbtcSepolia = Asset{
+		Chain:    NewEvmChain(EthereumSepolia),
+		Address:  "0x4D68da063577F98C55166c7AF6955cF58a97b20A",
+		Decimals: 8,
+		Symbol:   "WBTC",
+	}
 )
 
 // Asset on Arbitrum
@@ -182,7 +188,7 @@ var (
 		Decimals: 18,
 		Symbol:   "BERA",
 	}
-	AssetLbtcBase = Asset{
+	AssetLbtcBera = Asset{
 		Chain:    NewEvmChain(Bera),
 		Address:  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 		Decimals: 8,
