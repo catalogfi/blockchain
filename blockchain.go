@@ -87,6 +87,8 @@ func ParseChainName(name Name) (Chain, error) {
 	switch name {
 	case Bitcoin, BitcoinTestnet3, BitcoinTestnet4, BitcoinSignet, BitcoinRegtest:
 		return NewUtxoChain(name), nil
+	case "bitcoin_test": // alias for testnet4
+		return NewUtxoChain(BitcoinTestnet4), nil
 	case Ethereum, EthereumSepolia, EthereumLocalnet,
 		Arbitrum, ArbitrumSepolia, ArbitrumLocalnet,
 		Base, BaseSepolia,
