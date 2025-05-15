@@ -71,6 +71,10 @@ var (
 			Type: uint256Ty,
 		},
 		{
+			Name: "affiliateFees",
+			Type: bytesTy,
+		},
+		{
 			Name: "additionalData",
 			Type: bytesTy,
 		},
@@ -92,6 +96,7 @@ type CreateOrder struct {
 	MinDestinationConfirmations *big.Int
 	Timelock                    *big.Int
 	SecretHash                  [32]byte
+	AffiliateFees               []byte
 	AdditionalData              []byte
 }
 
@@ -126,6 +131,7 @@ func PackCreateOrder(order *CreateOrder) ([]byte, error) {
 		order.DestinationAmount,
 		order.Fee,
 		order.Nonce,
+		order.AffiliateFees,
 		order.AdditionalData,
 	)
 	if err != nil {
@@ -163,6 +169,7 @@ func UnpackCreateOrder(data []byte) (*CreateOrder, error) {
 		DestinationAmount:           values[11].(*big.Int),
 		Fee:                         values[12].(*big.Int),
 		Nonce:                       values[13].(*big.Int),
-		AdditionalData:              values[14].([]byte),
+		AffiliateFees:               values[14].([]byte),
+		AdditionalData:              values[15].([]byte),
 	}, nil
 }
