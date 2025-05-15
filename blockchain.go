@@ -5,7 +5,7 @@ import (
 )
 
 // Name is a string identifier of different blockchains
-type Name string
+type Name = string
 
 // Name of all supported chains.
 // format = ("%v_%v", chain, network), all lower cases and network will be omitted if it's mainnet
@@ -32,6 +32,8 @@ const (
 
 	HyperEvm        Name = "hyperevm"
 	HyperEvmTestnet Name = "hyperevm_testnet"
+
+	CitreaTestnet Name = "citrea_testnet"
 )
 
 type Type string
@@ -89,7 +91,8 @@ func ParseChainName(name Name) (Chain, error) {
 		Arbitrum, ArbitrumSepolia, ArbitrumLocalnet,
 		Base, BaseSepolia,
 		Bera, BeraBepolia,
-		HyperEvm, HyperEvmTestnet:
+		HyperEvm, HyperEvmTestnet,
+		CitreaTestnet:
 		return NewEvmChain(name), nil
 	default:
 		return nil, fmt.Errorf("unsupported chain = %v", name)
