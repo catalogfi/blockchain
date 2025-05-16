@@ -65,7 +65,8 @@ func (chain EvmChain) ChainID() *big.Int {
 	case MonadTestnet:
 		return big.NewInt(10143)
 	case StarknetSepolia:
-		return big.NewInt(393402133025997798000961)
+		value, _ := big.NewInt(0).SetString("393402133025997798000961", 10)
+		return value
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))
 	}
