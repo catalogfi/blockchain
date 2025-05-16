@@ -25,7 +25,7 @@ func (chain EvmChain) Network() Network {
 	switch chain.name {
 	case Ethereum, Arbitrum, Base, Bera, HyperEvm:
 		return NetworkMainnet
-	case EthereumSepolia, ArbitrumSepolia, BaseSepolia, BeraBepolia, HyperEvmTestnet, CitreaTestnet:
+	case EthereumSepolia, ArbitrumSepolia, BaseSepolia, BeraBepolia, HyperEvmTestnet, CitreaTestnet, MonadTestnet, StarknetSepolia:
 		return NetworkTestnet
 	case EthereumLocalnet, ArbitrumLocalnet:
 		return NetworkLocalnet
@@ -62,6 +62,10 @@ func (chain EvmChain) ChainID() *big.Int {
 		return big.NewInt(998)
 	case CitreaTestnet:
 		return big.NewInt(5115)
+	case MonadTestnet:
+		return big.NewInt(10143)
+	case StarknetSepolia:
+		return big.NewInt(393402133025997798000961)
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))
 	}
@@ -78,6 +82,8 @@ func (chain EvmChain) L2() bool {
 	case HyperEvm, HyperEvmTestnet: // hyperEvm is l2 for Hyperliquid
 		return true
 	case CitreaTestnet:
+		return false
+	case MonadTestnet:
 		return false
 	default:
 		panic(fmt.Sprintf("unknown evm chain = %v", chain))
