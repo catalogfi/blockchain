@@ -42,7 +42,7 @@ const (
 	StarknetDevnet  Name = "starknet_devnet"
 
 	Solana         Name = "solana"
-	SolanaDevnet   Name = "solana_devnet"
+	SolanaDevnet   Name = "solana_testnet"
 	SolanaLocalnet Name = "solana_localnet"
 )
 
