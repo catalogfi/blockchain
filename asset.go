@@ -233,6 +233,24 @@ var (
 	}
 )
 
+// Asset on Unichain
+var (
+	// Mainnet
+
+	AssetEthUnichain = Asset{
+		Chain:    NewEvmChain(Unichain),
+		Address:  Native,
+		Decimals: 18,
+		Symbol:   "ETH",
+	}
+	AssetWbtcUnichain = Asset{
+		Chain:    NewEvmChain(Unichain),
+		Address:  "0x927B51f251480a681271180DA4de28D44EC4AfB8",
+		Decimals: 8,
+		Symbol:   "WBTC",
+	}
+)
+
 func HtlcContractAddress(asset Asset) common.Address {
 	switch {
 	case asset.Chain.Name() == Ethereum:

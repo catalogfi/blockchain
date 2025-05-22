@@ -44,6 +44,9 @@ const (
 	Solana         Name = "solana"
 	SolanaDevnet   Name = "solana_testnet"
 	SolanaLocalnet Name = "solana_localnet"
+
+	Unichain        Name = "unichain"
+	UnichainSepolia Name = "unichain_sepolia"
 )
 
 type Type string
@@ -109,7 +112,8 @@ func ParseChainName(name Name) (Chain, error) {
 		HyperEvm, HyperEvmTestnet,
 		CitreaTestnet,
 		MonadTestnet,
-		Starknet, StarknetSepolia, StarknetDevnet:
+		Starknet, StarknetSepolia, StarknetDevnet,
+		Unichain, UnichainSepolia:
 		return NewEvmChain(name), nil
 	case Solana, SolanaDevnet, SolanaLocalnet:
 		return NewSolanaChain(name), nil
