@@ -37,7 +37,13 @@ const (
 
 	MonadTestnet Name = "monad_testnet"
 
-	StarknetSepolia = "starknet_sepolia"
+	Starknet        Name = "starknet"
+	StarknetSepolia Name = "starknet_sepolia"
+	StarknetDevnet  Name = "starknet_devnet"
+
+	Solana         Name = "solana"
+	SolanaDevnet   Name = "solana_testnet"
+	SolanaLocalnet Name = "solana_localnet"
 )
 
 type Type string
@@ -46,6 +52,9 @@ const (
 	// TypeEvm is an identifier for all evm-compatible chains,
 	// namely, Ethereum, BinanceSmartChain and so on.
 	TypeEvm = Type("evm")
+
+	// TypeSolana is an identifier for all Solana chains.
+	TypeSolana = Type("solana")
 
 	// TypeUTXOBased is an identifier for all utxo-based chains, namely,
 	// Bitcoin, BitcoinCash, Dogecoin, and so on.
@@ -100,8 +109,10 @@ func ParseChainName(name Name) (Chain, error) {
 		HyperEvm, HyperEvmTestnet,
 		CitreaTestnet,
 		MonadTestnet,
-		StarknetSepolia:
+		Starknet, StarknetSepolia, StarknetDevnet:
 		return NewEvmChain(name), nil
+	case Solana, SolanaDevnet, SolanaLocalnet:
+		return NewSolanaChain(name), nil
 	default:
 		return nil, fmt.Errorf("unsupported chain = %v", name)
 	}
