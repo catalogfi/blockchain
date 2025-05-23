@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -488,7 +489,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 
 			var htlcUtxos []UTXO
 			if action.ActionType == HtlcActionRedeem {
-				if !bytes.Equal(wal.PublicKey().SerializeCompressed(), action.Htlc.RedeemerPubKey) {
+				if !bytes.Equal(schnorr.SerializePubKey(wal.PublicKey()), action.Htlc.RedeemerPubKey) {
 					return nil, fmt.Errorf("cannot redeem the htlc with a different key")
 				}
 				utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
@@ -498,7 +499,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 				htlcUtxos = []UTXO{utxo}
 				sizer.AddUtxos(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(action.Htlc.Secret())), utxo)
 			} else if action.ActionType == HtlcActionRefund {
-				if !bytes.Equal(wal.PublicKey().SerializeCompressed(), action.Htlc.InitiatorPubKey) {
+				if !bytes.Equal(schnorr.SerializePubKey(wal.PublicKey()), action.Htlc.InitiatorPubKey) {
 					return nil, fmt.Errorf("cannot refund the htlc with a different key")
 				}
 				htlcUtxos, err = action.Htlc.RefundableUtxos(ctx, wal.network, wal.indexer)
