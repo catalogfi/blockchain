@@ -8,33 +8,51 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type LoggerOptions struct {
+// LoggerOptions defines a function type for configuring logger options
+type LoggerOptions func(*loggerOptions)
+
+// loggerOptions holds the configuration for the logger
+type loggerOptions struct {
 	webhookURL   string
 	serviceName  string
 	consoleLevel zapcore.Level
 	webhookLevel zapcore.Level
 }
 
-func defaultLoggerOptions() *LoggerOptions {
-	return &LoggerOptions{
+// defaultLoggerOptions returns a loggerOptions with default values
+func defaultLoggerOptions() *loggerOptions {
+	return &loggerOptions{
 		consoleLevel: zapcore.InfoLevel,
 		webhookLevel: zapcore.ErrorLevel,
 	}
 }
 
-func WithConsoleLevel(consoleLevel zapcore.Level) func(*LoggerOptions) {
-	return func(logOpt *LoggerOptions) {
+// with consoleLevel sets the logging level for console output
+func WithConsoleLevel(consoleLevel zapcore.Level) LoggerOptions {
+	return func(logOpt *loggerOptions) {
 		logOpt.consoleLevel = consoleLevel
 	}
 }
 
-func WithWebhookLevel(webhookLevel zapcore.Level) func(*LoggerOptions) {
-	return func(logOpt *LoggerOptions) {
+// with WebhookLevel sets the logging level for webhook output
+func WithWebhookLevel(webhookLevel zapcore.Level) LoggerOptions {
+	return func(logOpt *loggerOptions) {
 		logOpt.webhookLevel = webhookLevel
 	}
 }
 
-func NewWebhookLogger(webhookURL string, ServiceName string, loggeropts ...func(*LoggerOptions)) *zap.Logger {
+// NewWebhookLogger creates a new logger that logs to both console and a webhook.
+//
+//	params :
+//
+// - webhookURL: URL to send error logs to
+//
+// - ServiceName: Name of the service for logging context
+//
+// - loggeropts: Optional configuration functions to customize logger behavior
+//
+// If no webhook URL is provided, it returns a logger that only logs to stdout.
+func NewWebhookLogger(webhookURL string, ServiceName string, loggeropts ...func(*loggerOptions)) *zap.Logger {
 	defaultOpts := defaultLoggerOptions()
 	defaultOpts.webhookURL = webhookURL
 	defaultOpts.serviceName = ServiceName
