@@ -47,6 +47,8 @@ const (
 
 	Unichain        Name = "unichain"
 	UnichainSepolia Name = "unichain_sepolia"
+
+	SuiTestnet Name = "sui_testnet"
 )
 
 type Type string
@@ -58,6 +60,8 @@ const (
 
 	// TypeSolana is an identifier for all Solana chains.
 	TypeSolana = Type("solana")
+
+	TypeSui = Type("sui")
 
 	// TypeUTXOBased is an identifier for all utxo-based chains, namely,
 	// Bitcoin, BitcoinCash, Dogecoin, and so on.
@@ -117,6 +121,8 @@ func ParseChainName(name Name) (Chain, error) {
 		return NewEvmChain(name), nil
 	case Solana, SolanaDevnet, SolanaLocalnet:
 		return NewSolanaChain(name), nil
+	case SuiTestnet:
+		return NewSuiChain(name), nil
 	default:
 		return nil, fmt.Errorf("unsupported chain = %v", name)
 	}
