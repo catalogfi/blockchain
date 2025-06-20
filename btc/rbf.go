@@ -533,9 +533,9 @@ func (w *batcherWallet) createRBFTx(
 	weight := baseSize*3 + totalSize
 	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 
-	fees1 := math.Ceil(float64((previousFeeRate+1)*vSize) / 1000)
-	fees2 := math.Ceil(float64(previousFee+uint(descendantsFee)) + float64(vSize))
-	fees3 := math.Ceil(float64(feeRate*vSize) / 1000)
+	fees1 := (float64(previousFeeRate) + 0.001) * float64(vSize)
+	fees2 := float64(previousFee+uint(descendantsFee)) + float64(vSize)
+	fees3 := float64(feeRate * vSize)
 	newFeeEstimate := int64(math.Max(math.Max(fees1, fees2), fees3))
 
 	if newFeeEstimate > int64(fee) {
