@@ -533,12 +533,12 @@ func (w *batcherWallet) createRBFTx(
 	weight := baseSize*3 + totalSize
 	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 
-	newFee := ((int(vSize)) * feeRate) + int(previousFee) + int(descendantsFee)
-	needEstimateWithPrevFeeRate := ((int(vSize)) * previousFeeRate) + 1 + int(descendantsFee)
+	fees1 := math.Ceil(float64((previousFeeRate+1)*vSize) / 1000)
+	fees2 := math.Ceil(float64(previousFee+uint(descendantsFee)) + float64(vSize))
+	fees3 := math.Ceil(float64(feeRate*vSize) / 1000)
+	newFeeEstimate := int64(math.Max(math.Max(fees1, fees2), fees3))
 
-	newFeeEstimate := max(needEstimateWithPrevFeeRate, newFee)
-
-	if newFeeEstimate > int(fee) {
+	if newFeeEstimate > int64(fee) {
 		totalIn, totalOut := func() (int64, int64) {
 			totalOut := int64(0)
 			for _, txOut := range tx.TxOut {
@@ -571,7 +571,7 @@ func (w *batcherWallet) createRBFTx(
 				zap.Int64("totalIn", totalIn),
 				zap.Int64("totalOut", totalOut),
 				zap.Int64("changeAmount", changeAmount),
-				zap.Int("newFeeEstimate", newFeeEstimate),
+				zap.Int64("newFeeEstimate", newFeeEstimate),
 			)
 			previousUTXOs := utxos
 
@@ -593,7 +593,7 @@ func (w *batcherWallet) createRBFTx(
 			"rebuilding rbf tx",
 			zap.Int("depth", depth),
 			zap.Uint("fee", fee),
-			zap.Int("newFeeEstimate", newFeeEstimate),
+			zap.Int64("newFeeEstimate", newFeeEstimate),
 			zap.Int("requiredFeeRate", feeRate),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),
