@@ -35,6 +35,10 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 	mockFeeEstimator := NewMockFeeEstimator(int(requiredFeeRate))
 
+	requiredFeeRate2 := int64(2)
+
+	mockFeeEstimator2 := NewMockFeeEstimator(int(requiredFeeRate2))
+
 	var wallet btc.BatcherWallet
 	var wallet2 btc.BatcherWallet
 	var cache btc.Cache
@@ -90,7 +94,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		cache2 = btc.NewBatcherCache(db, "2", btc.RBF)
 		bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
-		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator, chainParams, cache2, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
+		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator2, chainParams, cache2, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
 		Expect(err).To(BeNil())
 
@@ -131,9 +135,6 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		err = wallet.Start(context.Background())
 		Expect(err).To(BeNil())
 
-		err = wallet2.Start(context.Background())
-		Expect(err).To(BeNil())
-
 	})
 
 	AfterAll(func() {
@@ -146,6 +147,8 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 	})
 
 	It("should be able to send funds in smaller amounts", func() {
+		err = wallet2.Start(context.Background())
+		Expect(err).To(BeNil())
 		for i := 0; i < 10; i++ {
 			req := []btc.SendRequest{
 				{
@@ -414,5 +417,81 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		Expect(err).To(BeNil())
 		feeRate := (lb.Tx.Fee * blockchain.WitnessScaleFactor) / int64(lb.Tx.Weight)
 		Expect(feeRate).Should(BeNumerically(">=", requiredFeeRate+10))
+	})
+
+	It("should rbf with minimal fee rate", func() {
+		vsizes := []int64{}
+		fees := []int64{}
+		feeRate := []int64{}
+		for i := 0; i < 25; i++ {
+			req := []btc.SendRequest{
+				{
+					Amount: 1000,
+					To:     wallet2.Address(),
+				},
+			}
+
+			id, err := wallet.Send(context.Background(), req, nil, nil)
+			Expect(err).To(BeNil())
+
+			var tx btc.Transaction
+			var ok bool
+
+			for {
+				fmt.Printf("waiting for tx %s (iteration %d)\n", id, i+1)
+				tx, ok, err = wallet.Status(context.Background(), id)
+				Expect(err).To(BeNil())
+				if ok {
+					Expect(tx).ShouldNot(BeNil())
+					vsizes = append(vsizes, int64(tx.Weight))
+					fees = append(fees, tx.Fee)
+					feeRate = append(feeRate, (tx.Fee)/(int64(tx.Weight)/blockchain.WitnessScaleFactor))
+					fmt.Printf("Transaction %s sent successfully, vsizes: %v\n", id, vsizes)
+					fmt.Printf("Transaction %s fee: %d\n", id, tx.Fee)
+					fmt.Printf("Transaction %s fee rate: %d\n", id, (tx.Fee)/(int64(tx.Weight)/blockchain.WitnessScaleFactor))
+					break
+				}
+				time.Sleep(5 * time.Second)
+			}
+		}
+
+		fmt.Printf("All transactions sent, vsizes: %v\n", vsizes)
+		fmt.Printf("All transactions fees: %v\n", fees)
+		fmt.Printf("All transactions fee rates: %v\n", feeRate)
+	})
+	It("should work if the previous fee rates changed due to descendants", func() {
+		err = wallet2.Start(context.Background())
+		Expect(err).To(BeNil())
+
+		// Send funds to wallet2 and wait for confirmation
+		sendAndWait := func(w btc.Wallet, req []btc.SendRequest) btc.Transaction {
+			id, err := w.Send(context.Background(), req, nil, nil)
+			Expect(err).To(BeNil())
+			var tx btc.Transaction
+			var ok bool
+			for {
+				fmt.Printf("waiting for tx %s\n", id)
+				tx, ok, err = w.Status(context.Background(), id)
+				Expect(err).To(BeNil())
+				if ok {
+					Expect(tx).ShouldNot(BeNil())
+					break
+				}
+				time.Sleep(5 * time.Second)
+			}
+			return tx
+		}
+
+		sendAndWait(wallet, []btc.SendRequest{{Amount: 100000, To: wallet2.Address()}})
+
+		// Send multiple outputs from wallet2 to randAddr
+		req2 := make([]btc.SendRequest, 10)
+		for i := range req2 {
+			req2[i] = btc.SendRequest{Amount: 1000, To: randAddr}
+		}
+		sendAndWait(wallet2, req2)
+
+		// Send again to wallet2 and wait
+		sendAndWait(wallet, []btc.SendRequest{{Amount: 100000, To: wallet2.Address()}})
 	})
 })

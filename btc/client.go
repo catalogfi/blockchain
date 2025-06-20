@@ -455,3 +455,62 @@ func (b *BitcoinRPCClient) GetDescendantsFee(ctx context.Context, txId string) (
 
 	return int64(math.Round(sum * 100000000)), nil
 }
+
+func (client *BitcoinRPCClient) GetMempoolEntry(ctx context.Context, txid string) (*btcjson.GetMempoolEntryResult, error) {
+	// Prepare the JSON-RPC request
+	requestBody := RPCRequest{
+		Jsonrpc: "1.0",
+		ID:      "curltext",
+		Method:  "getmempoolentry",
+		Params:  []interface{}{txid},
+	}
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("GetMempoolEntry: error marshalling JSON: %w", err)
+	}
+
+	// Create a new HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, "POST", client.RpcURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("GetMempoolEntry: error creating request: %w", err)
+	}
+
+	// Add headers and basic auth
+	req.Header.Set("Content-Type", "text/plain")
+	req.SetBasicAuth(client.RpcUser, client.RpcPass)
+
+	// Send the request
+	httpClient := &http.Client{}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GetMempoolEntry: error sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("GetMempoolEntry: error reading response: %w", err)
+	}
+
+	// Parse the response
+	var apiResponse struct {
+		Result btcjson.GetMempoolEntryResult `json:"result"`
+		Error  interface{}                   `json:"error"`
+		ID     string                        `json:"id"`
+	}
+	if err := json.Unmarshal(body, &apiResponse); err != nil {
+		return nil, fmt.Errorf("GetMempoolEntry: error unmarshalling JSON: %w", err)
+	}
+
+	// Handle error from bitcoind
+	if apiResponse.Error != nil {
+		errStr := fmt.Sprintf("%v", apiResponse.Error)
+		if strings.Contains(errStr, "Transaction not in mempool") {
+			return nil, ErrTxNotFound
+		}
+		return nil, fmt.Errorf("GetMempoolEntry: RPC error: %v", apiResponse.Error)
+	}
+
+	return &apiResponse.Result, nil
+}

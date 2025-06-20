@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -266,6 +267,41 @@ var _ = Describe("bitcoin client", func() {
 			err = client.SubmitTx(ctx, new(wire.MsgTx))
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
+		})
+	})
+
+	Context("Test BitcoinRPCClient", func() {
+		It("should return mempool entry", func(ctx context.Context) {
+			bitcoin_client := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
+
+			chainParams := chaincfg.RegressionNetParams
+			indexer := localnet.BTCIndexer()
+			fixedFeeEstimator := btc.NewFixFeeEstimator(16)
+
+			alicePrivKey, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			aliceSimpleWallet, err := btc.NewSimpleWallet(alicePrivKey, &chainParams, indexer, fixedFeeEstimator, btc.HighFee)
+			Expect(err).To(BeNil())
+
+			_, err = localnet.FundBitcoin(aliceSimpleWallet.Address().EncodeAddress(), indexer)
+			Expect(err).To(BeNil())
+
+			addr, err := randomP2wpkhAddress(chainParams)
+			Expect(err).To(BeNil())
+
+			req := []btc.SendRequest{
+				{
+					Amount: 100000,
+					To:     addr,
+				},
+			}
+
+			txid, err := aliceSimpleWallet.Send(context.Background(), req, nil, nil)
+			Expect(err).To(BeNil())
+
+			By("GetMempoolEntry()")
+			_, err = bitcoin_client.GetMempoolEntry(ctx, txid)
+			Expect(err).To(BeNil())
 		})
 	})
 })
