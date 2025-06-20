@@ -455,9 +455,9 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 			}
 		}
 
-		fmt.Printf("All transactions sent, vsizes: %v\n", vsizes)
-		fmt.Printf("All transactions fees: %v\n", fees)
-		fmt.Printf("All transactions fee rates: %v\n", feeRate)
+		fmt.Printf("transaction weights: %v\n", vsizes)
+		fmt.Printf("transaction fees: %v\n", fees)
+		fmt.Printf("transaction fee rates: %v\n", feeRate)
 	})
 	It("should work if the previous fee rates changed due to descendants", func() {
 		err = wallet2.Start(context.Background())
