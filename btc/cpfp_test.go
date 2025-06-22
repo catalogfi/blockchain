@@ -31,7 +31,7 @@ var _ = Describe("BatchWallet:CPFP", Ordered, func() {
 
 	mockFeeEstimator := NewMockFeeEstimator(10)
 	cache := NewTestCache(btc.CPFP)
-	bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
+	bitcoinRPC := btc.NewBitcoinClient("admin1", "123", "http://0.0.0.0:18443")
 	wallet, err := btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.CPFP))
 	Expect(err).To(BeNil())
 

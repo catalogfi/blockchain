@@ -118,18 +118,14 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 	}
 
 	// Calculate the current fee rate for the batch transaction.
-	mempoolEntry, err := w.rpc.GetMempoolEntry(c, batch.Tx.TxID)
+	rbfFeeInfo, err := w.rpc.GetRBFTxFeeInfo(c, batch.Tx.TxID)
 	if err != nil {
-		w.logger.Error("failed to get mempool entry", zap.Error(err), zap.String("txid", batch.Tx.TxID))
-		return fmt.Errorf("failed to get mempool entry: %w", err)
+		w.logger.Error("failed to get RBF fee info", zap.Error(err), zap.String("txid", batch.Tx.TxID))
+		return fmt.Errorf("failed to get RBF fee info: %w", err)
 	}
 
-	prevFees, err := btcutil.NewAmount(mempoolEntry.Fees.Descendant)
-	if err != nil {
-		return err
-	}
-	currentFeeRate := (float64(prevFees) / float64(mempoolEntry.DescendantSize))
-	w.logger.Info("current fee rate for the batch", zap.Float64("fee_rate", currentFeeRate))
+	currentFeeRate := rbfFeeInfo.TxFeeRate
+	w.logger.Info("current batch RBF fee info", zap.Any("rbf_fee_info", rbfFeeInfo))
 
 	previousUTXOs := UTXOs{}
 	for _, vin := range batch.Tx.VINs {
@@ -145,11 +141,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 			Status: &utxoTx.Status,
 		})
 	}
-	descendantsFee, err := w.rpc.GetDescendantsFee(c, batch.Tx.TxID)
-	if err != nil {
-		w.logger.Error("failed to get descendants", zap.Error(err), zap.String("txid", batch.Tx.TxID))
-		return fmt.Errorf("failed to get descendants: %w", err)
-	}
+	descendantsFee := rbfFeeInfo.DescendantFee
 
 	// Attempt to create a new RBF batch with combined requests.
 	return w.createNewRBFBatch(c, previousUTXOs, append(existingRequests, newRequests...), currentFeeRate, int(batch.Tx.Fee), 0, int(descendantsFee))

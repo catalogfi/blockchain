@@ -92,7 +92,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 
 		cache = btc.NewBatcherCache(db, "", btc.RBF)
 		cache2 = btc.NewBatcherCache(db, "2", btc.RBF)
-		bitcoinRPC := btc.NewBitcoinRPCClient("admin1", "123", "http://0.0.0.0:18443")
+		bitcoinRPC := btc.NewBitcoinClient("admin1", "123", "http://0.0.0.0:18443")
 		wallet, _ = btc.NewBatcherWallet(privateKey, indexer, mockFeeEstimator, chainParams, cache, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		wallet2, _ = btc.NewBatcherWallet(pk3, indexer, mockFeeEstimator2, chainParams, cache2, logger, &bitcoinRPC, btc.WithPTI(5*time.Second), btc.WithStrategy(btc.RBF))
 		_, err = localnet.FundBitcoin(wallet.Address().EncodeAddress(), indexer)
@@ -446,7 +446,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 					vsizes = append(vsizes, int64(tx.Weight))
 					fees = append(fees, tx.Fee)
 					feeRate = append(feeRate, (tx.Fee)/(int64(tx.Weight)/blockchain.WitnessScaleFactor))
-					fmt.Printf("Transaction %s sent successfully, vsizes: %v\n", id, vsizes)
+					fmt.Printf("Transaction %s sent successfully, weight: %v\n", id, vsizes)
 					fmt.Printf("Transaction %s fee: %d\n", id, tx.Fee)
 					fmt.Printf("Transaction %s fee rate: %d\n", id, (tx.Fee)/(int64(tx.Weight)/blockchain.WitnessScaleFactor))
 					break
