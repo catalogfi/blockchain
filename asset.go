@@ -1,6 +1,8 @@
 package blockchain
 
-import "github.com/ethereum/go-ethereum/common"
+import (
+	"github.com/ethereum/go-ethereum/common"
+)
 
 var Native = ""
 
