@@ -124,6 +124,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 		return fmt.Errorf("failed to get RBF fee info: %w", err)
 	}
 
+	// currentFeeRate is the fee rate from the actual and tx and its direct descendants
 	currentFeeRate := rbfFeeInfo.TxFeeRate
 	w.logger.Info("current batch RBF fee info", zap.Any("rbf_fee_info", rbfFeeInfo))
 
@@ -366,10 +367,15 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 		return nil
 	}
 
-	currentFeeRate := int(tx.Fee) * 4 / tx.Weight
+	// get current tx fee info
+	feeInfo, err := w.rpc.GetRBFTxFeeInfo(c, tx.TxID)
+	if err != nil {
+		w.logger.Error("failed to get fee info (updateRBF)", zap.Error(err))
+		return err
+	}
 
 	// Validate the fee rate update according to the wallet options
-	err = validateUpdate(currentFeeRate, requiredFeeRate, w.opts)
+	err = validateUpdate(int(feeInfo.TxFeeRate), requiredFeeRate, w.opts)
 	if err != nil {
 		return err
 	}

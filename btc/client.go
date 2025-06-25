@@ -417,6 +417,7 @@ func NewBitcoinClient(rpcUser string, rpcPass string, rpcURL string) BitcoinClie
 	}
 }
 
+// GetMempoolDescendants returns all descendants (both direct and indirect) of a transaction in the mempool.
 func (client *BitcoinClient) GetMempoolDescendants(ctx context.Context, txid string) (map[string]DescendantTransaction, error) {
 	method := "getmempooldescendants"
 	params, err := client.packParams(txid, true)
@@ -438,6 +439,9 @@ func (client *BitcoinClient) GetMempoolDescendants(ctx context.Context, txid str
 	return apiResponse, nil
 }
 
+// GetDescendantsFee calculates the total fee of all descendants of a transaction in the mempool.
+// it fetches the descendants using `getmempooldescendants` and sums their fees.
+// If the transaction is not found in the mempool, it returns ErrTxNotFound.
 func (client *BitcoinClient) GetDescendantsFee(ctx context.Context, txid string) (int64, error) {
 	apiResponse, err := client.GetMempoolDescendants(ctx, txid)
 	if err != nil {
@@ -465,36 +469,42 @@ func (client *BitcoinClient) GetDescendantsFee(ctx context.Context, txid string)
 
 // GetMempoolEntryResult models the data returned from the getmempoolentry's
 // fee field
-
 type MempoolFees struct {
-	Base       float64 `json:"base"`
-	Modified   float64 `json:"modified"`
-	Ancestor   float64 `json:"ancestor"`
+	// Base is the fee of the transaction itself, in BTC.
+	Base     float64 `json:"base"`
+	Modified float64 `json:"modified"`
+	Ancestor float64 `json:"ancestor"`
+	// Descendant is the total fee of the transaction and all its descendants (both direct and indirect), in BTC.
 	Descendant float64 `json:"descendant"`
 }
 
 // GetMempoolEntryResult models the data returned from the getmempoolentry
-// command.
 type GetMempoolEntryResult struct {
-	VSize           int32       `json:"vsize"`
-	Size            int32       `json:"size"`
-	Weight          int64       `json:"weight"`
-	Fee             float64     `json:"fee"`
-	ModifiedFee     float64     `json:"modifiedfee"`
-	Time            int64       `json:"time"`
-	Height          int64       `json:"height"`
-	DescendantCount int64       `json:"descendantcount"`
-	DescendantSize  int64       `json:"descendantsize"`
-	DescendantFees  float64     `json:"descendantfees"`
-	AncestorCount   int64       `json:"ancestorcount"`
-	AncestorSize    int64       `json:"ancestorsize"`
-	AncestorFees    float64     `json:"ancestorfees"`
-	WTxId           string      `json:"wtxid"`
-	Fees            MempoolFees `json:"fees"`
-	Depends         []string    `json:"depends"`
-	SpendBy         []string    `json:"spentby"`
+	// Vsize of the actual transaction
+	VSize           int32   `json:"vsize"`
+	Size            int32   `json:"size"`
+	Weight          int64   `json:"weight"`
+	Fee             float64 `json:"fee"`
+	ModifiedFee     float64 `json:"modifiedfee"`
+	Time            int64   `json:"time"`
+	Height          int64   `json:"height"`
+	DescendantCount int64   `json:"descendantcount"`
+	// DescendantSize is the total Vsize of the transaction and all its descendants
+	DescendantSize int64 `json:"descendantsize"`
+	// DescendantFees is the total fee of the transaction and all its descendants(both direct and indirect)
+	DescendantFees float64     `json:"descendantfees"`
+	AncestorCount  int64       `json:"ancestorcount"`
+	AncestorSize   int64       `json:"ancestorsize"`
+	AncestorFees   float64     `json:"ancestorfees"`
+	WTxId          string      `json:"wtxid"`
+	Fees           MempoolFees `json:"fees"`
+	Depends        []string    `json:"depends"`
+	// SpentBy is a list of transaction IDs that spend outputs from this transaction.
+	// This is useful for tracking direct descendants of a transaction in the mempool.
+	SpendBy []string `json:"spentby"`
 }
 
+// GetMempoolEntry returns mempool data for given transaction
 func (client *BitcoinClient) GetMempoolEntry(ctx context.Context, txid string) (*GetMempoolEntryResult, error) {
 	method := "getmempoolentry"
 	params, err := client.packParams(txid)
@@ -524,7 +534,9 @@ type RBFTxFeeInfo struct {
 	TxFeeRate float64 `json:"tx_fee_rate"`
 }
 
+// GetRBFTxFeeInfo returns FeeInfo required to RBF (Replace-By-Fee) a transaction in the mempool
 func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (*RBFTxFeeInfo, error) {
+	// Get the descendants and the entry for the transaction
 	descendants, err := client.GetMempoolDescendants(ctx, txid)
 	if err != nil {
 		if errors.Is(err, ErrTxNotFound) {
@@ -553,10 +565,14 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 		DescendantFee: descendantFee,
 		TxFeeRate:     float64(totalFee) / float64(entry.DescendantSize),
 	}
+	// If there are no descendants, fee rate is is the base fee divided by the vsize of the transaction
 	if len(descendants) == 0 {
 		return feeInfo, nil
 	}
 
+	// Calculate the fee rate based on the direct descendants
+	// The fee rate is calculated as the total fee of the transaction and its direct descendants divided
+	// by the total vsize of the transaction and its direct descendants.
 	var directDescendantSize, directDescendantFee float64
 	for _, childTxid := range entry.SpendBy {
 		if desc, ok := descendants[childTxid]; ok {
@@ -571,6 +587,7 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 	return feeInfo, nil
 }
 
+// packParams converts the provided parameters into a slice of json.RawMessage.
 func (client *BitcoinClient) packParams(params ...interface{}) ([]json.RawMessage, error) {
 	rawParams := make([]json.RawMessage, len(params))
 	for i, param := range params {
@@ -583,6 +600,7 @@ func (client *BitcoinClient) packParams(params ...interface{}) ([]json.RawMessag
 	return rawParams, nil
 }
 
+// send sends a JSON-RPC request to the Bitcoin node and returns the raw response.
 func (client *BitcoinClient) send(ctx context.Context, method string, params []json.RawMessage) ([]byte, error) {
 	// Construct the request
 	jReq := Request{

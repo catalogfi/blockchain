@@ -423,7 +423,7 @@ var _ = Describe("BatchWallet:RBF", Ordered, func() {
 		vsizes := []int64{}
 		fees := []int64{}
 		feeRate := []int64{}
-		for i := 0; i < 25; i++ {
+		for i := 0; i < 50; i++ {
 			req := []btc.SendRequest{
 				{
 					Amount: 1000,
