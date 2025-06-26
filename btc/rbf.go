@@ -118,7 +118,18 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 	}
 
 	// Calculate the current fee rate for the batch transaction.
-	currentFeeRate := int(batch.Tx.Fee) * blockchain.WitnessScaleFactor / (batch.Tx.Weight)
+	rbfFeeInfo, err := w.rpc.GetRBFTxFeeInfo(c, batch.Tx.TxID)
+	if err != nil {
+		if !errors.Is(err, ErrTxNotFound) {
+			w.logger.Error("failed to get RBF fee info", zap.Error(err), zap.String("txid", batch.Tx.TxID))
+			return fmt.Errorf("failed to get RBF fee info: %w", err)
+		}
+		return ErrFeeUpdateNotNeeded
+	}
+
+	// currentFeeRate is the fee rate from the actual and tx and its direct descendants
+	currentFeeRate := rbfFeeInfo.TxFeeRate
+	w.logger.Info("current batch RBF fee info", zap.Any("rbf_fee_info", rbfFeeInfo))
 
 	previousUTXOs := UTXOs{}
 	for _, vin := range batch.Tx.VINs {
@@ -134,11 +145,7 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 			Status: &utxoTx.Status,
 		})
 	}
-	descendantsFee, err := w.rpc.GetDescendantsFee(c, batch.Tx.TxID)
-	if err != nil {
-		w.logger.Error("failed to get descendants", zap.Error(err), zap.String("txid", batch.Tx.TxID))
-		return fmt.Errorf("failed to get descendants: %w", err)
-	}
+	descendantsFee := rbfFeeInfo.DescendantFee
 
 	// Attempt to create a new RBF batch with combined requests.
 	return w.createNewRBFBatch(c, previousUTXOs, append(existingRequests, newRequests...), currentFeeRate, int(batch.Tx.Fee), 0, int(descendantsFee))
@@ -202,7 +209,7 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 }
 
 // createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
-func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate, currentFee, requiredFeeRate, descendantsFee int) error {
+func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate float64, currentFee, requiredFeeRate, descendantsFee int) error {
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 
@@ -363,10 +370,18 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 		return nil
 	}
 
-	currentFeeRate := int(tx.Fee) * 4 / tx.Weight
+	// get current tx fee info
+	feeInfo, err := w.rpc.GetRBFTxFeeInfo(c, tx.TxID)
+	if err != nil {
+		if !errors.Is(err, ErrTxNotFound) {
+			w.logger.Error("failed to get RBF fee info", zap.Error(err), zap.String("txid", tx.TxID))
+			return fmt.Errorf("failed to get RBF fee info: %w", err)
+		}
+		return ErrFeeUpdateNotNeeded
+	}
 
 	// Validate the fee rate update according to the wallet options
-	err = validateUpdate(currentFeeRate, requiredFeeRate, w.opts)
+	err = validateUpdate(int(feeInfo.TxFeeRate), requiredFeeRate, w.opts)
 	if err != nil {
 		return err
 	}
@@ -417,7 +432,7 @@ func (w *batcherWallet) createRBFTx(
 	checkValidity bool,
 	previousFee uint,
 
-	previousFeeRate int,
+	previousFeeRate float64,
 	descendantsFee int,
 	// Depth to limit the recursion
 	depth int,
@@ -533,12 +548,21 @@ func (w *batcherWallet) createRBFTx(
 	weight := baseSize*3 + totalSize
 	vSize := int(math.Ceil(float64(weight) / blockchain.WitnessScaleFactor))
 
-	newFee := ((int(vSize)) * feeRate) + int(previousFee) + int(descendantsFee)
-	needEstimateWithPrevFeeRate := ((int(vSize)) * previousFeeRate) + 1 + int(descendantsFee)
+	fees1 := math.Ceil((float64(previousFeeRate) + 0.001) * float64(vSize))
+	fees2 := math.Ceil(float64(previousFee+uint(descendantsFee)) + float64(vSize))
+	fees3 := float64(feeRate * vSize)
+	newFeeEstimate := int64(math.Ceil(math.Max(math.Max(fees1, fees2), fees3)))
 
-	newFeeEstimate := max(needEstimateWithPrevFeeRate, newFee)
+	w.logger.Info(
+		"new fee estimate for RBF transaction",
+		zap.Float64("fees1", fees1),
+		zap.Float64("fees2", fees2),
+		zap.Float64("fees3", fees3),
+		zap.Int64("newFeeEstimate", newFeeEstimate),
+		zap.Int("vSize", vSize),
+	)
 
-	if newFeeEstimate > int(fee) {
+	if newFeeEstimate > int64(fee) {
 		totalIn, totalOut := func() (int64, int64) {
 			totalOut := int64(0)
 			for _, txOut := range tx.TxOut {
@@ -571,7 +595,7 @@ func (w *batcherWallet) createRBFTx(
 				zap.Int64("totalIn", totalIn),
 				zap.Int64("totalOut", totalOut),
 				zap.Int64("changeAmount", changeAmount),
-				zap.Int("newFeeEstimate", newFeeEstimate),
+				zap.Int64("newFeeEstimate", newFeeEstimate),
 			)
 			previousUTXOs := utxos
 
@@ -593,7 +617,7 @@ func (w *batcherWallet) createRBFTx(
 			"rebuilding rbf tx",
 			zap.Int("depth", depth),
 			zap.Uint("fee", fee),
-			zap.Int("newFeeEstimate", newFeeEstimate),
+			zap.Int64("newFeeEstimate", newFeeEstimate),
 			zap.Int("requiredFeeRate", feeRate),
 			zap.Int("TxIns", len(tx.TxIn)),
 			zap.Int("TxOuts", len(tx.TxOut)),

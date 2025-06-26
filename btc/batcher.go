@@ -155,7 +155,7 @@ type batcherWallet struct {
 	sw           Wallet
 	opts         BatcherOptions
 	indexer      IndexerClient
-	rpc          BitcoinRPCClient
+	rpc          BitcoinClient
 	feeEstimator FeeEstimator
 	cache        Cache
 }
@@ -168,7 +168,7 @@ type Batch struct {
 	Strategy    Strategy
 }
 
-func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, rpc *BitcoinRPCClient, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
+func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, rpc *BitcoinClient, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
 	wallet := &batcherWallet{
 		indexer:      indexer,
 		privateKey:   privateKey,
@@ -376,7 +376,7 @@ func (w *batcherWallet) runPeriodicBatcher(ctx context.Context) {
 //     no batches to create
 func (w *batcherWallet) processBatch() {
 	if err := w.createBatch(); err != nil {
-		if !errors.Is(err, ErrBatchParametersNotMet) {
+		if !(errors.Is(err, ErrBatchParametersNotMet) || errors.Is(err, ErrFeeUpdateNotNeeded)) {
 			w.logger.Error("failed to create batch", zap.Error(err))
 		}
 
