@@ -1,13 +1,16 @@
 package cosigner_test
 
 import (
+	"encoding/hex"
 	"os"
 	"testing"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
+	"github.com/catalogfi/blockchain/btc/cosigner"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -20,11 +23,13 @@ var (
 	debug string
 
 	// Vars
-	network   *chaincfg.Params
-	logger    *zap.Logger
-	indexer   btc.IndexerClient
-	client    btc.Client
-	addrTypes []waddrmgr.AddressType
+	network     *chaincfg.Params
+	logger      *zap.Logger
+	indexer     btc.IndexerClient
+	cosignerPub *btcec.PublicKey
+	btcClient   btc.Client
+	client      *cosigner.Client
+	addrTypes   []waddrmgr.AddressType
 )
 
 func TestBtc(t *testing.T) {
@@ -48,10 +53,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).Should(BeNil())
 	indexer = btc.NewElectrsIndexerClient(logger, btctest.DefaultRegtestIndexer, btc.DefaultRetryInterval)
 
-	client = btc.NewClient(network, btctest.DefaultRegtestHost, btctest.RegressionRpcUsername, btctest.RegressionRpcPassword)
+	btcClient = btc.NewClient(network, btctest.DefaultRegtestHost, btctest.RegressionRpcUsername, btctest.RegressionRpcPassword)
 	addrTypes = []waddrmgr.AddressType{
 		waddrmgr.PubKeyHash,
 		waddrmgr.WitnessPubKey,
 		waddrmgr.TaprootPubKey,
 	}
+	cosignerPubStr, err := hex.DecodeString("0321f053cec7917da6213b489994212ed0637dad9df995c107a763fb8e4ee081f1")
+	Expect(err).Should(BeNil())
+	cosignerPub, err = btcec.ParsePubKey(cosignerPubStr)
+	Expect(err).Should(BeNil())
+	client = cosigner.NewClient("http://127.0.0.1:8080")
 })

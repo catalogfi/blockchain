@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -12,21 +14,14 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// type Account struct {
-// 	Address           string          `json:"address"`
-// 	GuardianPublicKey string          `json:"guardian_public_key"`
-// 	UserPublicKey     string          `json:"user_public_key"`
-// 	SpentOutpoints    map[string]bool `json:"spent_outpoints"`
-// }
-
 type Transaction struct {
-	Values              map[wire.OutPoint]int64           `json:"values"`
-	MergeTransactions   map[string]*wire.MsgTx            `json:"merge_transactions"`
-	MempoolTransactions map[string]*wire.MsgTx            `json:"mempool_transactions"`
-	TxHashes            []string                          `json:"txhashes"`
-	Spends              []map[wire.OutPoint]wire.TxOut    `json:"spends"`
-	SpendLinks          []map[wire.OutPoint]wire.OutPoint `json:"spendlinks"`
-	BackupTransactions  []map[string]*wire.MsgTx          `json:"backup_transactions"`
+	Values              map[string]int64  `json:"values"`
+	MergeTransactions   map[string]string `json:"merge_transactions"`
+	MempoolTransactions map[string]string `json:"mempool_transactions"`
+	TxHashes            []string          `json:"txhashes"`
+	Spends              map[string]string `json:"spends"`
+	SpendLinks          map[string]string `json:"spendlinks"`
+	BackupTransactions  map[string]string `json:"backup_transactions"`
 }
 
 type Client struct {
@@ -34,7 +29,14 @@ type Client struct {
 	url string
 }
 
-func (client *Client) NewAccount(pub btcec.PublicKey) (string, error) {
+func NewClient(url string) *Client {
+	return &Client{
+		hc:  &http.Client{},
+		url: url,
+	}
+}
+
+func (client *Client) NewAccount(pub *btcec.PublicKey) (string, error) {
 	pubStr := hex.EncodeToString(pub.SerializeCompressed())
 	var req = struct {
 		PublicKey string `json:"public_key"`
@@ -53,7 +55,7 @@ func (client *Client) NewAccount(pub btcec.PublicKey) (string, error) {
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf(response.Status)
 	}
 
@@ -68,7 +70,7 @@ func (client *Client) NewAccount(pub btcec.PublicKey) (string, error) {
 
 func (client *Client) NewTransaction(address string, unsignedTx *wire.MsgTx) (*wire.MsgTx, error) {
 	path := fmt.Sprintf("%v/account/%v/transactions", client.url, address)
-	buff := bytes.NewBuffer(make([]byte, unsignedTx.SerializeSize()))
+	buff := bytes.NewBuffer(make([]byte, 0, unsignedTx.SerializeSize()))
 	if err := unsignedTx.Serialize(buff); err != nil {
 		return nil, err
 	}
@@ -87,8 +89,12 @@ func (client *Client) NewTransaction(address string, unsignedTx *wire.MsgTx) (*w
 	if err != nil {
 		return nil, err
 	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf(response.Status)
+	if response.StatusCode != http.StatusCreated {
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 
 	var resp struct {
@@ -162,24 +168,24 @@ func (client *Client) GetTransactionByNonce(address string, nonce int) (*Transac
 	return &tx, nil
 }
 
-func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backupTxs []*wire.MsgTx) (*wire.MsgTx, error) {
+func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backupTxs map[string]*wire.MsgTx) (*wire.MsgTx, error) {
 	path := fmt.Sprintf("%v/account/%v/transaction/latest", client.url, address)
 
 	backupMap := make(map[string]string)
-	for _, tx := range backupTxs {
+	for txid, tx := range backupTxs {
 		buffer := bytes.NewBuffer([]byte{})
 		if err := tx.Serialize(buffer); err != nil {
 			return nil, err
 		}
-		backupMap[tx.TxHash().String()] = hex.EncodeToString(buffer.Bytes())
+		backupMap[txid] = hex.EncodeToString(buffer.Bytes())
 	}
-	buff := bytes.NewBuffer(make([]byte, newTx.SerializeSize()))
+	buff := bytes.NewBuffer(make([]byte, 0, newTx.SerializeSize()))
 	if err := newTx.Serialize(buff); err != nil {
 		return nil, err
 	}
 	request := struct {
 		BackupTxs  map[string]string `json:"backup_txs"`
-		UnsignedTx string            `json:"unsigned_txF"`
+		UnsignedTx string            `json:"unsigned_tx"`
 	}{
 		BackupTxs:  backupMap,
 		UnsignedTx: hex.EncodeToString(buff.Bytes()),
@@ -200,7 +206,11 @@ func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backu
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, err
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 
 	var resp struct {
@@ -218,4 +228,36 @@ func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backu
 		return nil, err
 	}
 	return tx.MsgTx(), nil
+}
+
+func (client *Client) NewMergeTx(tx *wire.MsgTx) error {
+	path := fmt.Sprintf("%v/transactions", client.url)
+	buff := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+	if err := tx.Serialize(buff); err != nil {
+		return err
+	}
+
+	request := struct {
+		TxHex string `json:"txhex"`
+	}{
+		hex.EncodeToString(buff.Bytes()),
+	}
+	log.Printf("merge data = %v", hex.EncodeToString(buff.Bytes()))
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+
+	response, err := client.hc.Post(path, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != http.StatusCreated {
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
+	}
+	return nil
 }

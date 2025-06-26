@@ -2,10 +2,12 @@ package btc
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"math"
+	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -184,6 +186,22 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEs
 		fees3 := math.Ceil(float64(minFeeRate.Int()*vsize) / 1000)
 		return int64(math.Max(math.Max(fees1, fees2), fees3)), nil
 	}
+}
+
+func RbfModeFromPrevTx(client Client, txid string, sizer *SizeEstimator) (FeeMode, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	entry, err := client.GetMempoolEntry(ctx, txid)
+	if err != nil {
+		return nil, err
+	}
+	prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+	if err != nil {
+		return nil, err
+	}
+	prevFeeRate := NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
+	return RbfMode(0, prevFeeRate, int64(prevFees), sizer), nil
 }
 
 // BuildTx is a helper function for building a bitcoin transaction. It uses the given `FeeMode` to calculate

@@ -6,6 +6,8 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+var DefaultTimelock = int64(144 * 180)
+
 var (
 	BaseSizeSpend  = 0
 	BaseSizeRefund = 0
@@ -31,6 +33,29 @@ var (
 	}
 )
 
+func Script(cosignerPub, userPub []byte, timelock int64) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddOp(txscript.OP_IF).
+		AddOp(txscript.OP_2).
+		AddData(cosignerPub).
+		AddData(userPub).
+		AddOp(txscript.OP_2).
+		AddOp(txscript.OP_CHECKMULTISIG).
+		AddOp(txscript.OP_ELSE).
+		AddInt64(timelock).
+		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddData(userPub).
+		AddOp(txscript.OP_CHECKSIG).
+		AddOp(txscript.OP_ENDIF).
+		Script()
+}
+
+func Sign(script []byte, tx *wire.MsgTx, index int, fetcher txscript.PrevOutputFetcher, key *btcec.PrivateKey) ([]byte, error) {
+	outpoint := fetcher.FetchPrevOutput(tx.TxIn[index].PreviousOutPoint)
+	return txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, outpoint.Value, script, txscript.SigHashAll, key)
+}
+
 func Witness(script, cosignerSig, userSig []byte, refund bool) wire.TxWitness {
 	var witnessStack wire.TxWitness
 	if refund {
@@ -48,27 +73,4 @@ func Witness(script, cosignerSig, userSig []byte, refund bool) wire.TxWitness {
 	}
 
 	return witnessStack
-}
-
-func Sign(script []byte, tx *wire.MsgTx, index int, fetcher txscript.PrevOutputFetcher, key *btcec.PrivateKey) ([]byte, error) {
-	outpoint := fetcher.FetchPrevOutput(tx.TxIn[index].PreviousOutPoint)
-	return txscript.RawTxInWitnessSignature(tx, txscript.NewTxSigHashes(tx, fetcher), index, outpoint.Value, script, txscript.SigHashAll, key)
-}
-
-func Script(cosignerPub, userPub []byte, waitTime int64) ([]byte, error) {
-	return txscript.NewScriptBuilder().
-		AddOp(txscript.OP_IF).
-		AddOp(txscript.OP_2).
-		AddData(cosignerPub).
-		AddData(userPub).
-		AddOp(txscript.OP_2).
-		AddOp(txscript.OP_CHECKMULTISIG).
-		AddOp(txscript.OP_ELSE).
-		AddInt64(waitTime).
-		AddOp(txscript.OP_CHECKSEQUENCEVERIFY).
-		AddOp(txscript.OP_DROP).
-		AddData(userPub).
-		AddOp(txscript.OP_CHECKSIG).
-		AddOp(txscript.OP_ENDIF).
-		Script()
 }
