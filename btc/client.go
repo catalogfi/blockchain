@@ -11,7 +11,6 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
@@ -445,9 +444,6 @@ func (client *BitcoinClient) GetMempoolDescendants(ctx context.Context, txid str
 func (client *BitcoinClient) GetDescendantsFee(ctx context.Context, txid string) (int64, error) {
 	apiResponse, err := client.GetMempoolDescendants(ctx, txid)
 	if err != nil {
-		if errors.Is(err, ErrTxNotFound) {
-			return 0, ErrTxNotFound
-		}
 		return 0, fmt.Errorf("Error getting mempool descendants: %w", err)
 	}
 
@@ -539,16 +535,10 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 	// Get the descendants and the entry for the transaction
 	descendants, err := client.GetMempoolDescendants(ctx, txid)
 	if err != nil {
-		if errors.Is(err, ErrTxNotFound) {
-			return nil, ErrTxNotFound
-		}
 		return nil, fmt.Errorf("error getting mempool descendants: %w", err)
 	}
 	entry, err := client.GetMempoolEntry(ctx, txid)
 	if err != nil {
-		if errors.Is(err, ErrTxNotFound) {
-			return nil, ErrTxNotFound
-		}
 		return nil, fmt.Errorf("error getting mempool entry: %w", err)
 	}
 	if entry == nil {
@@ -605,7 +595,7 @@ func (client *BitcoinClient) send(ctx context.Context, method string, params []j
 	// Construct the request
 	jReq := Request{
 		Version: "1.0",
-		ID:      rand.Uint32(), // Use Int63 for compatibility with Go 1.21
+		ID:      rand.Uint32(),
 		Method:  method,
 		Params:  params,
 	}
@@ -614,70 +604,27 @@ func (client *BitcoinClient) send(ctx context.Context, method string, params []j
 		return nil, err
 	}
 
-	// Post the request
-	var (
-		lastErr      error
-		backoff      time.Duration
-		httpResponse *http.Response
-	)
-
-	for i := 0; i < 10; i++ {
-		bodyReader := bytes.NewReader(raw)
-		httpReq, err := http.NewRequest("POST", client.RpcURL, bodyReader)
-		if err != nil {
-			return nil, err
-		}
-		httpReq.Close = true
-		httpReq.Header.Set("Content-Type", "application/json")
-		if client.RpcUser != "" && client.RpcPass != "" {
-			httpReq.SetBasicAuth(client.RpcUser, client.RpcPass)
-		}
-
-		httpResponse, err = client.httpClient.Do(httpReq)
-
-		// Quit the retry loop on success or if we can't retry anymore.
-		if err == nil || i == 10 {
-			break
-		}
-
-		// Save the last error for the case where we backoff further,
-		// retry and get an invalid response but no error. If this
-		// happens the saved last error will be used to enrich the error
-		// message that we pass back to the caller.
-		lastErr = err
-
-		// Backoff sleep otherwise.
-		backoff = 500 * time.Millisecond * time.Duration(i+1)
-		if backoff > 5*time.Second {
-			backoff = 5 * time.Second
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, err
-		case <-time.After(backoff):
-		}
+	bodyReader := bytes.NewReader(raw)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", client.RpcURL, bodyReader)
+	if err != nil {
+		return nil, err
 	}
-	if lastErr != nil {
-		return nil, lastErr
+	httpReq.Header.Set("Content-Type", "application/json")
+	if client.RpcUser != "" && client.RpcPass != "" {
+		httpReq.SetBasicAuth(client.RpcUser, client.RpcPass)
 	}
 
-	// We still want to return an error if for any reason the response
-	// remains empty.
-	if httpResponse == nil {
-		return nil, fmt.Errorf("invalid http POST response (nil), "+
-			"method: %s, id: %d, last error=%v",
-			jReq.Method, jReq.ID, lastErr)
+	httpResponse, err := client.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
 	}
+	defer httpResponse.Body.Close()
 
-	// Read the raw bytes and close the response.
 	respBytes, err := io.ReadAll(httpResponse.Body)
-	httpResponse.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("error reading json reply: %v", err)
 	}
 
-	// Try to unmarshal the response as a regular JSON-RPC response.
 	var resp rawResponse
 	if err := json.Unmarshal(respBytes, &resp); err != nil {
 		return nil, err
