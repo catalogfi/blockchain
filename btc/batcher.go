@@ -376,7 +376,7 @@ func (w *batcherWallet) runPeriodicBatcher(ctx context.Context) {
 //     no batches to create
 func (w *batcherWallet) processBatch() {
 	if err := w.createBatch(); err != nil {
-		if !errors.Is(err, ErrBatchParametersNotMet) {
+		if !(errors.Is(err, ErrBatchParametersNotMet) || errors.Is(err, ErrFeeUpdateNotNeeded)) {
 			w.logger.Error("failed to create batch", zap.Error(err))
 		}
 
