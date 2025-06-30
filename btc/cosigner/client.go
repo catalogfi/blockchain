@@ -194,6 +194,7 @@ func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backu
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("update tx = %v", string(data))
 
 	req, err := http.NewRequest(http.MethodPut, path, bytes.NewBuffer(data))
 	if err != nil {
