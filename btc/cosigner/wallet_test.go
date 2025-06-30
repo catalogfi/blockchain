@@ -44,7 +44,7 @@ var _ = Describe("wallet", func() {
 			}
 		})
 
-		It("Merge tx", func(ctx context.Context) {
+		FIt("Merge tx", func(ctx context.Context) {
 			By("Create a new wallet")
 			key, err := btcec.NewPrivateKey()
 			Expect(err).Should(BeNil())
