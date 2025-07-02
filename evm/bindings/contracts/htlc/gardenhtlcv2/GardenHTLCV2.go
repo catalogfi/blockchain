@@ -1,7 +1,7 @@
 // Code generated - DO NOT EDIT.
 // This file is a generated binding and any manual changes will be lost.
 
-package gardenhtlc_v2
+package gardenhtlcv2
 
 import (
 	"errors"
