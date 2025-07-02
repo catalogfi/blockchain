@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
@@ -63,10 +64,12 @@ var _ = Describe("Indexer client", func() {
 
 			By("SubmitTx()")
 			amount, feeRate := int64(1e6), btctest.RandomFeeRate()
-			recipients := []btc.Recipient{btc.NewRecipient(addr.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(addr, amount)
+			Expect(err).To(BeNil())
+			recipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			rawTx, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr)
+			rawTx, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, rawTx, key, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, rawTx)).Should(Succeed())
@@ -94,10 +97,12 @@ var _ = Describe("Indexer client", func() {
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e6), btctest.RandomFeeRate()
-			recipients := []btc.Recipient{btc.NewRecipient(pkAddr.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(pkAddr, amount)
+			Expect(err).To(BeNil())
+			recipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, pkAddr)
+			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 
@@ -112,13 +117,10 @@ var _ = Describe("Indexer client", func() {
 			Expect(errors.Is(err, btc.ErrAlreadyInUtxoSet)).Should(BeTrue())
 
 			By("Try construct a new transaction spending the same input")
-			recipients1 := []btc.Recipient{
-				{
-					To:     pkAddr.EncodeAddress(),
-					Amount: 2 * amount,
-				},
-			}
-			transaction1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients1, pkAddr)
+			recipient1, err := btc.NewTxOutFromAddress(pkAddr, 2*amount)
+			Expect(err).To(BeNil())
+			recipients1 := []*wire.TxOut{recipient1}
+			transaction1, err := btc.BuildTx(feeMode, nil, utxos, recipients1, pkAddr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")

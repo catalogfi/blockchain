@@ -9,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
@@ -164,9 +165,11 @@ var _ = Describe("bitcoin fees", func() {
 				exact := 0
 				for i := 0; i < 10000; i++ {
 					amount, feeRate := rand.Int63n(10000)+1e7, btctest.RandomFeeRate()
-					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+					recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+					Expect(err).To(BeNil())
+					recipients := []*wire.TxOut{recipient}
 					feeMode := btc.MinFeeRateMode(feeRate, sizer)
-					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+					transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 					Expect(err).To(BeNil())
 
 					estWeight, err := sizer.EstimateTxWeight(transaction)
@@ -246,7 +249,7 @@ var _ = Describe("bitcoin fees", func() {
 			diff := map[int]int{}
 			for i := 0; i < 10000; i++ {
 				feeMode := btc.MinFeeRateMode(btctest.RandomFeeRate(), sizer)
-				transaction, err := btc.BuildTx(network, feeMode, append(utxos1, utxos2...), nil, nil, addr1)
+				transaction, err := btc.BuildTx(feeMode, append(utxos1, utxos2...), nil, nil, addr1)
 				Expect(err).To(BeNil())
 				estWeight, err := sizer.EstimateTxWeight(transaction)
 				Expect(err).To(BeNil())

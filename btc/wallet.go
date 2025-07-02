@@ -90,7 +90,11 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire
 
 	// Recipients
 	htlcAddr := htlc.Address(wal.network)
-	recipients := []Recipient{NewRecipient(htlcAddr.EncodeAddress(), htlc.Amount)}
+	recipient, err := NewTxOutFromAddress(htlcAddr, htlc.Amount)
+	if err != nil {
+		return nil, nil, err
+	}
+	recipients := []*wire.TxOut{recipient}
 
 	// Fees
 	feeRate, err := wal.feeEstimator.FeeSuggestion()
@@ -100,7 +104,7 @@ func (wal *wallet) Initiate(ctx context.Context, htlc *HTLC) (*wire.MsgTx, *wire
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
 
 	// Build tx
-	tx, err := BuildTx(wal.network, feeMode, nil, utxos, recipients, wal.Address())
+	tx, err := BuildTx(feeMode, nil, utxos, recipients, wal.Address())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -154,7 +158,7 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	// Build tx
 	sizer := NewSizeEstimator(BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(htlc.Secret())), utxos...)
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
-	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, wal.Address())
+	tx, err := BuildTx(feeMode, utxos, nil, nil, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +220,7 @@ func (wal *wallet) Refund(ctx context.Context, htlc *HTLC, target btcutil.Addres
 	if target == nil {
 		target = wal.addr
 	}
-	tx, err := BuildTx(wal.network, feeMode, utxos, nil, nil, target)
+	tx, err := BuildTx(feeMode, utxos, nil, nil, target)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +298,7 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	sizer := NewSizeEstimatorOfAddrType(wal.addrType, utxos...)
 	sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
 	feeMode := MinFeeRateMode(feeRate.High, sizer)
-	transaction, err := BuildTx(wal.network, feeMode, []UTXO{utxo}, utxos, []Recipient{recipient}, wal.Address())
+	transaction, err := BuildTx(feeMode, []UTXO{utxo}, utxos, []*wire.TxOut{recipient}, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +406,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 	}
 
 	// Include all actions from the previous tx
-	recipients := []Recipient{}
+	recipients := []*wire.TxOut{}
 	inputs := []UTXO{}
 	prevWitnesses := map[string]wire.TxWitness{}
 	prevSequences := map[string]int{}
@@ -457,10 +461,15 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			if vout.ScriptPubKeyAddress == wal.Address().EncodeAddress() {
 				continue
 			}
-			recipients = append(recipients, Recipient{
-				To:     vout.ScriptPubKeyAddress,
-				Amount: int64(vout.Value),
-			})
+			voutAddr, err := btcutil.DecodeAddress(vout.ScriptPubKeyAddress, wal.network)
+			if err != nil {
+				return nil, err
+			}
+			recipient, err := NewTxOutFromAddress(voutAddr, int64(vout.Value))
+			if err != nil {
+				return nil, err
+			}
+			recipients = append(recipients, recipient)
 			outputsMaps[vout.ScriptPubKeyAddress] = true
 		}
 
@@ -480,7 +489,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 			if ok := outputsMaps[addr.String()]; ok {
 				continue
 			}
-			recipients = append(recipients, NewRecipient(addr.String(), action.Htlc.Amount))
+			recipient, err := NewTxOutFromAddress(addr, action.Htlc.Amount)
+			if err != nil {
+				return nil, err
+			}
+			recipients = append(recipients, recipient)
 			outputsMaps[addr.String()] = true
 		case HtlcActionRedeem, HtlcActionRefund:
 			if ok := inputsMap[addr.EncodeAddress()]; ok {
@@ -527,7 +540,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 
 			// If we want to refund to a different address
 			if action.ActionType == HtlcActionRefund && action.RefundTo != nil {
-				recipients = append(recipients, NewRecipient(action.RefundTo.String(), amount))
+				recipient, err := NewTxOutFromAddress(action.RefundTo, amount)
+				if err != nil {
+					return nil, err
+				}
+				recipients = append(recipients, recipient)
 			}
 		case HtlcActionInstantRefund:
 			utxo, recipient, err := ValidateInstantRefundTx(action.Htlc, action.InstantRefundTx, wal.network)
@@ -538,7 +555,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 				continue
 			}
 			inputs = append([]UTXO{utxo}, inputs...)
-			recipients = append([]Recipient{recipient}, recipients...)
+			recipients = append([]*wire.TxOut{recipient}, recipients...)
 			inputsMap[addr.String()] = true
 			inputActions[utxo.String()] = action
 			sizer.AddUtxos(BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund, utxo)
@@ -576,7 +593,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 	}
 
 	// Build the tx
-	tx, err := BuildTx(wal.network, feeMode, inputs, utxos, recipients, wal.Address())
+	tx, err := BuildTx(feeMode, inputs, utxos, recipients, wal.Address())
 	if err != nil {
 		return nil, err
 	}
@@ -651,8 +668,11 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 }
 
 func (wal *wallet) InstantRefundTx(utxo UTXO, htlc *HTLC) (*wire.MsgTx, error) {
-	recipient := NewRecipient(wal.addr.EncodeAddress(), utxo.Amount)
-	irTx, err := BuildTx(wal.network, GaslessMode(), []UTXO{utxo}, nil, []Recipient{recipient}, nil)
+	recipient, err := NewTxOutFromAddress(wal.addr, utxo.Amount)
+	if err != nil {
+		return nil, err
+	}
+	irTx, err := BuildTx(GaslessMode(), []UTXO{utxo}, nil, []*wire.TxOut{recipient}, nil)
 	if err != nil {
 		return nil, err
 	}

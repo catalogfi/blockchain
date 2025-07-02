@@ -35,7 +35,7 @@ var _ = Describe("cosigner", func() {
 			Expect(err).To(BeNil())
 			sizer := btc.NewSizeEstimator(cosigner.BaseSizeSpend, cosigner.SegwitSizeSpend, utxos...)
 			feeMode := btc.MinFeeRateMode(1e3, sizer)
-			tx1, err := btc.BuildTx(network, feeMode, utxos, nil, nil, addr)
+			tx1, err := btc.BuildTx(feeMode, utxos, nil, nil, addr)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the tx")
@@ -73,7 +73,7 @@ var _ = Describe("cosigner", func() {
 			Expect(err).To(BeNil())
 			sizer := btc.NewSizeEstimator(cosigner.BaseSizeRefund, cosigner.SegwitSizeRefund(waitTime), utxos...)
 			feeMode := btc.MinFeeRateMode(1e3, sizer)
-			tx1, err := btc.BuildTx(network, feeMode, utxos, nil, nil, addr)
+			tx1, err := btc.BuildTx(feeMode, utxos, nil, nil, addr)
 			Expect(err).To(BeNil())
 			Expect(btctest.NewBlockWaitMined(6, indexer)).Should(Succeed())
 

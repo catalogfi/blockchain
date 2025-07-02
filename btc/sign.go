@@ -1,7 +1,10 @@
 package btc
 
 import (
+	"context"
+	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -9,6 +12,8 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/catalogfi/tools"
+	"github.com/catalogfi/tools/pkg/memcache"
 )
 
 type SigOptions func(*sigOptions)
@@ -176,4 +181,65 @@ func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey
 		}
 	}
 	return nil
+}
+
+type InMemFetcher struct {
+	cache   memcache.Cache[wire.TxOut]
+	indexer IndexerClient
+}
+
+func NewInMemFetcher(ttl time.Duration, indexer IndexerClient) (*InMemFetcher, error) {
+	cache, err := tools.NewMemCache[wire.TxOut](memcache.WithTtl(ttl))
+	if err != nil {
+		return nil, err
+	}
+
+	return &InMemFetcher{
+		cache:   cache,
+		indexer: indexer,
+	}, nil
+}
+
+func (fetcher InMemFetcher) AddPrevOut(op wire.OutPoint, txOut *wire.TxOut) {
+	key := op.String()
+	fetcher.cache.Set(key, *txOut)
+}
+
+func (fetcher InMemFetcher) AddUtxo(pkScript []byte, utxos ...UTXO) {
+	for _, utxo := range utxos {
+		key := utxo.String()
+		txOut := wire.TxOut{
+			Value:    utxo.Amount,
+			PkScript: pkScript,
+		}
+		fetcher.cache.Set(key, txOut)
+	}
+}
+
+func (fetcher InMemFetcher) FetchPrevOutput(outpoint wire.OutPoint) *wire.TxOut {
+	key := outpoint.String()
+	val, ok := fetcher.cache.Get(key)
+	if !ok {
+		if fetcher.indexer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			tx, err := fetcher.indexer.GetTx(ctx, outpoint.Hash.String())
+			if err != nil {
+				return nil
+			}
+			if len(tx.VOUTs) > int(outpoint.Index) {
+				out := tx.VOUTs[outpoint.Index]
+				pkScript, err := hex.DecodeString(out.ScriptPubKey)
+				if err != nil {
+					return nil
+				}
+				return &wire.TxOut{
+					Value:    int64(out.Value),
+					PkScript: pkScript,
+				}
+			}
+		}
+		return nil
+	}
+	return &val
 }

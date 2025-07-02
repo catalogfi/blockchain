@@ -37,10 +37,12 @@ var _ = Describe("Bitcoin scripts", func() {
 			utxos, err := indexer.GetUTXOs(context.Background(), addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), btctest.RandomFeeRate()
-			fundingRecipients := []btc.Recipient{btc.NewRecipient(addr.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(addr, amount)
+			Expect(err).To(BeNil())
+			fundingRecipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			fundingTx, err := btc.BuildTx(network, feeMode, nil, utxos, fundingRecipients, addr1)
+			fundingTx, err := btc.BuildTx(feeMode, nil, utxos, fundingRecipients, addr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the funding tx")
@@ -53,7 +55,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			utxos1 := []btc.UTXO{btc.NewUtxo(fundingTx.TxHash().String(), 0, amount)}
 			sizer.AddUtxos(0, btc.RedeemMultisigSigScriptSize, utxos1...)
 			feeMode = btc.MinFeeRateMode(feeRate, sizer)
-			redeemTx, err := btc.BuildTx(network, feeMode, utxos1, nil, nil, addr2)
+			redeemTx, err := btc.BuildTx(feeMode, utxos1, nil, nil, addr2)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the redeem tx")
@@ -113,7 +115,7 @@ var _ = Describe("Bitcoin scripts", func() {
 	// 				Amount: amount,
 	// 			},
 	// 		}
-	// 		fundingTx, err := btc.BuildTx(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
+	// 		fundingTx, err := btc.BuildTx( feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
 	// 		Expect(err).To(BeNil())
 	//
 	// 		By("Sign and submit the funding tx")
@@ -193,7 +195,7 @@ var _ = Describe("Bitcoin scripts", func() {
 	// 			BaseSize:   0,
 	// 			SegwitSize: btc.RedeemHtlcRedeemSigScriptSize(len(secret)),
 	// 		}
-	// 		htlcSpendTx, err := btc.BuildTx(network, feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
+	// 		htlcSpendTx, err := btc.BuildTx( feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
 	// 		Expect(err).To(BeNil())
 	//
 	// 		By("Sign and submit the tx")
@@ -241,7 +243,7 @@ var _ = Describe("Bitcoin scripts", func() {
 	// 				Amount: amount,
 	// 			},
 	// 		}
-	// 		fundingTx, err := btc.BuildTx(network, feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
+	// 		fundingTx, err := btc.BuildTx( feeRate, btc.NewRawInputs(), utxos, btc.P2pkhUpdater, fundingRecipients, p2pkhAddr1)
 	// 		Expect(err).To(BeNil())
 	//
 	// 		By("Sign and submit the fund tx")
@@ -327,7 +329,7 @@ var _ = Describe("Bitcoin scripts", func() {
 	// 			BaseSize:   0,
 	// 			SegwitSize: btc.RedeemHtlcRefundSigScriptSize,
 	// 		}
-	// 		htlcSpendTx, err := btc.BuildTx(network, feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
+	// 		htlcSpendTx, err := btc.BuildTx( feeRate, rawInputs, nil, nil, nil, p2pkhAddr2)
 	// 		Expect(err).To(BeNil())
 	//
 	// 		By("Sign the htlc spend tx")

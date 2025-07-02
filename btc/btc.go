@@ -64,6 +64,14 @@ func NewUtxo(txid string, vout uint32, amount int64) UTXO {
 	}
 }
 
+func UtxoFromOutPoint(outPoint wire.OutPoint, amount int64) UTXO {
+	return UTXO{
+		TxID:   outPoint.Hash.String(),
+		Vout:   outPoint.Index,
+		Amount: amount,
+	}
+}
+
 // String returns a string that identifies this UTXO, it is in the format of "<txid>:<vout>".
 func (utxo UTXO) String() string {
 	return fmt.Sprintf("%v:%v", utxo.TxID, utxo.Vout)
@@ -87,31 +95,12 @@ func (utxo UTXO) ToTxIn() (*wire.TxIn, error) {
 	return wire.NewTxIn(outpoint, nil, nil), nil
 }
 
-// Recipient is a recipient of a transaction. It contains the address and the amount to be sent.
-type Recipient struct {
-	To     string `json:"to"`
-	Amount int64  `json:"amount"`
-}
-
-// NewRecipient constructs a new Recipient object with the given address and amount.
-func NewRecipient(to string, amount int64) Recipient {
-	return Recipient{
-		To:     to,
-		Amount: amount,
-	}
-}
-
-// ToTxOut converts the Recipient to a `*wire.TxOut` so it can be easily added to a new tx.
-func (recipient Recipient) ToTxOut(network *chaincfg.Params) (*wire.TxOut, error) {
-	toAddress, err := btcutil.DecodeAddress(recipient.To, network)
+func NewTxOutFromAddress(addr btcutil.Address, amount int64) (*wire.TxOut, error) {
+	toScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		return nil, err
 	}
-	toScript, err := txscript.PayToAddrScript(toAddress)
-	if err != nil {
-		return nil, err
-	}
-	return wire.NewTxOut(recipient.Amount, toScript), nil
+	return wire.NewTxOut(amount, toScript), nil
 }
 
 // PublicKeyAddress generates a Bitcoin address from a given public key, depending on the specified address type.
@@ -209,7 +198,7 @@ func RbfModeFromPrevTx(client Client, txid string, sizer *SizeEstimator) (FeeMod
 // transaction will be picked to cover the output amount and fees. The `recipients` includes a list of target addresses
 // and the associated amounts to be sent.  If there's any change, it will be sent back to the `changeAddr`.
 // If `changeAddr` is nil, change will be spent as fees.
-func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, recipients []Recipient, changeAddr btcutil.Address) (*wire.MsgTx, error) {
+func BuildTx(feeReq FeeMode, inputs, utxos []UTXO, txOuts []*wire.TxOut, changeAddr btcutil.Address) (*wire.MsgTx, error) {
 	tx := wire.NewMsgTx(DefaultTxVersion)
 	totalIn, totalOut := int64(0), int64(0)
 
@@ -225,13 +214,9 @@ func BuildTx(network *chaincfg.Params, feeReq FeeMode, inputs, utxos []UTXO, rec
 		tx.AddTxIn(txIn)
 		totalIn += utxo.Amount
 	}
-	for _, recipient := range recipients {
-		txOut, err := recipient.ToTxOut(network)
-		if err != nil {
-			return nil, err
-		}
+	for _, txOut := range txOuts {
 		tx.AddTxOut(txOut)
-		totalOut += recipient.Amount
+		totalOut += txOut.Value
 	}
 
 	// Keep adding utxos to make sure it has enough input to cover the output + fees.

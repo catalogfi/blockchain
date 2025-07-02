@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -56,7 +55,11 @@ func (client *Client) NewAccount(pub *btcec.PublicKey) (string, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf(response.Status)
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 
 	var resp struct {
@@ -121,7 +124,11 @@ func (client *Client) GetTransactions(address string) ([]Transaction, error) {
 		return nil, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf(response.Status)
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 	var txs []Transaction
 	if err := json.NewDecoder(response.Body).Decode(&txs); err != nil {
@@ -140,7 +147,12 @@ func (client *Client) GetLatestTransaction(address string) (*Transaction, error)
 		if response.StatusCode == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf(response.Status)
+
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 	var tx Transaction
 	if err := json.NewDecoder(response.Body).Decode(&tx); err != nil {
@@ -159,7 +171,11 @@ func (client *Client) GetTransactionByNonce(address string, nonce int) (*Transac
 		if response.StatusCode == http.StatusNotFound {
 			return nil, nil
 		}
-		return nil, fmt.Errorf(response.Status)
+		msg, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
 	}
 	var tx Transaction
 	if err := json.NewDecoder(response.Body).Decode(&tx); err != nil {
@@ -194,7 +210,6 @@ func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backu
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("update tx = %v", string(data))
 
 	req, err := http.NewRequest(http.MethodPut, path, bytes.NewBuffer(data))
 	if err != nil {
@@ -243,7 +258,6 @@ func (client *Client) NewMergeTx(tx *wire.MsgTx) error {
 	}{
 		hex.EncodeToString(buff.Bytes()),
 	}
-	log.Printf("merge data = %v", hex.EncodeToString(buff.Bytes()))
 	data, err := json.Marshal(request)
 	if err != nil {
 		return err

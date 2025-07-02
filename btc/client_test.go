@@ -93,7 +93,7 @@ var _ = Describe("bitcoin client", func() {
 				}
 				sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 				feeMode := btc.MinFeeRateMode(10000, sizer)
-				tx1, err := btc.BuildTx(network, feeMode, utxos, nil, nil, addr)
+				tx1, err := btc.BuildTx(feeMode, utxos, nil, nil, addr)
 				Expect(err).To(BeNil())
 				Expect(btc.SignTx(waddrmgr.PubKeyHash, tx1, key, utxos)).Should(Succeed())
 				Expect(client.SubmitTx(ctx, tx1)).Should(Succeed())
@@ -120,10 +120,12 @@ var _ = Describe("bitcoin client", func() {
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
 			Expect(err).To(BeNil())
 			amount := int64(1e5)
-			recipients := []btc.Recipient{btc.NewRecipient(pkAddr.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(pkAddr, amount)
+			Expect(err).To(BeNil())
+			recipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(10000, sizer)
-			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, pkAddr)
+			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
@@ -150,15 +152,11 @@ var _ = Describe("bitcoin client", func() {
 			Expect(errors.Is(err, btc.ErrAlreadyInUtxoSet)).Should(BeTrue())
 
 			By("Try construct a new transaction spending the same input")
-			recipients1 := []btc.Recipient{
-				{
-					To:     pkAddr.EncodeAddress(),
-					Amount: 2 * amount,
-				},
-			}
-
+			recipient1, err := btc.NewTxOutFromAddress(pkAddr, 2*amount)
+			Expect(err).To(BeNil())
+			recipients1 := []*wire.TxOut{recipient1}
 			feeMode1 := btc.FixedFeesMode(1000)
-			transaction1, err := btc.BuildTx(network, feeMode1, nil, utxos, recipients1, pkAddr)
+			transaction1, err := btc.BuildTx(feeMode1, nil, utxos, recipients1, pkAddr)
 			Expect(err).To(BeNil())
 			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
 
@@ -185,10 +183,12 @@ var _ = Describe("bitcoin client", func() {
 			utxos, err := indexer.GetUTXOs(ctx, pkAddr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), btctest.RandomFeeRate()
-			recipients := []btc.Recipient{btc.NewRecipient(pkAddr2.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(pkAddr2, amount)
+			Expect(err).To(BeNil())
+			recipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, pkAddr1)
+			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")

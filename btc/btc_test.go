@@ -34,10 +34,13 @@ var _ = Describe("Bitcoin", func() {
 					utxos, err := indexer.GetUTXOs(ctx, addr1)
 					Expect(err).To(BeNil())
 					amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+					recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+					Expect(err).To(BeNil())
+					recipients := []*wire.TxOut{recipient}
+
 					sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 					feeMode := btc.MinFeeRateMode(feeRate, sizer)
-					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+					transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 					Expect(err).To(BeNil())
 
 					By("Sign and submit the fund tx")
@@ -70,9 +73,11 @@ var _ = Describe("Bitcoin", func() {
 					utxos, err := indexer.GetUTXOs(ctx, addr1)
 					Expect(err).To(BeNil())
 					amount, fees := int64(1e7), int64(500+rand.Intn(1000))
-					recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+					recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+					Expect(err).To(BeNil())
+					recipients := []*wire.TxOut{recipient}
 					feeMode := btc.FixedFeesMode(fees)
-					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+					transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 					Expect(err).To(BeNil())
 
 					By("Sign and submit the fund tx")
@@ -107,10 +112,12 @@ var _ = Describe("Bitcoin", func() {
 							utxos, err := indexer.GetUTXOs(ctx, addr1)
 							Expect(err).To(BeNil())
 							amount := int64(1e7)
-							recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+							recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+							Expect(err).To(BeNil())
+							recipients := []*wire.TxOut{recipient}
 							sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 							feeMode := btc.MinFeeRateMode(feeRate, sizer)
-							tx1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+							tx1, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 							Expect(err).To(BeNil())
 
 							By("Sign and submit the fund tx")
@@ -124,7 +131,7 @@ var _ = Describe("Bitcoin", func() {
 							vsize := (query.Weight + 3) / 4
 							prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 							feeMode1 := btc.RbfMode(0, prevFeeRate, query.Fee, sizer)
-							tx2, err := btc.BuildTx(network, feeMode1, utxos, nil, recipients, addr1)
+							tx2, err := btc.BuildTx(feeMode1, utxos, nil, recipients, addr1)
 							Expect(err).To(BeNil())
 
 							if addrType == waddrmgr.TaprootPubKey {
@@ -158,10 +165,12 @@ var _ = Describe("Bitcoin", func() {
 						utxos, err := indexer.GetUTXOs(ctx, addr1)
 						Expect(err).To(BeNil())
 						amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+						Expect(err).To(BeNil())
+						recipients := []*wire.TxOut{recipient}
 						sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 						feeMode := btc.MinFeeRateMode(feeRate, sizer)
-						tx1, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+						tx1, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx")
@@ -176,7 +185,7 @@ var _ = Describe("Bitcoin", func() {
 						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 						minFeerate := prevFeeRate + 20e3
 						feeMode1 := btc.RbfMode(minFeerate, prevFeeRate, query.Fee, sizer)
-						tx2, err := btc.BuildTx(network, feeMode1, utxos, nil, recipients, addr1)
+						tx2, err := btc.BuildTx(feeMode1, utxos, nil, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Replacement tx should be accepted")
@@ -209,10 +218,12 @@ var _ = Describe("Bitcoin", func() {
 						utxos1, err := indexer.GetUTXOs(ctx, addr1)
 						Expect(err).To(BeNil())
 						amount, feeRate := int64(1e7), btc.SatoshiPerKb(100e3)
-						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+						Expect(err).To(BeNil())
+						recipients := []*wire.TxOut{recipient}
 						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
 						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						tx1, err := btc.BuildTx(feeMode1, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
@@ -226,7 +237,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
 						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(1e3), sizer2)
-						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						tx2, err := btc.BuildTx(feeMode2, utxos2, nil, nil, addr2)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
@@ -244,7 +255,7 @@ var _ = Describe("Bitcoin", func() {
 						vsize := (query.Weight + 3) / 4
 						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients, addr1)
+						tx3, err := btc.BuildTx(feeMode3, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						if addrType == waddrmgr.TaprootPubKey {
@@ -274,10 +285,12 @@ var _ = Describe("Bitcoin", func() {
 						utxos1, err := indexer.GetUTXOs(ctx, addr1)
 						Expect(err).To(BeNil())
 						amount, feeRate := int64(1e7), btc.SatoshiPerKb(100e3)
-						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+						Expect(err).To(BeNil())
+						recipients := []*wire.TxOut{recipient}
 						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
 						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						tx1, err := btc.BuildTx(feeMode1, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
@@ -291,7 +304,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
 						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(1e3), sizer2)
-						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						tx2, err := btc.BuildTx(feeMode2, utxos2, nil, nil, addr2)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
@@ -309,11 +322,13 @@ var _ = Describe("Bitcoin", func() {
 						vsize := (query.Weight + 3) / 4
 						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-						recipients1 := make([]btc.Recipient, 20)
+
+						recipients1 := make([]*wire.TxOut, 20)
 						for i := 0; i < 20; i++ {
-							recipients1[i] = btc.NewRecipient(addr2.EncodeAddress(), amount/10)
+							recipients1[i], err = btc.NewTxOutFromAddress(addr2, amount/10)
+							Expect(err).To(BeNil())
 						}
-						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients1, addr1)
+						tx3, err := btc.BuildTx(feeMode3, nil, utxos1, recipients1, addr1)
 						Expect(err).To(BeNil())
 
 						if addrType == waddrmgr.TaprootPubKey {
@@ -343,10 +358,12 @@ var _ = Describe("Bitcoin", func() {
 						utxos1, err := indexer.GetUTXOs(ctx, addr1)
 						Expect(err).To(BeNil())
 						amount, feeRate := int64(1e7), btc.SatoshiPerKb(1e3)
-						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+						Expect(err).To(BeNil())
+						recipients := []*wire.TxOut{recipient}
 						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
 						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						tx1, err := btc.BuildTx(feeMode1, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
@@ -360,7 +377,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
 						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(100e3), sizer2)
-						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						tx2, err := btc.BuildTx(feeMode2, utxos2, nil, nil, addr2)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
@@ -378,7 +395,7 @@ var _ = Describe("Bitcoin", func() {
 						vsize := (query.Weight + 3) / 4
 						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
 						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients, addr1)
+						tx3, err := btc.BuildTx(feeMode3, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						if addrType == waddrmgr.TaprootPubKey {
@@ -408,10 +425,12 @@ var _ = Describe("Bitcoin", func() {
 						utxos1, err := indexer.GetUTXOs(ctx, addr1)
 						Expect(err).To(BeNil())
 						amount, feeRate := int64(1e7), btc.SatoshiPerKb(50e3)
-						recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+						recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+						Expect(err).To(BeNil())
+						recipients := []*wire.TxOut{recipient}
 						sizer1 := btc.NewSizeEstimatorOfAddrType(addrType, utxos1...)
 						feeMode1 := btc.MinFeeRateMode(feeRate, sizer1)
-						tx1, err := btc.BuildTx(network, feeMode1, nil, utxos1, recipients, addr1)
+						tx1, err := btc.BuildTx(feeMode1, nil, utxos1, recipients, addr1)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
@@ -425,7 +444,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 						sizer2 := btc.NewSizeEstimatorOfAddrType(addrType, utxos2...)
 						feeMode2 := btc.MinFeeRateMode(btc.SatoshiPerKb(55e3), sizer2)
-						tx2, err := btc.BuildTx(network, feeMode2, utxos2, nil, nil, addr2)
+						tx2, err := btc.BuildTx(feeMode2, utxos2, nil, nil, addr2)
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
@@ -442,12 +461,13 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 						vsize := (query.Weight + 3) / 4
 						prevFeeRate := btc.NewSatoshiPerKb(query.Fee, vsize)
-						recipients1 := make([]btc.Recipient, 20)
+						recipients1 := make([]*wire.TxOut, 20)
 						for i := 0; i < 20; i++ {
-							recipients1[i] = btc.NewRecipient(addr2.EncodeAddress(), amount/10)
+							recipients1[i], err = btc.NewTxOutFromAddress(addr2, amount/10)
+							Expect(err).To(BeNil())
 						}
 						feeMode3 := btc.RbfMode(0, prevFeeRate, int64(prevFees), sizer1)
-						tx3, err := btc.BuildTx(network, feeMode3, nil, utxos1, recipients1, addr1)
+						tx3, err := btc.BuildTx(feeMode3, nil, utxos1, recipients1, addr1)
 						Expect(err).To(BeNil())
 
 						if addrType == waddrmgr.TaprootPubKey {
@@ -480,7 +500,7 @@ var _ = Describe("Bitcoin", func() {
 					feeRate := btctest.RandomFeeRate()
 					sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 					feeMode := btc.MinFeeRateMode(feeRate, sizer)
-					transaction, err := btc.BuildTx(network, feeMode, nil, utxos, nil, addr1)
+					transaction, err := btc.BuildTx(feeMode, nil, utxos, nil, addr1)
 					Expect(err).To(BeNil())
 
 					By("Construct a message in the OP_RETURN script")
@@ -522,10 +542,12 @@ var _ = Describe("Bitcoin", func() {
 
 				By("Try using the utxo set to build a tx")
 				amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-				recipients := []btc.Recipient{btc.NewRecipient(addr1.EncodeAddress(), amount)}
+				recipient, err := btc.NewTxOutFromAddress(addr1, amount)
+				Expect(err).To(BeNil())
+				recipients := []*wire.TxOut{recipient}
 				sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 				feeMode := btc.MinFeeRateMode(feeRate, sizer)
-				transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+				transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 				Expect(err).To(BeNil())
 
 				By("The built tx should not use the uneconomical utxo")
@@ -551,10 +573,12 @@ var _ = Describe("Bitcoin", func() {
 			utxos, err := indexer.GetUTXOs(ctx, addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e7), btctest.RandomFeeRate()
-			recipients := []btc.Recipient{btc.NewRecipient(addr2.EncodeAddress(), amount)}
+			recipient, err := btc.NewTxOutFromAddress(addr2, amount)
+			Expect(err).To(BeNil())
+			recipients := []*wire.TxOut{recipient}
 			sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			transaction, err := btc.BuildTx(network, feeMode, nil, utxos, recipients, addr1)
+			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")

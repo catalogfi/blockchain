@@ -446,47 +446,47 @@ func IsMultiSigLeaf(script []byte) (bool, string) {
 
 // ValidateInstantRefundTx checks if the given tx is a valid instant refund tx of the htlc. It assumes the tx will only
 // have one input and one output. Input's witness stack will only contain one item which is the initiator's signature.
-func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Params) (UTXO, Recipient, error) {
+func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Params) (UTXO, *wire.TxOut, error) {
 	if len(tx.TxIn) != 1 {
-		return UTXO{}, Recipient{}, errors.New("invalid number of inputs")
+		return UTXO{}, nil, errors.New("invalid number of inputs")
 	}
 	if len(tx.TxOut) != 1 {
-		return UTXO{}, Recipient{}, errors.New("invalid number of outputs")
+		return UTXO{}, nil, errors.New("invalid number of outputs")
 	}
 	if len(tx.TxIn[0].Witness) != 1 {
-		return UTXO{}, Recipient{}, errors.New("invalid witness length")
+		return UTXO{}, nil, errors.New("invalid witness length")
 	}
 	sigBytes := tx.TxIn[0].Witness[0]
 	amount := tx.TxOut[0].Value
 	if amount < DustAmount {
-		return UTXO{}, Recipient{}, errors.New("amount lower than dust amount")
+		return UTXO{}, nil, errors.New("amount lower than dust amount")
 	}
 
 	// Verify signature
 	script, err := htlc.P2trScript()
 	if err != nil {
-		return UTXO{}, Recipient{}, err
+		return UTXO{}, nil, err
 	}
 	fetcher := txscript.NewCannedPrevOutputFetcher(script, amount)
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
 	leaf, _ := htlc.Leaf(HtlcActionInstantRefund)
 	tapSigHashes, err := txscript.CalcTapscriptSignaturehash(sigHashes, SigHashSingleAnyoneCanPay, tx, 0, fetcher, leaf)
 	if err != nil {
-		return UTXO{}, Recipient{}, err
+		return UTXO{}, nil, err
 	}
 	if len(sigBytes) == schnorr.SignatureSize+1 {
 		sigBytes = sigBytes[:len(sigBytes)-1]
 	}
 	signature, err := schnorr.ParseSignature(sigBytes)
 	if err != nil {
-		return UTXO{}, Recipient{}, err
+		return UTXO{}, nil, err
 	}
 	pub, err := schnorr.ParsePubKey(htlc.InitiatorPubKey)
 	if err != nil {
-		return UTXO{}, Recipient{}, err
+		return UTXO{}, nil, err
 	}
 	if ok := signature.Verify(tapSigHashes, pub); !ok {
-		return UTXO{}, Recipient{}, errors.New("invalid signature")
+		return UTXO{}, nil, errors.New("invalid signature")
 	}
 
 	// Parse the input's utxo and output address from the tx
@@ -495,19 +495,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 		Vout:   tx.TxIn[0].PreviousOutPoint.Index,
 		Amount: amount,
 	}
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(tx.TxOut[0].PkScript, network)
-	if err != nil {
-		return UTXO{}, Recipient{}, err
-	}
-	if len(addrs) != 1 {
-		return UTXO{}, Recipient{}, errors.New("invalid output address")
-	}
-	recipient := Recipient{
-		To:     addrs[0].EncodeAddress(),
-		Amount: tx.TxOut[0].Value,
-	}
-
-	return utxo, recipient, nil
+	return utxo, tx.TxOut[0], nil
 }
 
 // isWaitTimeOpCode returns if the given opCode is a valid opCode for a `OP_CHECKSEQUENCEVERIFY` params.
