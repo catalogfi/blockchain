@@ -253,6 +253,48 @@ var (
 	}
 )
 
+// Asset on Corn
+var (
+	// Mainnet
+
+	AssetBtcnCorn = Asset{
+		Chain:    NewEvmChain(Corn),
+		Address:  Native,
+		Decimals: 8,
+		Symbol:   "BTCN",
+	}
+
+	// Testnet
+
+	AssetBtcnCornTestnet = Asset{
+		Chain:    NewEvmChain(CornTestnet),
+		Address:  Native,
+		Decimals: 8,
+		Symbol:   "BTCN",
+	}
+)
+
+// Asset on Corn
+var (
+	// Mainnet
+
+	AssetBtcBotanix = Asset{
+		Chain:    NewEvmChain(Botanix),
+		Address:  Native,
+		Decimals: 8,
+		Symbol:   "BTC",
+	}
+
+	// Testnet
+
+	AssetBtcBotanixTestnet = Asset{
+		Chain:    NewEvmChain(BotanixTestnet),
+		Address:  Native,
+		Decimals: 8,
+		Symbol:   "BTC",
+	}
+)
+
 func HtlcContractAddress(asset Asset) common.Address {
 	switch {
 	case asset.Chain.Name() == Ethereum:

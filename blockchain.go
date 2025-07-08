@@ -33,8 +33,10 @@ const (
 	HyperEvm        Name = "hyperevm"
 	HyperEvmTestnet Name = "hyperevm_testnet"
 
+	Citrea        Name = "citrea"
 	CitreaTestnet Name = "citrea_testnet"
 
+	Monad        Name = "monad"
 	MonadTestnet Name = "monad_testnet"
 
 	Starknet        Name = "starknet"
@@ -47,6 +49,12 @@ const (
 
 	Unichain        Name = "unichain"
 	UnichainSepolia Name = "unichain_sepolia"
+
+	Botanix        Name = "botanix"
+	BotanixTestnet Name = "botanix_testnet"
+
+	Corn        Name = "corn"
+	CornTestnet Name = "corn_testnet"
 )
 
 type Type string
@@ -110,10 +118,12 @@ func ParseChainName(name Name) (Chain, error) {
 		Base, BaseSepolia,
 		Bera, BeraBepolia,
 		HyperEvm, HyperEvmTestnet,
-		CitreaTestnet,
-		MonadTestnet,
+		Citrea, CitreaTestnet,
+		Monad, MonadTestnet,
 		Starknet, StarknetSepolia, StarknetDevnet,
-		Unichain, UnichainSepolia:
+		Unichain, UnichainSepolia,
+		Botanix, BotanixTestnet,
+		Corn, CornTestnet:
 		return NewEvmChain(name), nil
 	case Solana, SolanaDevnet, SolanaLocalnet:
 		return NewSolanaChain(name), nil
