@@ -46,7 +46,7 @@ var _ = Describe("Bitcoin scripts", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the funding tx")
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, fundingTx, key1, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, fundingTx, key1, utxos)).Should(Succeed())
 			Expect(client.SubmitTx(ctx, fundingTx)).Should(Succeed())
 			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(fundingTx.TxHash().String())))
 			time.Sleep(time.Second)

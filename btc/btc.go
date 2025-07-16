@@ -64,6 +64,7 @@ func NewUtxo(txid string, vout uint32, amount int64) UTXO {
 	}
 }
 
+// UtxoFromOutPoint contructs a new UTXO from a `wire.OutPoint`. It won't have the status field.
 func UtxoFromOutPoint(outPoint wire.OutPoint, amount int64) UTXO {
 	return UTXO{
 		TxID:   outPoint.Hash.String(),
@@ -72,7 +73,7 @@ func UtxoFromOutPoint(outPoint wire.OutPoint, amount int64) UTXO {
 	}
 }
 
-// String returns a string that identifies this UTXO, it is in the format of "<txid>:<vout>".
+// String returns a string that identifies this UTXO, it is in the format of "txid:vout".
 func (utxo UTXO) String() string {
 	return fmt.Sprintf("%v:%v", utxo.TxID, utxo.Vout)
 }
@@ -95,6 +96,7 @@ func (utxo UTXO) ToTxIn() (*wire.TxIn, error) {
 	return wire.NewTxIn(outpoint, nil, nil), nil
 }
 
+// NewTxOutFromAddress construct a new `*wire.TxOut` from an address and amount, so it can be used in btc transaction.
 func NewTxOutFromAddress(addr btcutil.Address, amount int64) (*wire.TxOut, error) {
 	toScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
@@ -128,12 +130,12 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// FeeMode defines the rules on how to calculate the fees when building a transaction. It can be called after a tx is
-// build and it will return the minimum fees(in sats) required by this mode.
+// FeeMode defines the rules on how to calculate the fees when building a transaction. It will be called after an
+// unsigned tx is build and it will return the minimum fees(in sats) required by this mode.
 type FeeMode func(tx *wire.MsgTx) (int64, error)
 
 // MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be at lease the given `feeRate`
-func MinFeeRateMode(feeRate SatoshiPerKb, sizer *SizeEstimator) FeeMode {
+func MinFeeRateMode(feeRate SatoshiPerKb, sizer SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vs, err := sizer.EstimateTxVirtualSize(tx)
 		if err != nil {
@@ -159,12 +161,12 @@ func GaslessMode() FeeMode {
 
 // RbfMode computes the required fees for a transaction to be replace-by-fee (RBF) compliant.
 // `minFeeRate` is an optional parameter which set the minimum fee rate you want to use, similar to `MinFeeRateMode`.
-// Use 0 if you don't want to have a minimum fee rate.
+// Use 0 if you don't want to need a minimum fee rate.
 // `prevFeeRate` is the maximum fee rate of all directly conflicting transactions. The new fee rate has to be greater
 // than this according to the mempool policy.
-// `prevFees`is the sum of fees of paid by the original transactions. This includes teh replacement transaction and all
+// `prevFees`is the sum of fees of paid by the original transactions. This includes the replacement transaction and all
 // its descendants.
-func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEstimator) FeeMode {
+func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer SizeEstimator) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
 		vsize, err := sizer.EstimateTxVirtualSize(tx)
 		if err != nil {
@@ -177,7 +179,7 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer *SizeEs
 	}
 }
 
-func RbfModeFromPrevTx(client Client, txid string, sizer *SizeEstimator) (FeeMode, error) {
+func RbfModeFromPrevTx(client Client, txid string, sizer SizeEstimator) (FeeMode, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -372,7 +374,7 @@ func createVoutList(mtx *wire.MsgTx, chainParams *chaincfg.Params, filterAddrMap
 		vout.ScriptPubKey.Type = scriptClass.String()
 		vout.ScriptPubKey.ReqSigs = int32(reqSigs)
 
-		// Address is defined when there's a single well-defined
+		// MustAddress is defined when there's a single well-defined
 		// receiver address. To spend the output a signature for this,
 		// and only this, address is required.
 		if len(encodedAddrs) == 1 && reqSigs <= 1 {
@@ -389,7 +391,6 @@ func createVoutList(mtx *wire.MsgTx, chainParams *chaincfg.Params, filterAddrMap
 // to a raw transaction JSON object.
 // Copied from https://github.com/btcsuite/btcd/rpcserver.go and modified
 func CreateTxRawResult(chainParams *chaincfg.Params, mtx *wire.MsgTx) (*btcjson.TxRawResult, error) {
-
 	mtxHex, err := messageToHex(mtx)
 	if err != nil {
 		return nil, err

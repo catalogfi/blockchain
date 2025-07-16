@@ -71,7 +71,7 @@ var _ = Describe("Indexer client", func() {
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
 			rawTx, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, rawTx, key, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, rawTx, key, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, rawTx)).Should(Succeed())
 
 			By("GetAddressTxs()")
@@ -104,7 +104,7 @@ var _ = Describe("Indexer client", func() {
 			feeMode := btc.MinFeeRateMode(feeRate, sizer)
 			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 
 			By("Submit the transaction")
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
@@ -122,7 +122,7 @@ var _ = Describe("Indexer client", func() {
 			recipients1 := []*wire.TxOut{recipient1}
 			transaction1, err := btc.BuildTx(feeMode, nil, utxos, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, key, utxos)).Should(Succeed())
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
 			err = indexer.SubmitTx(ctx, transaction1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())

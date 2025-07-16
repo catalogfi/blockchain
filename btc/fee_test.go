@@ -174,7 +174,7 @@ var _ = Describe("bitcoin fees", func() {
 
 					estWeight, err := sizer.EstimateTxWeight(transaction)
 					Expect(err).To(BeNil())
-					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+					Expect(btc.QuickSign(addrType, transaction, key1, utxos)).Should(Succeed())
 					actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))
 					Expect(estWeight - int(actualWeight)).Should(BeNumerically(">=", 0))
 
@@ -245,6 +245,12 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 			Expect(btc.AddUtxosToFetcher(fetcher, pkScript2, utxos2...)).Should(Succeed())
 
+			By("Set the sign method for different utxos ")
+			signMap := map[string]btc.SignFunc{}
+			for _, utxo := range utxos1 {
+				signMap[utxo.String()] = btc.SignFuncPubKeyHash(key1, fetcher)
+			}
+
 			By("Build and sign the transaction")
 			diff := map[int]int{}
 			for i := 0; i < 10000; i++ {
@@ -255,13 +261,11 @@ var _ = Describe("bitcoin fees", func() {
 				Expect(err).To(BeNil())
 
 				sigHashes := txscript.NewTxSigHashes(transaction, fetcher)
-				for i := range transaction.TxIn {
-					if i < len(utxos1) {
-						Expect(btc.SignInput(waddrmgr.PubKeyHash, transaction, i, key1, fetcher, sigHashes)).Should(Succeed())
-					} else {
-						Expect(btc.SignInput(waddrmgr.WitnessPubKey, transaction, i, key2, fetcher, sigHashes)).Should(Succeed())
-					}
+				for _, utxo := range utxos2 {
+					signMap[utxo.String()] = btc.SignFuncWitnessPubKey(key2, fetcher, sigHashes)
 				}
+				Expect(btc.SignTx(transaction, signMap)).Should(Succeed())
+
 				actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))
 				Expect(estWeight - int(actualWeight)).Should(BeNumerically(">=", 0))
 				diff[estWeight-int(actualWeight)]++

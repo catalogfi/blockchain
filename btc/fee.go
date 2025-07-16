@@ -1,6 +1,8 @@
 package btc
 
 import (
+	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,8 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/catalogfi/tools"
+	"github.com/catalogfi/tools/pkg/memcache"
 )
 
 const (
@@ -85,16 +89,94 @@ func AddUtxosToFetcher(fetcher *txscript.MultiPrevOutFetcher, script []byte, utx
 	return nil
 }
 
+type InMemFetcher struct {
+	cache   memcache.Cache[wire.TxOut]
+	indexer IndexerClient
+}
+
+func NewInMemFetcher(ttl time.Duration, indexer IndexerClient) (*InMemFetcher, error) {
+	cache, err := tools.NewMemCache[wire.TxOut](memcache.WithTtl(ttl))
+	if err != nil {
+		return nil, err
+	}
+
+	return &InMemFetcher{
+		cache:   cache,
+		indexer: indexer,
+	}, nil
+}
+
+func (fetcher InMemFetcher) AddPrevOut(op wire.OutPoint, txOut *wire.TxOut) {
+	key := op.String()
+	fetcher.cache.Set(key, *txOut)
+}
+
+func (fetcher InMemFetcher) AddUtxo(pkScript []byte, utxos ...UTXO) {
+	for _, utxo := range utxos {
+		key := utxo.String()
+		txOut := wire.TxOut{
+			Value:    utxo.Amount,
+			PkScript: pkScript,
+		}
+		fetcher.cache.Set(key, txOut)
+	}
+}
+
+func (fetcher InMemFetcher) FetchPrevOutput(outpoint wire.OutPoint) *wire.TxOut {
+	key := outpoint.String()
+	val, ok := fetcher.cache.Get(key)
+	if !ok {
+		if fetcher.indexer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			tx, err := fetcher.indexer.GetTx(ctx, outpoint.Hash.String())
+			if err != nil {
+				return nil
+			}
+			if len(tx.VOUTs) > int(outpoint.Index) {
+				out := tx.VOUTs[outpoint.Index]
+				pkScript, err := hex.DecodeString(out.ScriptPubKey)
+				if err != nil {
+					return nil
+				}
+				return &wire.TxOut{
+					Value:    int64(out.Value),
+					PkScript: pkScript,
+				}
+			}
+		}
+		return nil
+	}
+	return &val
+}
+
+// SizeEstimator collects estimated signature's upbound size of UTXOs, it then can be used to estimate the transaction
+// size for fee purpose.
+type SizeEstimator interface {
+
+	// AddUtxos adds the base and segwit weight of the utxos.
+	AddUtxos(base, segwit int, utxos ...UTXO)
+
+	// FetchSize returns the base, segwit size of the give utxo.
+	FetchSize(utxo UTXO) (int, int, error)
+
+	// EstimateTxWeight estimates the total weight of the given tx.
+	EstimateTxWeight(tx *wire.MsgTx) (int, error)
+
+	// EstimateTxVirtualSize estimates the virtual size of the given tx.
+	EstimateTxVirtualSize(tx *wire.MsgTx) (int, error)
+}
+
 // SizeEstimator collects estimated signature size of UTXOs, it then can be used to estimate the transaction size for
 // fee purpose.
-type SizeEstimator struct {
+type sizeEstimator struct {
 	mu            *sync.Mutex
 	baseSizeMap   map[string]int
 	segwitSizeMap map[string]int
 }
 
 // NewSizeEstimator returns an SizeEstimator with some preload UTXOs.
-func NewSizeEstimator(base, segwit int, utxos ...UTXO) *SizeEstimator {
+func NewSizeEstimator(base, segwit int, utxos ...UTXO) SizeEstimator {
 	baseSizeMap := make(map[string]int)
 	segwitSizeMap := make(map[string]int)
 	if base != 0 || segwit != 0 {
@@ -104,7 +186,7 @@ func NewSizeEstimator(base, segwit int, utxos ...UTXO) *SizeEstimator {
 		}
 	}
 
-	return &SizeEstimator{
+	return &sizeEstimator{
 		mu:            new(sync.Mutex),
 		baseSizeMap:   baseSizeMap,
 		segwitSizeMap: segwitSizeMap,
@@ -112,7 +194,7 @@ func NewSizeEstimator(base, segwit int, utxos ...UTXO) *SizeEstimator {
 }
 
 // NewSizeEstimatorOfAddrType returns an SizeEstimator basing on the provided address type.
-func NewSizeEstimatorOfAddrType(addrType waddrmgr.AddressType, utxos ...UTXO) *SizeEstimator {
+func NewSizeEstimatorOfAddrType(addrType waddrmgr.AddressType, utxos ...UTXO) SizeEstimator {
 	switch addrType {
 	case waddrmgr.PubKeyHash:
 		return NewSizeEstimator(BaseSizeP2PKH, SegwitSizeP2PKH, utxos...)
@@ -126,7 +208,7 @@ func NewSizeEstimatorOfAddrType(addrType waddrmgr.AddressType, utxos ...UTXO) *S
 }
 
 // AddUtxos adds a list of UTXOs and their estimated base and segwit size
-func (estimator *SizeEstimator) AddUtxos(base, segwit int, utxos ...UTXO) {
+func (estimator *sizeEstimator) AddUtxos(base, segwit int, utxos ...UTXO) {
 	estimator.mu.Lock()
 	defer estimator.mu.Unlock()
 
@@ -136,7 +218,7 @@ func (estimator *SizeEstimator) AddUtxos(base, segwit int, utxos ...UTXO) {
 	}
 }
 
-func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
+func (estimator *sizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 	estimator.mu.Lock()
 	defer estimator.mu.Unlock()
 
@@ -151,7 +233,7 @@ func (estimator *SizeEstimator) FetchSize(utxo UTXO) (int, int, error) {
 	return base, segwit, nil
 }
 
-func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
+func (estimator *sizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
 	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
 	legacy := 0
 	for _, input := range tx.TxIn {
@@ -187,7 +269,7 @@ func (estimator *SizeEstimator) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
 // EstimateTxVirtualSize returns the estimated size of the given transaction. It would be an upperbound, and usually the
 // fees might be a few bytes less. It assumes the tx is not signed at all. It would return an error if one of the utxo
 // is unknown in terms of signature size.
-func (estimator *SizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
+func (estimator *sizeEstimator) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
 	weight, err := estimator.EstimateTxWeight(tx)
 	if err != nil {
 		return 0, err

@@ -151,9 +151,9 @@ func NewHTLC(initiatorPubKey, redeemerPubKey, secretHash []byte, timelock, amoun
 	}, nil
 }
 
-// Address returns the address of the htlc script. We panic for the error since it shouldn't happen, this will make
+// MustAddress returns the address of the htlc script. We panic for the error since it shouldn't happen, this will make
 // things easier for the caller.
-func (htlc *HTLC) Address(network *chaincfg.Params) btcutil.Address {
+func (htlc *HTLC) MustAddress(network *chaincfg.Params) btcutil.Address {
 	if htlc.tree == nil {
 		panic(fmt.Errorf("empty htlc tree"))
 	}
@@ -210,7 +210,7 @@ func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
 
 // Utxo finds the initiation utxo of the htlc.
 func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
-	addr := htlc.Address(network)
+	addr := htlc.MustAddress(network)
 	utxos, err := indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return UTXO{}, err
@@ -225,7 +225,7 @@ func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer In
 }
 
 func (htlc *HTLC) RefundableUtxos(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) ([]UTXO, error) {
-	addr := htlc.Address(network)
+	addr := htlc.MustAddress(network)
 	utxos, err := indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return nil, err

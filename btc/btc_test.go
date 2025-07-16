@@ -44,7 +44,7 @@ var _ = Describe("Bitcoin", func() {
 					Expect(err).To(BeNil())
 
 					By("Sign and submit the fund tx")
-					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+					Expect(btc.QuickSign(addrType, transaction, key1, utxos)).Should(Succeed())
 					Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 					By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
 
@@ -81,7 +81,7 @@ var _ = Describe("Bitcoin", func() {
 					Expect(err).To(BeNil())
 
 					By("Sign and submit the fund tx")
-					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+					Expect(btc.QuickSign(addrType, transaction, key1, utxos)).Should(Succeed())
 					Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 					By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
 
@@ -121,7 +121,7 @@ var _ = Describe("Bitcoin", func() {
 							Expect(err).To(BeNil())
 
 							By("Sign and submit the fund tx")
-							Expect(btc.SignTx(addrType, tx1, key1, utxos)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx1, key1, utxos)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 							By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -137,13 +137,13 @@ var _ = Describe("Bitcoin", func() {
 							if addrType == waddrmgr.TaprootPubKey {
 								By("Tx should be rejected if we pay one sat less in fee")
 								tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value + 1
-								Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+								Expect(btc.QuickSign(addrType, tx2, key1, utxos)).Should(Succeed())
 								Expect(indexer.SubmitTx(ctx, tx2)).ShouldNot(Succeed())
 								tx2.TxOut[len(tx2.TxOut)-1].Value = tx2.TxOut[len(tx2.TxOut)-1].Value - 1
 							}
 
 							By("Replacement tx should be accepted")
-							Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx2, key1, utxos)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 							By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 						}
@@ -174,7 +174,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx")
-						Expect(btc.SignTx(addrType, tx1, key1, utxos)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx1, key1, utxos)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -189,7 +189,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Replacement tx should be accepted")
-						Expect(btc.SignTx(addrType, tx2, key1, utxos)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx2, key1, utxos)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
@@ -227,7 +227,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
-						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx1, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -241,7 +241,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
-						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx2, key2, utxos2)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
@@ -261,13 +261,13 @@ var _ = Describe("Bitcoin", func() {
 						if addrType == waddrmgr.TaprootPubKey {
 							By("Tx should be rejected if we pay one sat less in fee")
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
 						}
 
 						By("Replacement tx should be accepted")
-						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
 					}
@@ -294,7 +294,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
-						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx1, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -308,7 +308,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
-						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx2, key2, utxos2)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
@@ -334,13 +334,13 @@ var _ = Describe("Bitcoin", func() {
 						if addrType == waddrmgr.TaprootPubKey {
 							By("Tx should be rejected if we pay one sat less in fee")
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
 						}
 
 						By("Replacement tx should be accepted")
-						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
 					}
@@ -367,7 +367,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
-						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx1, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -381,7 +381,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
-						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx2, key2, utxos2)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
@@ -401,13 +401,13 @@ var _ = Describe("Bitcoin", func() {
 						if addrType == waddrmgr.TaprootPubKey {
 							By("Tx should be rejected if we pay one sat less in fee")
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
 						}
 
 						By("Replacement tx should be accepted")
-						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
 					}
@@ -434,7 +434,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx1")
-						Expect(btc.SignTx(addrType, tx1, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx1, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx1)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx1.TxHash().String()))
 
@@ -448,7 +448,7 @@ var _ = Describe("Bitcoin", func() {
 						Expect(err).To(BeNil())
 
 						By("Sign and submit the fund tx2")
-						Expect(btc.SignTx(addrType, tx2, key2, utxos2)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx2, key2, utxos2)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx2)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx2.TxHash().String()))
 
@@ -473,13 +473,13 @@ var _ = Describe("Bitcoin", func() {
 						if addrType == waddrmgr.TaprootPubKey {
 							By("Tx should be rejected if we pay one sat less in fee")
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value + 1
-							Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+							Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 							Expect(indexer.SubmitTx(ctx, tx3)).ShouldNot(Succeed())
 							tx3.TxOut[len(tx3.TxOut)-1].Value = tx3.TxOut[len(tx3.TxOut)-1].Value - 1
 						}
 
 						By("Replacement tx should be accepted")
-						Expect(btc.SignTx(addrType, tx3, key1, utxos1)).Should(Succeed())
+						Expect(btc.QuickSign(addrType, tx3, key1, utxos1)).Should(Succeed())
 						Expect(indexer.SubmitTx(ctx, tx3)).Should(Succeed())
 						By(color.GreenString("tx hash = %v", tx3.TxHash().String()))
 					}
@@ -517,7 +517,7 @@ var _ = Describe("Bitcoin", func() {
 					})
 
 					By("Sign and submit the fund tx")
-					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+					Expect(btc.QuickSign(addrType, transaction, key1, utxos)).Should(Succeed())
 					Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 					By(color.GreenString("tx hash = %v", transaction.TxHash().String()))
 				}
@@ -582,7 +582,7 @@ var _ = Describe("Bitcoin", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(addrType, transaction, key1, utxos)).Should(Succeed())
 
 			By("Decode the tx")
 			rawTxResult, err := btc.CreateTxRawResult(network, transaction)

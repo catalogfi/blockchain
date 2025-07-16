@@ -95,7 +95,7 @@ var _ = Describe("bitcoin client", func() {
 				feeMode := btc.MinFeeRateMode(10000, sizer)
 				tx1, err := btc.BuildTx(feeMode, utxos, nil, nil, addr)
 				Expect(err).To(BeNil())
-				Expect(btc.SignTx(waddrmgr.PubKeyHash, tx1, key, utxos)).Should(Succeed())
+				Expect(btc.QuickSign(waddrmgr.PubKeyHash, tx1, key, utxos)).Should(Succeed())
 				Expect(client.SubmitTx(ctx, tx1)).Should(Succeed())
 				Eventually(func() error {
 					_, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
@@ -129,7 +129,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, privKey, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, privKey, utxos)).Should(Succeed())
 
 			By("Expect `ErrTxNotFound` before submitting the tx")
 			txid := transaction.TxHash()
@@ -158,7 +158,7 @@ var _ = Describe("bitcoin client", func() {
 			feeMode1 := btc.FixedFeesMode(1000)
 			transaction1, err := btc.BuildTx(feeMode1, nil, utxos, recipients1, pkAddr)
 			Expect(err).To(BeNil())
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
 
 			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
 			err = client.SubmitTx(ctx, transaction1)
@@ -192,7 +192,7 @@ var _ = Describe("bitcoin client", func() {
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.SignTx(waddrmgr.PubKeyHash, transaction, privKey1, utxos)).Should(Succeed())
+			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, privKey1, utxos)).Should(Succeed())
 			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
 
 			By("Expect an error if the utxo is spent")
