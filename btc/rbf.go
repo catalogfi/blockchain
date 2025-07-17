@@ -154,7 +154,7 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 		return Batch{}, err
 	}
 
-	confirmedBatch := Batch{}
+	confirmedBatch := NewEmptyBatch(RBF)
 
 	w.logger.Info("found pending batches", zap.Int("count", len(batches)))
 
@@ -180,11 +180,6 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 				return Batch{}, errors.New("multiple confirmed batches found")
 			}
 		}
-	}
-
-	// If no confirmed batch is found, return an error.
-	if confirmedBatch.Tx.TxID == "" {
-		return Batch{}, errors.New("no confirmed batch found")
 	}
 
 	return confirmedBatch, nil
