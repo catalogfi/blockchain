@@ -182,6 +182,10 @@ func (w *batcherWallet) getConfirmedBatch(c context.Context) (Batch, error) {
 		}
 	}
 
+	if confirmedBatch.Tx.TxID == "" {
+		w.logger.Info("no confirmed batch found, returning empty batch")
+	}
+
 	return confirmedBatch, nil
 }
 
