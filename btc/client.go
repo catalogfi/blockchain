@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -345,13 +347,6 @@ func (client *client) GetNetworkInfo(ctx context.Context) (*btcjson.GetNetworkIn
 	}
 }
 
-type RPCRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	ID      string        `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-}
-
 type Fees struct {
 	Base       float64 `json:"base"`
 	Modified   float64 `json:"modified"`
@@ -377,81 +372,268 @@ type DescendantTransaction struct {
 	Unbroadcast       bool     `json:"unbroadcast"`
 }
 
-type BitcoinRPCClient struct {
-	RpcUser string
-	RpcPass string
-	RpcURL  string
+type Request struct {
+	Version string            `json:"jsonrpc"`
+	ID      uint32            `json:"id"`
+	Method  string            `json:"method"`
+	Params  []json.RawMessage `json:"params"`
 }
 
-func NewBitcoinRPCClient(rpcUser string, rpcPass string, rpcURL string) BitcoinRPCClient {
-	return BitcoinRPCClient{
-		RpcUser: rpcUser,
-		RpcPass: rpcPass,
-		RpcURL:  rpcURL,
+// Response is the raw bytes of a JSON-RPC result, or the error if the response
+// error object was non-null.
+type Response struct {
+	result []byte
+	err    error
+}
+
+// rawResponse is a partially-unmarshaled JSON-RPC response.  For this
+// to be valid (according to JSON-RPC 1.0 spec), ID may not be nil.
+type rawResponse struct {
+	Result json.RawMessage   `json:"result"`
+	Error  *btcjson.RPCError `json:"error"`
+}
+
+func (r rawResponse) Response() Response {
+	if r.Error != nil {
+		return Response{err: r.Error}
+	}
+	return Response{r.Result, nil}
+}
+
+type BitcoinClient struct {
+	RpcUser    string
+	RpcPass    string
+	RpcURL     string
+	httpClient *http.Client
+}
+
+func NewBitcoinClient(rpcUser string, rpcPass string, rpcURL string) BitcoinClient {
+	return BitcoinClient{
+		RpcUser:    rpcUser,
+		RpcPass:    rpcPass,
+		RpcURL:     rpcURL,
+		httpClient: new(http.Client),
 	}
 }
 
-func (b *BitcoinRPCClient) GetDescendantsFee(ctx context.Context, txId string) (int64, error) {
-	verbose := true
-	// Create the JSON-RPC request
-	requestBody := RPCRequest{
-		Jsonrpc: "1.0",
-		ID:      "curltext",
-		Method:  "getmempooldescendants",
-		Params:  []interface{}{txId, verbose},
-	}
-	jsonData, err := json.Marshal(requestBody)
+// GetMempoolDescendants returns all descendants (both direct and indirect) of a transaction in the mempool.
+func (client *BitcoinClient) GetMempoolDescendants(ctx context.Context, txid string) (map[string]DescendantTransaction, error) {
+	method := "getmempooldescendants"
+	params, err := client.packParams(txid, true)
 	if err != nil {
-		return 0, fmt.Errorf("Error marshalling JSON: %w", err)
+		return nil, err
 	}
-
-	// Create a new HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", b.RpcURL, bytes.NewBuffer(jsonData))
+	result, err := client.send(ctx, method, params)
 	if err != nil {
-		return 0, fmt.Errorf("Error creating request: %w", err)
+		if strings.Contains(err.Error(), "Transaction not in mempool") {
+			return nil, ErrTxNotFound
+		}
+		return nil, err
 	}
 
-	// Add headers
-	req.Header.Set("Content-Type", "text/plain")
-	req.SetBasicAuth(b.RpcUser, b.RpcPass)
+	var apiResponse map[string]DescendantTransaction
+	if err := json.Unmarshal(result, &apiResponse); err != nil {
+		return nil, fmt.Errorf("Error unmarshalling JSON: %w", err)
+	}
+	return apiResponse, nil
+}
 
-	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+// GetDescendantsFee calculates the total fee of all descendants of a transaction in the mempool.
+// it fetches the descendants using `getmempooldescendants` and sums their fees.
+// If the transaction is not found in the mempool, it returns ErrTxNotFound.
+func (client *BitcoinClient) GetDescendantsFee(ctx context.Context, txid string) (int64, error) {
+	apiResponse, err := client.GetMempoolDescendants(ctx, txid)
 	if err != nil {
-		return 0, fmt.Errorf("Error sending request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("Error reading response: %w", err)
+		return 0, fmt.Errorf("Error getting mempool descendants: %w", err)
 	}
 
-	var apiResponse struct {
-		Result map[string]DescendantTransaction `json:"result"`
-		Error  interface{}                      `json:"error"`
-		ID     string                           `json:"id"`
-	}
-
-	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		return 0, fmt.Errorf("Error unmarshalling JSON: %w", err)
-	}
-
-	if len(apiResponse.Result) == 0 {
+	if len(apiResponse) == 0 {
 		return 0, nil
 	}
 
-	transactions := make([]DescendantTransaction, 0, len(apiResponse.Result))
-	for _, tx := range apiResponse.Result {
-		transactions = append(transactions, tx)
-	}
-
 	var sum float64
-	for _, tx := range transactions {
+	for _, tx := range apiResponse {
 		sum += tx.Fees.Base
 	}
 
-	return int64(math.Round(sum * 100000000)), nil
+	amount, err := btcutil.NewAmount(sum)
+	if err != nil {
+		return 0, fmt.Errorf("Error converting sum to btcutil.Amount: %w", err)
+	}
+	return int64(amount), nil
+}
+
+// GetMempoolEntryResult models the data returned from the getmempoolentry's
+// fee field
+type MempoolFees struct {
+	// Base is the fee of the transaction itself, in BTC.
+	Base     float64 `json:"base"`
+	Modified float64 `json:"modified"`
+	Ancestor float64 `json:"ancestor"`
+	// Descendant is the total fee of the transaction and all its descendants (both direct and indirect), in BTC.
+	Descendant float64 `json:"descendant"`
+}
+
+// GetMempoolEntryResult models the data returned from the getmempoolentry
+type GetMempoolEntryResult struct {
+	// Vsize of the actual transaction
+	VSize           int32   `json:"vsize"`
+	Size            int32   `json:"size"`
+	Weight          int64   `json:"weight"`
+	Fee             float64 `json:"fee"`
+	ModifiedFee     float64 `json:"modifiedfee"`
+	Time            int64   `json:"time"`
+	Height          int64   `json:"height"`
+	DescendantCount int64   `json:"descendantcount"`
+	// DescendantSize is the total Vsize of the transaction and all its descendants
+	DescendantSize int64 `json:"descendantsize"`
+	// DescendantFees is the total fee of the transaction and all its descendants(both direct and indirect)
+	DescendantFees float64     `json:"descendantfees"`
+	AncestorCount  int64       `json:"ancestorcount"`
+	AncestorSize   int64       `json:"ancestorsize"`
+	AncestorFees   float64     `json:"ancestorfees"`
+	WTxId          string      `json:"wtxid"`
+	Fees           MempoolFees `json:"fees"`
+	Depends        []string    `json:"depends"`
+	// SpentBy is a list of transaction IDs that spend outputs from this transaction.
+	// This is useful for tracking direct descendants of a transaction in the mempool.
+	SpendBy []string `json:"spentby"`
+}
+
+// GetMempoolEntry returns mempool data for given transaction
+func (client *BitcoinClient) GetMempoolEntry(ctx context.Context, txid string) (*GetMempoolEntryResult, error) {
+	method := "getmempoolentry"
+	params, err := client.packParams(txid)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		if strings.Contains(err.Error(), "Transaction not in mempool") {
+			return nil, ErrTxNotFound
+		}
+		return nil, err
+	}
+	var res GetMempoolEntryResult
+	err = json.Unmarshal(result, &res)
+	return &res, err
+}
+
+type RBFTxFeeInfo struct {
+	// Total fees of in-mempool descendants (including this transaction) in sats
+	TotalFee float64 `json:"total_fee"`
+	// Total fee of the descendants in sats
+	DescendantFee float64 `json:"descendant_fee"`
+	// current fee of the tx to be replaced ,
+	// the fee rate is calculated based on the actual tx and its direct descendants
+	// source : https://github.dev/bitcoin/bitcoin/blob/ed060e01e756fc8d4c1c590e79f9555ae86c433f/src/policy/rbf.cpp#L145
+	TxFeeRate float64 `json:"tx_fee_rate"`
+}
+
+// GetRBFTxFeeInfo returns FeeInfo required to RBF (Replace-By-Fee) a transaction in the mempool
+func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (*RBFTxFeeInfo, error) {
+	// Get the descendants and the entry for the transaction
+	descendants, err := client.GetMempoolDescendants(ctx, txid)
+	if err != nil {
+		return nil, fmt.Errorf("error getting mempool descendants: %w", err)
+	}
+	entry, err := client.GetMempoolEntry(ctx, txid)
+	if err != nil {
+		return nil, fmt.Errorf("error getting mempool entry: %w", err)
+	}
+	if entry == nil {
+		return nil, ErrTxNotFound
+	}
+
+	// Fees are in BTC, convert to sats
+	totalFee := math.Ceil(entry.Fees.Descendant * 1e8)
+	baseFee := math.Ceil(entry.Fees.Base * 1e8)
+	descendantFee := math.Ceil((entry.Fees.Descendant - entry.Fees.Base) * 1e8)
+
+	prevTxExactFeeRate := baseFee / float64(entry.VSize)
+	feeInfo := &RBFTxFeeInfo{
+		TotalFee:      totalFee,
+		DescendantFee: descendantFee,
+		TxFeeRate:     prevTxExactFeeRate,
+	}
+	// If there are no descendants, fee rate is is the base fee divided by the vsize of the transaction
+	if len(descendants) == 0 {
+		return feeInfo, nil
+	}
+
+	// Calculate the fee rate based on the direct descendants
+	// The fee rate is calculated as the total fee of the transaction and its direct descendants divided
+	// by the total vsize of the transaction and its direct descendants.
+	var directDescendantSize, directDescendantFee float64
+	for _, childTxid := range entry.SpendBy {
+		if desc, ok := descendants[childTxid]; ok {
+			directDescendantSize += float64(desc.Vsize)
+			directDescendantFee += float64(desc.Fees.Base * 1e8)
+		}
+	}
+
+	if directDescendantSize+float64(entry.VSize) > 0 {
+		// tx fee rate is calculated as max(directDescendantFee+baseFee)/max(directDescendantSize+float64(entry.VSize), prevTxExactFeeRate)
+		feeInfo.TxFeeRate = math.Max(float64(directDescendantFee+baseFee)/float64(directDescendantSize+float64(entry.VSize)), prevTxExactFeeRate)
+	}
+
+	return feeInfo, nil
+}
+
+// packParams converts the provided parameters into a slice of json.RawMessage.
+func (client *BitcoinClient) packParams(params ...interface{}) ([]json.RawMessage, error) {
+	rawParams := make([]json.RawMessage, len(params))
+	for i, param := range params {
+		var err error
+		rawParams[i], err = json.Marshal(param)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return rawParams, nil
+}
+
+// send sends a JSON-RPC request to the Bitcoin node and returns the raw response.
+func (client *BitcoinClient) send(ctx context.Context, method string, params []json.RawMessage) ([]byte, error) {
+	// Construct the request
+	jReq := Request{
+		Version: "1.0",
+		ID:      rand.Uint32(),
+		Method:  method,
+		Params:  params,
+	}
+	raw, err := json.Marshal(jReq)
+	if err != nil {
+		return nil, err
+	}
+
+	bodyReader := bytes.NewReader(raw)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", client.RpcURL, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if client.RpcUser != "" && client.RpcPass != "" {
+		httpReq.SetBasicAuth(client.RpcUser, client.RpcPass)
+	}
+
+	httpResponse, err := client.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResponse.Body.Close()
+
+	respBytes, err := io.ReadAll(httpResponse.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading json reply: %v", err)
+	}
+
+	var resp rawResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+	return resp.Result, nil
 }

@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
@@ -266,6 +269,146 @@ var _ = Describe("bitcoin client", func() {
 			err = client.SubmitTx(ctx, new(wire.MsgTx))
 			Expect(errors.Is(err, context.DeadlineExceeded)).Should(BeTrue())
 			cancel()
+		})
+	})
+
+	Context("Test BitcoinRPCClient", func() {
+		bitcoinClient := btc.NewBitcoinClient("admin1", "123", "http://0.0.0.0:18443")
+		chainParams := chaincfg.RegressionNetParams
+		indexer := localnet.BTCIndexer()
+		feeEstimator := btc.NewFixFeeEstimator(16)
+
+		newWallet := func() btc.Wallet {
+			privKey, err := btcec.NewPrivateKey()
+			Expect(err).To(BeNil())
+			wallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.HighFee)
+			Expect(err).To(BeNil())
+			return wallet
+		}
+
+		alice := newWallet()
+		bob := newWallet()
+
+		_, err := localnet.FundBitcoin(alice.Address().EncodeAddress(), indexer)
+		Expect(err).To(BeNil())
+
+		send := func(wallet btc.Wallet, to btcutil.Address, amount int64) (string, btc.Transaction) {
+			txid, err := wallet.Send(context.Background(), []btc.SendRequest{{Amount: amount, To: to}}, nil, nil)
+			Expect(err).To(BeNil())
+			tx, _, err := wallet.Status(context.Background(), txid)
+			Expect(err).To(BeNil())
+			return txid, tx
+		}
+
+		It("should return mempool entry", func(ctx context.Context) {
+			// Helper to check mempool entry fee
+			checkMempoolEntryFee := func(entry *btc.GetMempoolEntryResult, expectedFee int64) {
+				fee, err := btcutil.NewAmount(entry.Fees.Descendant)
+				Expect(err).To(BeNil())
+				Expect(float64(fee)).Should(Equal(float64(expectedFee)))
+			}
+
+			// Alice sends to Bob
+			txid1, tx1 := send(alice, bob.Address(), 1000000)
+
+			By("tx with no descendants")
+			entry1, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(entry1).ShouldNot(BeNil())
+			checkMempoolEntryFee(entry1, tx1.Fee)
+
+			// Bob sends to a random address
+			By("tx with one direct descendant")
+			randAddr, err := randomP2wpkhAddress(chainParams)
+			Expect(err).To(BeNil())
+			_, tx2 := send(bob, randAddr, 10000)
+
+			By("GetMempoolEntry() for Alice's tx after Bob's tx")
+			entry1b, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(entry1b).ShouldNot(BeNil())
+			Expect(len(entry1b.SpendBy)).Should(Equal(1))
+			checkMempoolEntryFee(entry1b, tx1.Fee+tx2.Fee)
+
+			// Bob sends another tx to the same random address
+			By("tx with indirect descendant")
+			_, tx3 := send(bob, randAddr, 20000)
+
+			entry1c, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(entry1c).ShouldNot(BeNil())
+			Expect(len(entry1c.SpendBy)).Should(Equal(1))
+			checkMempoolEntryFee(entry1c, tx1.Fee+tx2.Fee+tx3.Fee)
+
+			By("GetMempoolDescendants() for Alice's tx")
+			descendants, err := bitcoinClient.GetMempoolDescendants(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(descendants).ShouldNot(BeNil())
+			Expect(len(descendants)).Should(Equal(2))
+
+			By("GetDescendantFees() for Alice's tx")
+			descendantFee, err := bitcoinClient.GetDescendantsFee(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(float64(descendantFee)).Should(Equal(float64(tx2.Fee + tx3.Fee)))
+		})
+
+		It("should return correct rbf fee tx information", func(ctx context.Context) {
+			// Helper to check RBF info against mempool entry
+			checkRBFInfo := func(entry *btc.GetMempoolEntryResult, rbfInfo *btc.RBFTxFeeInfo, vsize float64) {
+				entryTotalFee := float64(entry.Fees.Descendant * 1e8)
+				descendantFee := float64(entry.Fees.Descendant-entry.Fees.Base) * 1e8
+				feeRate := entryTotalFee / vsize
+
+				Expect(rbfInfo.TxFeeRate).Should(Equal(feeRate))
+				Expect(float64(rbfInfo.TotalFee)).Should(Equal(entryTotalFee))
+				Expect(float64(rbfInfo.DescendantFee)).Should(Equal(descendantFee))
+			}
+
+			// Alice sends to Bob
+			txid1, _ := send(alice, bob.Address(), 1000000)
+
+			By("rbf tx info for tx with no descendants")
+			rbfInfo, err := bitcoinClient.GetRBFTxFeeInfo(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(rbfInfo).ShouldNot(BeNil())
+			mempoolEntry, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			checkRBFInfo(mempoolEntry, rbfInfo, float64(mempoolEntry.VSize))
+
+			// get fee info with one direct descendant
+			randAddr, err := randomP2wpkhAddress(chainParams)
+			Expect(err).To(BeNil())
+			_, directDescTx := send(bob, randAddr, 10000)
+
+			By("rbf tx info for tx with one direct descendant")
+			entry1b, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(entry1b).ShouldNot(BeNil())
+			rbfInfo, err = bitcoinClient.GetRBFTxFeeInfo(ctx, txid1)
+			Expect(err).To(BeNil())
+			checkRBFInfo(entry1b, rbfInfo, float64(entry1b.DescendantSize))
+
+			// get fee info with one indirect descendant
+			_, _ = send(bob, randAddr, 20000)
+			By("rbf tx info for tx with indirect descendant")
+			entry1c, err := bitcoinClient.GetMempoolEntry(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(entry1c).ShouldNot(BeNil())
+			rbfInfo, err = bitcoinClient.GetRBFTxFeeInfo(ctx, txid1)
+			Expect(err).To(BeNil())
+			mempoolDesc, err := bitcoinClient.GetMempoolDescendants(ctx, txid1)
+			Expect(err).To(BeNil())
+			Expect(mempoolDesc).ShouldNot(BeNil())
+
+			// For indirect descendant, calculate feeRate using base fee + directDescTx.Fee and vsize + descendant vsize
+			entryTotalFee := float64(entry1c.Fees.Descendant * 1e8)
+			descendantFee := float64(entry1c.Fees.Descendant-entry1c.Fees.Base) * 1e8
+			feeRate := float64(int64(entry1c.Fees.Base*1e8)+directDescTx.Fee) /
+				float64(int64(entry1c.VSize)+int64(mempoolDesc[directDescTx.TxID].Vsize))
+
+			Expect(rbfInfo.TxFeeRate).Should(Equal(feeRate))
+			Expect(float64(rbfInfo.TotalFee)).Should(Equal(math.Ceil(entryTotalFee)))
+			Expect(float64(rbfInfo.DescendantFee)).Should(Equal(math.Ceil(descendantFee)))
 		})
 	})
 })
