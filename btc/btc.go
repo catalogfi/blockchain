@@ -49,27 +49,30 @@ type UTXOs []UTXO
 
 // UTXO is an unspent transaction output.
 type UTXO struct {
-	TxID   string  `json:"txid"`
-	Vout   uint32  `json:"vout"`
-	Amount int64   `json:"value"`
-	Status *Status `json:"status"`
+	TxID     string  `json:"txid"`
+	Vout     uint32  `json:"vout"`
+	Amount   int64   `json:"value"`
+	PkScript []byte  `json:"pkscript"`
+	Status   *Status `json:"status"`
 }
 
 // NewUtxo returns a new Utxo object with given parameters. It won't have the status field.
-func NewUtxo(txid string, vout uint32, amount int64) UTXO {
+func NewUtxo(txid string, vout uint32, amount int64, pkScript []byte) UTXO {
 	return UTXO{
-		TxID:   txid,
-		Vout:   vout,
-		Amount: amount,
+		TxID:     txid,
+		Vout:     vout,
+		Amount:   amount,
+		PkScript: pkScript,
 	}
 }
 
 // UtxoFromOutPoint contructs a new UTXO from a `wire.OutPoint`. It won't have the status field.
-func UtxoFromOutPoint(outPoint wire.OutPoint, amount int64) UTXO {
+func UtxoFromOutPoint(outPoint wire.OutPoint, amount int64, pkScript []byte) UTXO {
 	return UTXO{
-		TxID:   outPoint.Hash.String(),
-		Vout:   outPoint.Index,
-		Amount: amount,
+		TxID:     outPoint.Hash.String(),
+		Vout:     outPoint.Index,
+		Amount:   amount,
+		PkScript: pkScript,
 	}
 }
 
@@ -135,9 +138,9 @@ func TxRawBytes(tx *wire.MsgTx) ([]byte, error) {
 type FeeMode func(tx *wire.MsgTx) (int64, error)
 
 // MinFeeRateMode is used to build a tx with a minimum feeRate. The actual fee rate will be at lease the given `feeRate`
-func MinFeeRateMode(feeRate SatoshiPerKb, sizer SizeEstimator) FeeMode {
+func MinFeeRateMode(feeRate SatoshiPerKb, signers Signers) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
-		vs, err := sizer.EstimateTxVirtualSize(tx)
+		vs, err := signers.EstimateTxVirtualSize(tx)
 		if err != nil {
 			return 0, err
 		}
@@ -166,9 +169,9 @@ func GaslessMode() FeeMode {
 // than this according to the mempool policy.
 // `prevFees`is the sum of fees of paid by the original transactions. This includes the replacement transaction and all
 // its descendants.
-func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer SizeEstimator) FeeMode {
+func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, signers Signers) FeeMode {
 	return func(tx *wire.MsgTx) (int64, error) {
-		vsize, err := sizer.EstimateTxVirtualSize(tx)
+		vsize, err := signers.EstimateTxVirtualSize(tx)
 		if err != nil {
 			return 0, err
 		}
@@ -179,7 +182,7 @@ func RbfMode(minFeeRate, prevFeeRate SatoshiPerKb, prevFees int64, sizer SizeEst
 	}
 }
 
-func RbfModeFromPrevTx(client Client, txid string, sizer SizeEstimator) (FeeMode, error) {
+func RbfModeFromPrevTx(client Client, txid string, signers Signers) (FeeMode, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -192,7 +195,7 @@ func RbfModeFromPrevTx(client Client, txid string, sizer SizeEstimator) (FeeMode
 		return nil, err
 	}
 	prevFeeRate := NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
-	return RbfMode(0, prevFeeRate, int64(prevFees), sizer), nil
+	return RbfMode(0, prevFeeRate, int64(prevFees), signers), nil
 }
 
 // BuildTx is a helper function for building a bitcoin transaction. It uses the given `FeeMode` to calculate
@@ -279,7 +282,7 @@ func BuildTx(feeReq FeeMode, inputs, utxos []UTXO, txOuts []*wire.TxOut, changeA
 
 // messageToHex serializes a message to the wire protocol encoding using the
 // latest protocol version and returns a hex-encoded string of the result.
-// Copied from https://github.com/btcsuite/btcd/rpcserver.go and modified
+// Copied from https://github.com/bZtcsuite/btcd/rpcserver.go and modified
 func messageToHex(msg wire.Message) (string, error) {
 	maxProtocolVersion := uint32(70002)
 	var buf bytes.Buffer

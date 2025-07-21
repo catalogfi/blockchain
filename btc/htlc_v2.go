@@ -491,9 +491,10 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 
 	// Parse the input's utxo and output address from the tx
 	utxo := UTXO{
-		TxID:   tx.TxIn[0].PreviousOutPoint.Hash.String(),
-		Vout:   tx.TxIn[0].PreviousOutPoint.Index,
-		Amount: amount,
+		TxID:     tx.TxIn[0].PreviousOutPoint.Hash.String(),
+		Vout:     tx.TxIn[0].PreviousOutPoint.Index,
+		Amount:   amount,
+		PkScript: script,
 	}
 	return utxo, tx.TxOut[0], nil
 }
@@ -530,4 +531,126 @@ func decodeLocktime(v []byte) int64 {
 	}
 
 	return result
+}
+
+type HtlcRedeemSigner struct {
+	opts   *sigOptions
+	leaf   txscript.TapLeaf
+	ctrBlk txscript.ControlBlock
+	key    *btcec.PrivateKey
+	secret []byte
+}
+
+func NewHtlcRedeemSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, secret []byte, sigOpts ...SigOptions) Signer {
+	opts := defaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcRedeemSigner{
+		key:    key,
+		leaf:   leaf,
+		ctrBlk: ctrBlk,
+		opts:   opts,
+		secret: secret,
+	}
+}
+
+func (signer *HtlcRedeemSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig, signer.secret, signer.leaf.Script, ctrBlkBytes}
+	return nil
+}
+
+func (signer *HtlcRedeemSigner) SigSize() (int, int) {
+	return BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(signer.secret))
+}
+
+type HtlcRefundSigner struct {
+	opts     *sigOptions
+	leaf     txscript.TapLeaf
+	ctrBlk   txscript.ControlBlock
+	key      *btcec.PrivateKey
+	timelock int64
+}
+
+func NewHtlcRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, timelock int64, sigOpts ...SigOptions) Signer {
+	opts := defaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcRefundSigner{
+		opts:     opts,
+		leaf:     leaf,
+		ctrBlk:   ctrBlk,
+		key:      key,
+		timelock: timelock,
+	}
+}
+
+func (signer *HtlcRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig, signer.leaf.Script, ctrBlkBytes}
+	return nil
+}
+
+func (signer *HtlcRefundSigner) SigSize() (int, int) {
+	return BaseSizeHtlcRefund, SegwitSizeHtlcRefund(signer.timelock)
+}
+
+type HtlcInstantRefundSigner struct {
+	opts     *sigOptions
+	redeemer bool
+	otherSig []byte
+	leaf     txscript.TapLeaf
+	ctrBlk   txscript.ControlBlock
+	key      *btcec.PrivateKey
+}
+
+func NewHtlcInstantRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, redeemer bool, otherSig []byte, sigOpts ...SigOptions) Signer {
+	opts := defaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcInstantRefundSigner{
+		key:      key,
+		redeemer: redeemer,
+		otherSig: otherSig,
+		leaf:     leaf,
+		ctrBlk:   ctrBlk,
+		opts:     opts,
+	}
+}
+
+func (signer *HtlcInstantRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	if signer.redeemer {
+		tx.TxIn[index].Witness = wire.TxWitness{sig, signer.otherSig, signer.leaf.Script, ctrBlkBytes}
+	} else {
+		tx.TxIn[index].Witness = wire.TxWitness{signer.otherSig, sig, signer.leaf.Script, ctrBlkBytes}
+	}
+
+	return nil
+}
+
+func (signer *HtlcInstantRefundSigner) SigSize() (int, int) {
+	return BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund
 }

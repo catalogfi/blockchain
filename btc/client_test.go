@@ -35,7 +35,8 @@ var _ = Describe("bitcoin client", func() {
 				Expect(info.BestBlockHash).ShouldNot(Equal("0000000000000000000000000000000000000000000000000000000000000000"))
 
 				By("Create a new tx")
-				key, addr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+				addrType := waddrmgr.PubKeyHash
+				key, addr, err := btctest.NewBtcKey(network, addrType)
 				Expect(err).To(BeNil())
 				txid, err := btctest.Faucet(addr.EncodeAddress())
 				Expect(err).To(BeNil())
@@ -84,18 +85,22 @@ var _ = Describe("bitcoin client", func() {
 				Expect(netInfo.RelayFee).Should(BeNumerically(">=", 0))
 
 				By("GetMempoolEntry()")
+				pkScript, err := hex.DecodeString(rawTx.Vout[vout].ScriptPubKey.Hex)
+				Expect(err).To(BeNil())
 				utxos := []btc.UTXO{
 					{
-						TxID:   txid.String(),
-						Vout:   uint32(vout),
-						Amount: 1e8,
+						TxID:     txid.String(),
+						Vout:     uint32(vout),
+						Amount:   1e8,
+						PkScript: pkScript,
 					},
 				}
-				sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
-				feeMode := btc.MinFeeRateMode(10000, sizer)
+				signers, _, err := btc.NewSignersByAddrType(addrType, key, utxos)
+				Expect(err).To(BeNil())
+				feeMode := btc.MinFeeRateMode(10000, signers)
 				tx1, err := btc.BuildTx(feeMode, utxos, nil, nil, addr)
 				Expect(err).To(BeNil())
-				Expect(btc.QuickSign(waddrmgr.PubKeyHash, tx1, key, utxos)).Should(Succeed())
+				Expect(signers.Sign(tx1)).Should(Succeed())
 				Expect(client.SubmitTx(ctx, tx1)).Should(Succeed())
 				Eventually(func() error {
 					_, err := client.GetMempoolEntry(ctx, tx1.TxHash().String())
@@ -108,37 +113,39 @@ var _ = Describe("bitcoin client", func() {
 	Context("errors", func() {
 		It("should return specific errors", func(ctx context.Context) {
 			By("New address")
-			privKey, pkAddr, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			addrType := waddrmgr.PubKeyHash
+			key, addr, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).To(BeNil())
 
 			By("funding the addresses")
-			_, err = btctest.Faucet(pkAddr.EncodeAddress())
+			_, err = btctest.Faucet(addr.EncodeAddress())
 			Expect(err).To(BeNil())
 			time.Sleep(5 * time.Second)
 
 			By("Construct a new tx")
-			utxos, err := indexer.GetUTXOs(ctx, pkAddr)
+			utxos, err := indexer.GetUTXOs(ctx, addr)
 			Expect(err).To(BeNil())
 			amount := int64(1e5)
-			recipient, err := btc.NewTxOutFromAddress(pkAddr, amount)
+			recipient, err := btc.NewTxOutFromAddress(addr, amount)
 			Expect(err).To(BeNil())
 			recipients := []*wire.TxOut{recipient}
-			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
-			feeMode := btc.MinFeeRateMode(10000, sizer)
-			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr)
+			signers, _, err := btc.NewSignersByAddrType(addrType, key, utxos)
+			Expect(err).To(BeNil())
+			feeMode := btc.MinFeeRateMode(10000, signers)
+			tx, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr)
 			Expect(err).To(BeNil())
 
 			By("Sign the transaction inputs")
-			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, privKey, utxos)).Should(Succeed())
+			Expect(signers.Sign(tx)).Should(Succeed())
 
 			By("Expect `ErrTxNotFound` before submitting the tx")
-			txid := transaction.TxHash()
+			txid := tx.TxHash()
 			_, err = client.GetRawTransaction(ctx, &txid)
 			Expect(errors.Is(err, btc.ErrTxNotFound)).Should(BeTrue())
 
 			By("Submit the transaction")
-			Expect(client.SubmitTx(ctx, transaction)).Should(Succeed())
-			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(transaction.TxHash().String())))
+			Expect(client.SubmitTx(ctx, tx)).Should(Succeed())
+			By(fmt.Sprintf("Funding tx hash = %v", color.YellowString(tx.TxHash().String())))
 			time.Sleep(time.Second)
 
 			By("We should not get any error fetching the tx details")
@@ -148,24 +155,24 @@ var _ = Describe("bitcoin client", func() {
 			By("Expect a `ErrAlreadyInChain` error if the tx is already in a block")
 			Expect(btctest.NewBlockWaitMined(1, indexer)).Should(Succeed())
 			time.Sleep(1 * time.Second)
-			err = client.SubmitTx(ctx, transaction)
+			err = client.SubmitTx(ctx, tx)
 			Expect(errors.Is(err, btc.ErrAlreadyInUtxoSet)).Should(BeTrue())
 
 			By("Try construct a new transaction spending the same input")
-			recipient1, err := btc.NewTxOutFromAddress(pkAddr, 2*amount)
+			recipient1, err := btc.NewTxOutFromAddress(addr, 2*amount)
 			Expect(err).To(BeNil())
 			recipients1 := []*wire.TxOut{recipient1}
 			feeMode1 := btc.FixedFeesMode(1000)
-			transaction1, err := btc.BuildTx(feeMode1, nil, utxos, recipients1, pkAddr)
+			tx1, err := btc.BuildTx(feeMode1, nil, utxos, recipients1, addr)
 			Expect(err).To(BeNil())
-			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction1, privKey, utxos)).Should(Succeed())
+			Expect(signers.Sign(tx1)).Should(Succeed())
 
 			By("Expect a `ErrTxInputsMissingOrSpent` error if the tx is already in a block")
-			err = client.SubmitTx(ctx, transaction1)
+			err = client.SubmitTx(ctx, tx1)
 			Expect(errors.Is(err, btc.ErrTxInputsMissingOrSpent)).Should(BeTrue())
 
 			By("Expect a `ErrTxNotInMempool` error if the tx is not in the mempool")
-			_, err = client.GetMempoolEntry(ctx, transaction1.TxHash().String())
+			_, err = client.GetMempoolEntry(ctx, tx1.TxHash().String())
 			Expect(errors.Is(err, btc.ErrTxNotInMempool)).Should(BeTrue())
 		})
 
@@ -174,30 +181,32 @@ var _ = Describe("bitcoin client", func() {
 			defer cancel()
 
 			By("Initialization keys ")
-			privKey1, pkAddr1, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, indexer)
+			addrType := waddrmgr.PubKeyHash
+			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType, indexer)
 			Expect(err).To(BeNil())
-			_, pkAddr2, err := btctest.NewBtcKey(network, waddrmgr.PubKeyHash)
+			_, addr2, err := btctest.NewBtcKey(network, addrType)
 			Expect(err).To(BeNil())
 
 			By("Build the transaction")
-			utxos, err := indexer.GetUTXOs(ctx, pkAddr1)
+			utxos, err := indexer.GetUTXOs(ctx, addr1)
 			Expect(err).To(BeNil())
 			amount, feeRate := int64(1e5), btctest.RandomFeeRate()
-			recipient, err := btc.NewTxOutFromAddress(pkAddr2, amount)
+			recipient, err := btc.NewTxOutFromAddress(addr2, amount)
 			Expect(err).To(BeNil())
 			recipients := []*wire.TxOut{recipient}
-			sizer := btc.NewSizeEstimator(btc.BaseSizeP2PKH, btc.SegwitSizeP2PKH, utxos...)
-			feeMode := btc.MinFeeRateMode(feeRate, sizer)
-			transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, pkAddr1)
+			signers, _, err := btc.NewSignersByAddrType(addrType, key1, utxos)
+			Expect(err).To(BeNil())
+			feeMode := btc.MinFeeRateMode(feeRate, signers)
+			tx, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 			Expect(err).To(BeNil())
 
 			By("Sign and submit the fund tx")
-			Expect(btc.QuickSign(waddrmgr.PubKeyHash, transaction, privKey1, utxos)).Should(Succeed())
-			Expect(indexer.SubmitTx(ctx, transaction)).Should(Succeed())
+			Expect(signers.Sign(tx)).Should(Succeed())
+			Expect(indexer.SubmitTx(ctx, tx)).Should(Succeed())
 
 			By("Expect an error if the utxo is spent")
 			time.Sleep(time.Second)
-			for _, input := range transaction.TxIn {
+			for _, input := range tx.TxIn {
 				res, err := client.GetTxOut(ctx, &input.PreviousOutPoint.Hash, input.PreviousOutPoint.Index)
 				Expect(err).Should(BeNil())
 				Expect(res).Should(BeNil())

@@ -66,17 +66,17 @@ func NewBtcAddrWithFunds(network *chaincfg.Params, addrType waddrmgr.AddressType
 }
 
 // NewWallet returns a new wallet. If `funds` is true, the wallet will be funded with the `merry faucet` command.
-// func NewWallet(network *chaincfg.Params, addrType waddrmgr.AddressType, indexer btc.IndexerClient, client btc.Client, feeEstimator btc.FeeEstimator, waitMined bool) (btc.Wallet, error) {
-// 	waitMinedIndexer := indexer
-// 	if !waitMined {
-// 		waitMinedIndexer = nil
-// 	}
-// 	key, _, err := NewBtcAddrWithFunds(network, addrType, waitMinedIndexer)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return btc.NewWallet(network, addrType, key, indexer, client, feeEstimator)
-// }
+func NewWallet(network *chaincfg.Params, addrType waddrmgr.AddressType, indexer btc.IndexerClient, client btc.Client, feeEstimator btc.FeeEstimator, waitMined bool) (btc.Wallet, error) {
+	waitMinedIndexer := indexer
+	if !waitMined {
+		waitMinedIndexer = nil
+	}
+	key, _, err := NewBtcAddrWithFunds(network, addrType, waitMinedIndexer)
+	if err != nil {
+		return nil, err
+	}
+	return btc.NewWallet(network, addrType, key, indexer, client, feeEstimator)
+}
 
 // RandomSecret creates a random secret with size [1,32)
 func RandomSecret() ([]byte, [32]byte) {
@@ -113,72 +113,71 @@ func NewHtlc(initiatorPubKey, redeemerPubKey *btcec.PublicKey, timelock, amount 
 	return htlc, err
 }
 
-//
-// // PrepareActions generates `n` number of htlcs and make them ready for the given action type. `wal1` and `wal2` will
-// // be the initiator's wallet and redeemer's wallet.
-// func PrepareActions(ctx context.Context, n int, wal1, wal2 btc.Wallet, indexer btc.IndexerClient, actionType btc.HtlcActionType) ([]btc.HtlcAction, error) {
-// 	actions := make([]btc.HtlcAction, n)
-// 	initiatorActions := make([]btc.HtlcAction, 0, n)
-// 	timelock, amount := int64(6), RandomAmount(1e5, 1e7)
-// 	miningBlocks := false
-// 	for i := 0; i < n; i++ {
-// 		htlc, err := NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-//
-// 		switch actionType {
-// 		case btc.HtlcActionInitiate:
-// 			actions[i] = btc.HtlcAction{
-// 				Htlc:       htlc,
-// 				ActionType: btc.HtlcActionInitiate,
-// 			}
-// 		case btc.HtlcActionRedeem, btc.HtlcActionRefund:
-// 			initiatorActions = append(initiatorActions, btc.HtlcAction{
-// 				Htlc:       htlc,
-// 				ActionType: btc.HtlcActionInitiate,
-// 			})
-//
-// 			actions[i] = btc.HtlcAction{
-// 				Htlc:       htlc,
-// 				ActionType: actionType,
-// 			}
-// 			if actionType == btc.HtlcActionRefund {
-// 				miningBlocks = true
-// 			}
-// 		case btc.HtlcActionInstantRefund:
-// 			_, instantRefundTx, err := wal1.Initiate(ctx, htlc)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			actions[i] = btc.HtlcAction{
-// 				Htlc:            htlc,
-// 				ActionType:      btc.HtlcActionInstantRefund,
-// 				InstantRefundTx: instantRefundTx,
-// 			}
-// 		}
-// 	}
-//
-// 	if len(initiatorActions) != 0 {
-// 		_, err := wal1.Execute(ctx, initiatorActions, "")
-// 		if err != nil {
-// 			return nil, err
-// 		}
-//
-// 		// Mining certain blocks to make the
-// 		if miningBlocks {
-// 			if err := NewBlock(int(timelock) - 1); err != nil {
-// 				return nil, err
-// 			}
-// 		}
-// 	}
-//
-// 	if actionType != btc.HtlcActionInitiate {
-// 		// Mine a new block and wait for it to be confirmed
-// 		if err := NewBlockWaitMined(1, indexer); err != nil {
-// 			return nil, err
-// 		}
-// 	}
-//
-// 	return actions, nil
-// }
+// PrepareActions generates `n` number of htlcs and make them ready for the given action type. `wal1` and `wal2` will
+// be the initiator's wallet and redeemer's wallet.
+func PrepareActions(ctx context.Context, n int, wal1, wal2 btc.Wallet, indexer btc.IndexerClient, actionType btc.HtlcActionType) ([]btc.HtlcAction, error) {
+	actions := make([]btc.HtlcAction, n)
+	initiatorActions := make([]btc.HtlcAction, 0, n)
+	timelock, amount := int64(6), RandomAmount(1e5, 1e7)
+	miningBlocks := false
+	for i := 0; i < n; i++ {
+		htlc, err := NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
+		if err != nil {
+			return nil, err
+		}
+
+		switch actionType {
+		case btc.HtlcActionInitiate:
+			actions[i] = btc.HtlcAction{
+				Htlc:       htlc,
+				ActionType: btc.HtlcActionInitiate,
+			}
+		case btc.HtlcActionRedeem, btc.HtlcActionRefund:
+			initiatorActions = append(initiatorActions, btc.HtlcAction{
+				Htlc:       htlc,
+				ActionType: btc.HtlcActionInitiate,
+			})
+
+			actions[i] = btc.HtlcAction{
+				Htlc:       htlc,
+				ActionType: actionType,
+			}
+			if actionType == btc.HtlcActionRefund {
+				miningBlocks = true
+			}
+		case btc.HtlcActionInstantRefund:
+			_, instantRefundTx, err := wal1.Initiate(ctx, htlc)
+			if err != nil {
+				return nil, err
+			}
+			actions[i] = btc.HtlcAction{
+				Htlc:            htlc,
+				ActionType:      btc.HtlcActionInstantRefund,
+				InstantRefundTx: instantRefundTx,
+			}
+		}
+	}
+
+	if len(initiatorActions) != 0 {
+		_, err := wal1.Execute(ctx, initiatorActions, "")
+		if err != nil {
+			return nil, err
+		}
+
+		// Mining certain blocks to make the
+		if miningBlocks {
+			if err := NewBlock(int(timelock) - 1); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if actionType != btc.HtlcActionInitiate {
+		// Mine a new block and wait for it to be confirmed
+		if err := NewBlockWaitMined(1, indexer); err != nil {
+			return nil, err
+		}
+	}
+
+	return actions, nil
+}
