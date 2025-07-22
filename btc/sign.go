@@ -38,50 +38,50 @@ var (
 	SegwitSizeP2trDefault = 1 + 1 + 64
 )
 
-type SigOptions func(*sigOptions)
+type SigOption func(*SigOptions)
 
-type sigOptions struct {
-	compressed        bool
-	sigHashes         *txscript.TxSigHashes
-	sigHashType       txscript.SigHashType
-	tapScriptRootHash []byte
+type SigOptions struct {
+	Compressed        bool
+	SigHashes         *txscript.TxSigHashes
+	SigHashType       txscript.SigHashType
+	TapScriptRootHash []byte
 }
 
-func (so *sigOptions) Parse(sigOpts ...SigOptions) {
+func (so *SigOptions) Parse(sigOpts ...SigOption) {
 	for _, sigOpt := range sigOpts {
 		sigOpt(so)
 	}
 }
 
-func defaultSigOptions() *sigOptions {
-	return &sigOptions{
-		compressed:        true,
-		sigHashType:       txscript.SigHashDefault,
-		tapScriptRootHash: nil,
+func DefaultSigOptions() *SigOptions {
+	return &SigOptions{
+		Compressed:        true,
+		SigHashType:       txscript.SigHashDefault,
+		TapScriptRootHash: nil,
 	}
 }
 
-func WithCompressed(compressed bool) SigOptions {
-	return func(o *sigOptions) {
-		o.compressed = compressed
+func WithCompressed(compressed bool) SigOption {
+	return func(o *SigOptions) {
+		o.Compressed = compressed
 	}
 }
 
-func WithSighashes(sighashes *txscript.TxSigHashes) SigOptions {
-	return func(o *sigOptions) {
-		o.sigHashes = sighashes
+func WithSighashes(sighashes *txscript.TxSigHashes) SigOption {
+	return func(o *SigOptions) {
+		o.SigHashes = sighashes
 	}
 }
 
-func WithSighashType(sighashType txscript.SigHashType) SigOptions {
-	return func(o *sigOptions) {
-		o.sigHashType = sighashType
+func WithSighashType(sighashType txscript.SigHashType) SigOption {
+	return func(o *SigOptions) {
+		o.SigHashType = sighashType
 	}
 }
 
-func WithTapScriptRootHash(hash []byte) SigOptions {
-	return func(o *sigOptions) {
-		o.tapScriptRootHash = hash
+func WithTapScriptRootHash(hash []byte) SigOption {
+	return func(o *SigOptions) {
+		o.TapScriptRootHash = hash
 	}
 }
 
@@ -126,8 +126,8 @@ func NewSigners(signer Signer, utxos ...UTXO) (Signers, error) {
 	}, nil
 }
 
-func NewSignersByAddrType(addrType waddrmgr.AddressType, key *btcec.PrivateKey, utxos []UTXO, sigOpts ...SigOptions) (Signers, Signer, error) {
-	opts := defaultSigOptions()
+func NewSignersByAddrType(addrType waddrmgr.AddressType, key *btcec.PrivateKey, utxos []UTXO, sigOpts ...SigOption) (Signers, Signer, error) {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	var signer Signer
@@ -244,12 +244,12 @@ type Signer interface {
 }
 
 type P2pkhSigner struct {
-	opts *sigOptions
+	opts *SigOptions
 	key  *btcec.PrivateKey
 }
 
-func NewP2pkhSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewP2pkhSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &P2pkhSigner{
@@ -259,10 +259,10 @@ func NewP2pkhSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
 }
 
 func (signer *P2pkhSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	if signer.opts.sigHashType == txscript.SigHashDefault {
-		signer.opts.sigHashType = txscript.SigHashAll
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
 	}
-	sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, signer.opts.sigHashType, signer.key, signer.opts.compressed)
+	sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, signer.opts.SigHashType, signer.key, signer.opts.Compressed)
 	if err != nil {
 		return err
 	}
@@ -276,12 +276,12 @@ func (signer *P2pkhSigner) SigSize() (int, int) {
 }
 
 type P2wpkSigner struct {
-	opts *sigOptions
+	opts *SigOptions
 	key  *btcec.PrivateKey
 }
 
-func NewP2wpkSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewP2wpkSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &P2wpkSigner{
@@ -291,11 +291,11 @@ func NewP2wpkSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
 }
 
 func (signer *P2wpkSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	if signer.opts.sigHashType == txscript.SigHashDefault {
-		signer.opts.sigHashType = txscript.SigHashAll
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
 	}
 
-	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.sigHashType, signer.key)
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}
@@ -308,12 +308,12 @@ func (signer *P2wpkSigner) SigSize() (int, int) {
 }
 
 type P2trSigner struct {
-	opts *sigOptions
+	opts *SigOptions
 	key  *btcec.PrivateKey
 }
 
-func NewP2trSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewP2trSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &P2trSigner{
@@ -323,7 +323,7 @@ func NewP2trSigner(key *btcec.PrivateKey, sigOpts ...SigOptions) Signer {
 }
 
 func (signer *P2trSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.tapScriptRootHash, signer.opts.sigHashType, signer.key)
+	sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.TapScriptRootHash, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}

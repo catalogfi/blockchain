@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = FDescribe("Wallet", func() {
+var _ = Describe("Wallet", func() {
 	Context("Operation on an HTLC", func() {
 		It("should be able to initiate and redeem an HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {

@@ -534,15 +534,15 @@ func decodeLocktime(v []byte) int64 {
 }
 
 type HtlcRedeemSigner struct {
-	opts   *sigOptions
+	opts   *SigOptions
 	leaf   txscript.TapLeaf
 	ctrBlk txscript.ControlBlock
 	key    *btcec.PrivateKey
 	secret []byte
 }
 
-func NewHtlcRedeemSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, secret []byte, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewHtlcRedeemSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, secret []byte, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &HtlcRedeemSigner{
@@ -559,7 +559,7 @@ func (signer *HtlcRedeemSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.T
 	if err != nil {
 		return err
 	}
-	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}
@@ -572,15 +572,15 @@ func (signer *HtlcRedeemSigner) SigSize() (int, int) {
 }
 
 type HtlcRefundSigner struct {
-	opts     *sigOptions
+	opts     *SigOptions
 	leaf     txscript.TapLeaf
 	ctrBlk   txscript.ControlBlock
 	key      *btcec.PrivateKey
 	timelock int64
 }
 
-func NewHtlcRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, timelock int64, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewHtlcRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, timelock int64, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &HtlcRefundSigner{
@@ -597,7 +597,7 @@ func (signer *HtlcRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.T
 	if err != nil {
 		return err
 	}
-	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}
@@ -610,7 +610,7 @@ func (signer *HtlcRefundSigner) SigSize() (int, int) {
 }
 
 type HtlcInstantRefundSigner struct {
-	opts     *sigOptions
+	opts     *SigOptions
 	redeemer bool
 	otherSig []byte
 	leaf     txscript.TapLeaf
@@ -618,8 +618,8 @@ type HtlcInstantRefundSigner struct {
 	key      *btcec.PrivateKey
 }
 
-func NewHtlcInstantRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, redeemer bool, otherSig []byte, sigOpts ...SigOptions) Signer {
-	opts := defaultSigOptions()
+func NewHtlcInstantRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, redeemer bool, otherSig []byte, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
 	opts.Parse(sigOpts...)
 
 	return &HtlcInstantRefundSigner{
@@ -638,7 +638,7 @@ func (signer *HtlcInstantRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint 
 		return err
 	}
 
-	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.sigHashType, signer.key)
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}
