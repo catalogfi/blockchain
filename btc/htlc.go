@@ -279,14 +279,12 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefu
 	if err != nil {
 		return nil, err
 	}
-	utxoValue := int64(0)
-	for _, utxo := range utxos {
-		utxoValue += utxo.Amount
-	}
+
 	instandRefundLeaf, cbBytes, err := getControlBlock(hw.internalKey, htlc, LeafInstantRefund)
 	if err != nil {
 		return nil, err
 	}
+
 	tx, err := validateInstantRefundSACP(instantRefundSACPTx, utxos, cbBytes, instandRefundLeaf)
 	if err != nil {
 		return nil, err
@@ -303,7 +301,7 @@ func (hw *htlcWallet) instantRefund(ctx context.Context, htlc *HTLC, instantRefu
 
 	for i := range tx.TxIn {
 		// 0th index is the signature of this wallet
-		witnessWithSig, err := hw.wallet.SignSACPTx(tx, i, utxoValue, instandRefundLeaf, scriptAddr, instantRefundWitness)
+		witnessWithSig, err := hw.wallet.SignSACPTx(tx, i, utxos[i].Amount, instandRefundLeaf, scriptAddr, instantRefundWitness)
 		if err != nil {
 			return nil, err
 		}
@@ -443,32 +441,31 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, cb []byte, insta
 		return nil, ErrSACPInvalidInputsLen
 	}
 
-	// Check if txHashs match with the utxos
+	// Check if the transaction inputs are valid.
 	for i, txIn := range tx.TxIn {
 		if txIn.PreviousOutPoint.Hash.String() != utxos[i].TxID {
 			return nil, ErrSACPInvalidInput
 		}
 
-	}
+		// witness should have 4 elements
+		if len(txIn.Witness) != 4 {
+			return nil, ErrInvalidInstantRefundSACPWitnessLen
+		}
 
-	// witness should have 4 elements
-	if len(tx.TxIn[0].Witness) != 4 {
-		return nil, ErrInvalidInstantRefundSACPWitnessLen
-	}
+		// first two should be signature lens
+		if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
+			return nil, ErrInvalidInstantRefundSACPWitnessLen
+		}
 
-	// TODO: check if the signature is valid
+		// instant refund script should be the same
+		if !bytes.Equal(tx.TxIn[0].Witness[2], instantRefundLeaf.Script) {
+			return nil, ErrInvalidInstantRefundScript
+		}
 
-	// first two should be signature lens
-	if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
-		return nil, ErrInvalidInstantRefundSACPWitnessLen
-	}
-	// instant refund script should be the same
-	if !bytes.Equal(tx.TxIn[0].Witness[2], instantRefundLeaf.Script) {
-		return nil, ErrInvalidInstantRefundScript
-	}
-	// control block should be the same
-	if !bytes.Equal(tx.TxIn[0].Witness[3], cb) {
-		return nil, ErrInvalidControlBlock
+		// control block should be the same
+		if !bytes.Equal(tx.TxIn[0].Witness[3], cb) {
+			return nil, ErrInvalidControlBlock
+		}
 	}
 
 	return tx, nil

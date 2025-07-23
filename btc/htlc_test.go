@@ -1,13 +1,17 @@
 package btc_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/localnet"
 
@@ -475,6 +479,93 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
 
+	It("should be able to initiate and instant refund multiple utxos in single HTLCs", func(ctx context.Context) {
+		aliceHTLC1, _, err := generateHTLC(alicePrivKey, bobPrivKey)
+		Expect(err).To(BeNil())
+
+		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		By("Initiate HTLCs")
+
+		txID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+			{
+				Action: btc.InitiateHTLCAction,
+				HTLC:   *aliceHTLC1,
+				Amount: initiateAmount,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		bobHTLCWallet, err := btc.NewHTLCWallet(bobSimpleWallet, indexer, &chainParams)
+		Expect(err).To(BeNil())
+
+		instantRefundSACP, err := bobHTLCWallet.GenerateInstantRefundSACP(ctx, aliceHTLC1, aliceSimpleWallet.Address())
+		Expect(err).To(BeNil())
+
+		sacpTx, err := btcutil.NewTxFromBytes(instantRefundSACP)
+		Expect(err).To(BeNil())
+
+		msgTx := sacpTx.MsgTx()
+
+		internalKey, err := btc.GardenNUMS()
+		Expect(err).To(BeNil())
+
+		// Get the instant refund leaf and control block for signing
+		instantRefundLeaf, cbBytes, err := getControlBlock(internalKey, aliceHTLC1, btc.LeafInstantRefund)
+		Expect(err).To(BeNil())
+
+		for i, txIn := range msgTx.TxIn {
+			newWitness := [][]byte{
+				btc.AddSignatureSchnorrOp,
+				btc.AddSignatureSchnorrOp,
+				instantRefundLeaf.Script,
+				cbBytes,
+			}
+
+			utxoAmount := 1000000
+
+			signedWitness, err := aliceSimpleWallet.SignSACPTx(msgTx, i, int64(utxoAmount), instantRefundLeaf, aliceSimpleWallet.Address(), newWitness)
+			Expect(err).To(BeNil())
+
+			txIn.Witness[1] = signedWitness[1]
+		}
+
+		txBytes, err := btc.GetTxRawBytes(msgTx)
+		Expect(err).To(BeNil())
+
+		By("Instant refund HTLCs")
+
+		txID, err = aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
+			{
+				Action:                   btc.InstantRefundHTLCAction,
+				HTLC:                     *aliceHTLC1,
+				InsantRefundSACPTxBytes:  txBytes,
+				InstantRefundSigAddAtIdx: 1,
+			},
+		})
+		Expect(err).To(BeNil())
+		Expect(txID).NotTo(BeEmpty())
+
+		fmt.Println("txID", txID)
+	})
+
 })
 
 // ------------------------------Helper functions--------------------------------
@@ -517,4 +608,103 @@ func generateSecret() ([]byte, []byte, error) {
 	}
 	sh := sha256.Sum256(secret)
 	return secret, sh[:], nil
+}
+
+// Helper function to get control block (copied from htlc.go)
+func getControlBlock(internalKey *btcec.PublicKey, htlc *btc.HTLC, leaf btc.Leaf) (txscript.TapLeaf, []byte, error) {
+	leaves, err := htlcLeaves(htlc)
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
+
+	tapScriptTree := txscript.AssembleTaprootScriptTree(leaves.ToArray()...)
+
+	controlBlock := tapScriptTree.LeafMerkleProofs[leaves.IndexOf(leaf)].ToControlBlock(
+		internalKey,
+	)
+
+	cbBytes, err := controlBlock.ToBytes()
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
+	tapLeaf, err := leaves.GetTapLeaf(leaf)
+	if err != nil {
+		return txscript.TapLeaf{}, nil, err
+	}
+
+	return tapLeaf, cbBytes, nil
+}
+
+// Helper function to create HTLC leaves (copied from htlc.go)
+func htlcLeaves(htlc *btc.HTLC) (*htlcTapLeaves, error) {
+	redeemLeaf, err := btc.RedeemLeaf(htlc.RedeemerPubkey, htlc.SecretHash)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
+
+	refundLeaf, err := btc.RefundLeaf(htlc.InitiatorPubkey, htlc.Timelock)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
+
+	instantRefundLeaf, err := btc.MultiSigLeaf(htlc.InitiatorPubkey, htlc.RedeemerPubkey)
+	if err != nil {
+		return &htlcTapLeaves{}, err
+	}
+	return newLeaves(redeemLeaf, refundLeaf, instantRefundLeaf)
+}
+
+// Helper struct and methods (copied from htlc.go)
+type htlcTapLeaves struct {
+	redeem        txscript.TapLeaf
+	refund        txscript.TapLeaf
+	instantRefund txscript.TapLeaf
+}
+
+func newLeaves(redeem, refund, instantRefund txscript.TapLeaf) (*htlcTapLeaves, error) {
+	return &htlcTapLeaves{
+		redeem:        redeem,
+		refund:        refund,
+		instantRefund: instantRefund,
+	}, nil
+}
+
+func (l *htlcTapLeaves) ToArray() []txscript.TapLeaf {
+	return []txscript.TapLeaf{l.instantRefund, l.refund, l.redeem}
+}
+
+func (l *htlcTapLeaves) GetTapLeaf(leaf btc.Leaf) (txscript.TapLeaf, error) {
+	switch leaf {
+	case btc.LeafRedeem:
+		return l.redeem, nil
+	case btc.LeafRefund:
+		return l.refund, nil
+	case btc.LeafInstantRefund:
+		return l.instantRefund, nil
+	default:
+		return txscript.TapLeaf{}, nil
+	}
+}
+
+func (l *htlcTapLeaves) IndexOf(leaf btc.Leaf) int {
+	var leafScript []byte
+
+	switch leaf {
+	case btc.LeafRedeem:
+		leafScript = l.redeem.Script
+	case btc.LeafRefund:
+		leafScript = l.refund.Script
+	case btc.LeafInstantRefund:
+		leafScript = l.instantRefund.Script
+	default:
+		return -1
+	}
+
+	leaves := l.ToArray()
+	for i, l := range leaves {
+		if bytes.Equal(l.Script, leafScript) {
+			return i
+		}
+	}
+	return -1
 }

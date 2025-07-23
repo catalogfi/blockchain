@@ -285,10 +285,8 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 		return nil, ErrFeeExceedsValue
 	}
 
-	sequenceMap := generateSequenceMap(utxoMap, []SpendRequest{spendRequest})
-
 	// build the transaction with no recipients or sacps
-	tx, _, err := buildTransaction(utxos, nil, nil, nil, to, fee, sequenceMap)
+	tx, err := buildSACPTransaction(utxos, to, fee)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +303,11 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 		return nil, err
 	}
 
-	if int64(feeToBePaid) > fee {
+	// Allow a small difference between estimated and actual fee to avoid overpaying or underpaying.
+	const feeTolerance = 500 // satoshis; adjust as needed
+	feeDiff := int64(feeToBePaid) - fee
+	if feeDiff > 0 || feeDiff < -feeTolerance {
+		// If we are underpaying, or overpaying by more than the tolerance, recalculate
 		return sw.generateSACP(ctx, spendRequest, to, int64(feeToBePaid))
 	}
 
@@ -587,6 +589,65 @@ func buildTxFromSacps(sacps [][]byte) (*wire.MsgTx, int, error) {
 	return tx, idx, nil
 }
 
+// Builds an unsigned SACP transaction with the given utxos and recipient
+func buildSACPTransaction(utxos UTXOs, to btcutil.Address, fee int64) (*wire.MsgTx, error) {
+	tx := wire.NewMsgTx(DefaultTxVersion)
+
+	txIns := []*wire.TxIn{}
+	txOuts := []*wire.TxOut{}
+
+	recipientScript, err := txscript.PayToAddrScript(to)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, utxo := range utxos {
+		// Check if the utxo amount is less than dust amount
+		if utxo.Amount < DustAmount {
+			return nil, fmt.Errorf("utxo amount is less than dust amount")
+		}
+
+		txid, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		txIn := wire.NewTxIn(wire.NewOutPoint(txid, utxo.Vout), []byte{}, [][]byte{})
+		txIns = append(txIns, txIn)
+
+		txOut := wire.NewTxOut(utxo.Amount, recipientScript)
+		txOuts = append(txOuts, txOut)
+	}
+
+	// Check if we have any outputs
+	if len(txOuts) == 0 {
+		return nil, fmt.Errorf("no outputs to create")
+	}
+
+	// find the index of the output with max output amount
+	maxOutputIdx := 0
+	for i, txOut := range txOuts {
+		if txOut.Value > txOuts[maxOutputIdx].Value {
+			maxOutputIdx = i
+		}
+	}
+
+	// remove the fee from the outputs evenly, with the remainder fee going to the max output.
+	feePerOutput := fee / int64(len(txOuts))
+	remainderFee := fee % int64(len(txOuts))
+	for i, txOut := range txOuts {
+		txOut.Value -= feePerOutput
+		if i == maxOutputIdx {
+			txOut.Value -= remainderFee
+		}
+	}
+
+	// add the inputs and outputs to the transaction
+	tx.TxIn = txIns
+	tx.TxOut = txOuts
+
+	return tx, nil
+}
+
 // Builds an unsigned transaction with the given utxos, recipients, change address and fee.
 func buildTransaction(utxos UTXOs, sacps [][]byte, recipients []SendRequest, redirectedRecipients []RedirectedSendRequest, changeAddr btcutil.Address, fee int64, sequencesMap map[string]uint32) (*wire.MsgTx, int, error) {
 
@@ -783,12 +844,12 @@ func signSpendTx(ctx context.Context, tx *wire.MsgTx, startingIdx int, inputs []
 			return ErrNoUTXOsFoundForAddress(in.ScriptAddress.String())
 		}
 
-		for _, utxo := range utxos {
-			err = signTx(tx, prevOutFetcher, utxo.Amount, idx, in.Witness, script, &in.Leaf, in.HashType, privateKey)
+		for i, utxo := range utxos {
+			// idx+i is the index of the input to sign, if there are multiple utxos for the same address
+			err = signTx(tx, prevOutFetcher, utxo.Amount, idx+i, in.Witness, script, &in.Leaf, in.HashType, privateKey)
 			if err != nil {
 				return err
 			}
-			idx++
 		}
 	}
 
