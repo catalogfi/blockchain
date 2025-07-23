@@ -453,17 +453,17 @@ func validateInstantRefundSACP(refundSACP []byte, utxos []UTXO, cb []byte, insta
 		}
 
 		// first two should be signature lens
-		if len(tx.TxIn[0].Witness[0]) != 65 || len(tx.TxIn[0].Witness[1]) != 65 {
+		if len(txIn.Witness[0]) != 65 || len(txIn.Witness[1]) != 65 {
 			return nil, ErrInvalidInstantRefundSACPWitnessLen
 		}
 
 		// instant refund script should be the same
-		if !bytes.Equal(tx.TxIn[0].Witness[2], instantRefundLeaf.Script) {
+		if !bytes.Equal(txIn.Witness[2], instantRefundLeaf.Script) {
 			return nil, ErrInvalidInstantRefundScript
 		}
 
 		// control block should be the same
-		if !bytes.Equal(tx.TxIn[0].Witness[3], cb) {
+		if !bytes.Equal(txIn.Witness[3], cb) {
 			return nil, ErrInvalidControlBlock
 		}
 	}
