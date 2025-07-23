@@ -479,14 +479,14 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		Expect(tx.VOUTs[1].ScriptPubKeyAddress).To(Equal(aliceSimpleWallet.Address().EncodeAddress()))
 	})
 
-	It("should be able to initiate and instant refund multiple utxos in single HTLCs", func(ctx context.Context) {
+	It("should be able to initiate and instant refund multiple utxos in single HTLC", func(ctx context.Context) {
 		aliceHTLC1, _, err := generateHTLC(alicePrivKey, bobPrivKey)
 		Expect(err).To(BeNil())
 
 		aliceHTLCWallet, err := btc.NewHTLCWallet(aliceSimpleWallet, indexer, &chainParams)
 		Expect(err).To(BeNil())
 
-		By("Initiate HTLCs")
+		By("Initiate HTLC")
 
 		txID, err := aliceHTLCWallet.Execute(ctx, []btc.RawHTLCAction{
 			{
@@ -531,6 +531,7 @@ var _ = Describe("HTLC Wallet(p2tr)", Ordered, func() {
 		instantRefundLeaf, cbBytes, err := getControlBlock(internalKey, aliceHTLC1, btc.LeafInstantRefund)
 		Expect(err).To(BeNil())
 
+		// Add initiator's signature to the instant refund sacp tx.
 		for i, txIn := range msgTx.TxIn {
 			newWitness := [][]byte{
 				btc.AddSignatureSchnorrOp,

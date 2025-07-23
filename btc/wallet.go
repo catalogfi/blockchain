@@ -285,7 +285,7 @@ func (sw *SimpleWallet) generateSACP(ctx context.Context, spendRequest SpendRequ
 		return nil, ErrFeeExceedsValue
 	}
 
-	// build the transaction with no recipients or sacps
+	// build the sacp transaction.
 	tx, err := buildSACPTransaction(utxos, to, fee)
 	if err != nil {
 		return nil, err
