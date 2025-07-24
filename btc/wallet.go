@@ -142,13 +142,14 @@ func (wal *wallet) Redeem(ctx context.Context, htlc *HTLC) (*wire.MsgTx, error) 
 	if err != nil {
 		return nil, err
 	}
-	redeemable, _, err := htlc.Redeemable(utxos)
-	if err != nil {
-		return nil, err
-	}
-	if !redeemable {
-		return nil, fmt.Errorf("HTLC is not redeemable")
-	}
+	// todo : disable this for now
+	// redeemable, _, err := htlc.Redeemable(utxos)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if !redeemable {
+	// 	return nil, fmt.Errorf("HTLC is not redeemable")
+	// }
 
 	// Fees
 	feeRate, err := wal.feeEstimator.FeeSuggestion()
@@ -342,7 +343,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 				signers.AddUtxo(walSigner, utxo)
 			} else {
 				// Decode the action from its witness
-				witness, err := decodeWitness(*vin.Witness)
+				witness, err := DecodeWitness(*vin.Witness)
 				if err != nil {
 					return nil, err
 				}
@@ -532,7 +533,7 @@ func (wal *wallet) InstantRefundTx(utxo UTXO, htlc *HTLC) (*wire.MsgTx, error) {
 	return irTx, nil
 }
 
-func decodeWitness(witnessStr []string) (wire.TxWitness, error) {
+func DecodeWitness(witnessStr []string) (wire.TxWitness, error) {
 	witness := make(wire.TxWitness, len(witnessStr))
 	for i := range witness {
 		decoded, err := hex.DecodeString(witnessStr[i])

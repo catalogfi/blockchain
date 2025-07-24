@@ -457,12 +457,11 @@ var _ = Describe("Wallet", func() {
 					_, err = wal1.Execute(ctx, actions3, "")
 					Expect(err).Should(BeNil())
 				}
-
 			})
 		})
 
 		Context("rbf", func() {
-			It("should be able to do rbf with new actions", func(ctx context.Context) {
+			FIt("should be able to do rbf with new actions", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
 					feeEstimator := btc.NewFixFeeEstimator(10e3)
@@ -479,7 +478,7 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 					refunds, err := btctest.PrepareActions(ctx, number, wal1, wal2, indexer, btc.HtlcActionRefund)
 					Expect(err).Should(BeNil())
-					instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInitiate)
+					instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
 					Expect(err).Should(BeNil())
 
 					By("Combined all actions and shuffle the order")

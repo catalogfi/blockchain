@@ -98,7 +98,11 @@ func NewSpendSigner(key *btcec.PrivateKey, script, otherSig []byte, user bool, s
 }
 
 func (signer *SpendSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.SigHashType, signer.key)
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, signer.script, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}
@@ -142,7 +146,10 @@ func NewRefundSigner(key *btcec.PrivateKey, script []byte, timelock int64, sigOp
 }
 
 func (signer *RefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.SigHashType, signer.key)
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, signer.script, signer.opts.SigHashType, signer.key)
 	if err != nil {
 		return err
 	}

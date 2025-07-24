@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -88,7 +87,6 @@ func (client *Client) NewTransaction(address string, unsignedTx *wire.MsgTx) (*w
 	if err != nil {
 		return nil, err
 	}
-	log.Print("request = ", string(data))
 
 	response, err := client.hc.Post(path, "application/json", bytes.NewBuffer(data))
 	if err != nil {
