@@ -295,6 +295,27 @@ var (
 	}
 )
 
+// Asset on Solana
+var (
+	// Mainnet
+
+	AssetSolSolana = Asset{
+		Chain:    NewSolanaChain(Solana),
+		Address:  Native,
+		Decimals: 9,
+		Symbol:   "SOL",
+	}
+
+	// Testnet
+
+	AssetSolSolanaDevnet = Asset{
+		Chain:    NewSolanaChain(SolanaDevnet),
+		Address:  Native,
+		Decimals: 9,
+		Symbol:   "SOL",
+	}
+)
+
 func HtlcContractAddress(asset Asset) common.Address {
 	switch {
 	case asset.Chain.Name() == Ethereum:
