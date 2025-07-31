@@ -35,6 +35,23 @@ func NewClient(url string) *Client {
 	}
 }
 
+// CosignerPub queries the public key of the cosigner server.
+func (client *Client) CosignerPub() (*btcec.PublicKey, error) {
+	path := fmt.Sprintf("%v", client.url)
+	var resp struct {
+		Pub string `json:"public_key"`
+	}
+	if err := client.do("GET", path, http.StatusOK, nil, &resp); err != nil {
+		return nil, err
+	}
+	raw, err := hex.DecodeString(resp.Pub)
+	if err != nil {
+		return nil, err
+	}
+	return btcec.ParsePubKey(raw)
+}
+
+// NewAccount creates a new account with given public key. It returns the address of the new account.
 func (client *Client) NewAccount(pub *btcec.PublicKey) (string, error) {
 	pubStr := hex.EncodeToString(pub.SerializeCompressed())
 	var req = struct {
@@ -42,70 +59,36 @@ func (client *Client) NewAccount(pub *btcec.PublicKey) (string, error) {
 	}{
 		PublicKey: pubStr,
 	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		return "", err
-	}
-
-	path := fmt.Sprintf("%v/accounts", client.url)
-	response, err := client.hc.Post(path, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusCreated {
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return "", err
-		}
-		return "", fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
-
 	var resp struct {
 		Address string `json:"address"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
+	path := fmt.Sprintf("%v/accounts", client.url)
+	if err := client.do("POST", path, http.StatusCreated, req, &resp); err != nil {
 		return "", err
 	}
 	return resp.Address, nil
 }
 
+// NewTransaction posts a new transaction of the given cosigner account. It returns the transaction with cosigner's
+// signature.
 func (client *Client) NewTransaction(address string, unsignedTx *wire.MsgTx) (*wire.MsgTx, error) {
 	path := fmt.Sprintf("%v/account/%v/transactions", client.url, address)
 	buff := bytes.NewBuffer(make([]byte, 0, unsignedTx.SerializeSize()))
 	if err := unsignedTx.Serialize(buff); err != nil {
 		return nil, err
 	}
-
 	request := struct {
 		UnsignedTx string `json:"unsigned_tx"`
 	}{
 		hex.EncodeToString(buff.Bytes()),
 	}
-	data, err := json.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := client.hc.Post(path, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusCreated {
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
-
 	var resp struct {
 		SignedTx string `json:"signed_tx"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
+	if err := client.do("POST", path, http.StatusCreated, request, &resp); err != nil {
 		return nil, err
 	}
+
 	signedTxBytes, err := hex.DecodeString(resp.SignedTx)
 	if err != nil {
 		return nil, err
@@ -117,76 +100,31 @@ func (client *Client) NewTransaction(address string, unsignedTx *wire.MsgTx) (*w
 	return tx.MsgTx(), nil
 }
 
+// GetTransactions returns the current transaction status of the address.
 func (client *Client) GetTransactions(address string) ([]Transaction, error) {
 	path := fmt.Sprintf("%v/account/%v/transactions", client.url, address)
-	response, err := client.hc.Get(path)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
 	var txs []Transaction
-	if err := json.NewDecoder(response.Body).Decode(&txs); err != nil {
-		return nil, err
-	}
-	return txs, nil
+	err := client.do("GET", path, http.StatusOK, nil, &txs)
+	return txs, err
 }
 
 func (client *Client) GetLatestTransaction(address string) (*Transaction, error) {
 	path := fmt.Sprintf("%v/account/%v/transaction/latest", client.url, address)
-	response, err := client.hc.Get(path)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusNotFound {
-			return nil, nil
-		}
-
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
+	// todo : handle  status code not found
 	var tx Transaction
-	if err := json.NewDecoder(response.Body).Decode(&tx); err != nil {
-		return nil, err
-	}
-	return &tx, nil
+	err := client.do("GET", path, http.StatusOK, nil, &tx)
+	return &tx, err
 }
 
 func (client *Client) GetTransactionByNonce(address string, nonce int) (*Transaction, error) {
 	path := fmt.Sprintf("%v/account/%v/transaction/%v", client.url, address, nonce)
-	response, err := client.hc.Get(path)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == http.StatusNotFound {
-			return nil, nil
-		}
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
 	var tx Transaction
-	if err := json.NewDecoder(response.Body).Decode(&tx); err != nil {
-		return nil, err
-	}
-	return &tx, nil
+	err := client.do("GET", path, http.StatusOK, nil, &tx)
+	return &tx, err
 }
 
 func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backupTxs map[string]*wire.MsgTx) (*wire.MsgTx, error) {
 	path := fmt.Sprintf("%v/account/%v/transaction/latest", client.url, address)
-
 	backupMap := make(map[string]string)
 	for txid, tx := range backupTxs {
 		buffer := bytes.NewBuffer([]byte{})
@@ -206,35 +144,13 @@ func (client *Client) UpdateTransaction(address string, newTx *wire.MsgTx, backu
 		BackupTxs:  backupMap,
 		UnsignedTx: hex.EncodeToString(buff.Bytes()),
 	}
-	data, err := json.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPut, path, bytes.NewBuffer(data))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	response, err := client.hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if response.StatusCode != http.StatusOK {
-		msg, err := io.ReadAll(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
-	}
-
 	var resp struct {
 		SignedTx string `json:"signed_tx"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
+	if err := client.do("PUT", path, http.StatusOK, request, &resp); err != nil {
 		return nil, err
 	}
+
 	signedTxBytes, err := hex.DecodeString(resp.SignedTx)
 	if err != nil {
 		return nil, err
@@ -258,21 +174,41 @@ func (client *Client) NewMergeTx(tx *wire.MsgTx) error {
 	}{
 		hex.EncodeToString(buff.Bytes()),
 	}
-	data, err := json.Marshal(request)
+	return client.do("POST", path, http.StatusCreated, request, nil)
+}
+
+func (client *Client) do(method, path string, code int, request, resp any) error {
+	// Construct the request
+	var body io.Reader
+	if request != nil {
+		data, err := json.Marshal(request)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewBuffer(data)
+	}
+	req, err := http.NewRequest(method, path, body)
 	if err != nil {
 		return err
+	}
+	switch method {
+	case "POST", "PUT":
+		req.Header.Set("Content-Type", "application/json")
 	}
 
-	response, err := client.hc.Post(path, "application/json", bytes.NewBuffer(data))
+	response, err := client.hc.Do(req)
 	if err != nil {
 		return err
 	}
-	if response.StatusCode != http.StatusCreated {
+	if response.StatusCode != code {
 		msg, err := io.ReadAll(response.Body)
 		if err != nil {
 			return err
 		}
 		return fmt.Errorf("code [%v] msg [%v]", response.Status, string(msg))
+	}
+	if resp != nil {
+		return json.NewDecoder(response.Body).Decode(&resp)
 	}
 	return nil
 }

@@ -174,7 +174,7 @@ func (htlc *HTLC) Secret() []byte {
 	return htlc.secret
 }
 
-func (htlc *HTLC) P2trScript() ([]byte, error) {
+func (htlc *HTLC) ScriptPubKey() ([]byte, error) {
 	rootHash := htlc.tree.RootNode.TapHash()
 	outputKey := txscript.ComputeTaprootOutputKey(GardenNums, rootHash[:])
 	return txscript.PayToTaprootScript(outputKey)
@@ -463,7 +463,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	}
 
 	// Verify signature
-	script, err := htlc.P2trScript()
+	script, err := htlc.ScriptPubKey()
 	if err != nil {
 		return UTXO{}, nil, err
 	}

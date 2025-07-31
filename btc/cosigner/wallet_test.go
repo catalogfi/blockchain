@@ -16,14 +16,14 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = FDescribe("wallet", func() {
+var _ = Describe("wallet", func() {
 	Context("htlc actions", func() {
 		It("should be able to initiate a few htlcs", func(ctx context.Context) {
 			By("Create a new wallet")
 			key1, err := btcec.NewPrivateKey()
 			Expect(err).Should(BeNil())
 			feeEstimator := btc.NewFixFeeEstimator(1e3)
-			wallet, err := cosigner.NewWallet(network, key1, cosignerPub, indexer, client, btcClient, feeEstimator)
+			wallet, err := cosigner.NewWallet(network, key1, indexer, client, btcClient, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("Fund the wallet")
@@ -46,9 +46,9 @@ var _ = FDescribe("wallet", func() {
 						Htlc:       htlc,
 					},
 				}
-				tx, _, err := wallet.Execute(ctx, action)
+				res, err := wallet.Execute(ctx, action)
 				Expect(err).Should(BeNil())
-				log.Printf("tx = %v", tx.TxHash().String())
+				log.Print(res.String())
 			}
 		})
 
@@ -65,7 +65,7 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Create a new cosigner wallet")
-			wallet, err := cosigner.NewWallet(network, key1, cosignerPub, indexer, client, btcClient, feeEstimator)
+			wallet, err := cosigner.NewWallet(network, key1, indexer, client, btcClient, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("fund the wallets")
@@ -83,9 +83,9 @@ var _ = FDescribe("wallet", func() {
 			for i := 0; i < 5; i++ {
 				// Wal1 inits the htlc
 				time.Sleep(5 * time.Second)
-				initTx, _, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
+				res, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
 				Expect(err).Should(BeNil())
-				log.Printf("tx = %v", initTx.TxHash().String())
+				log.Print(res.String())
 
 				// Wal2 redeems the htlc
 				time.Sleep(time.Second)
@@ -109,7 +109,7 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Create a new cosigner wallet")
-			wallet, err := cosigner.NewWallet(network, key1, cosignerPub, indexer, client, btcClient, feeEstimator)
+			wallet, err := cosigner.NewWallet(network, key1, indexer, client, btcClient, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("fund the wallets")
@@ -124,9 +124,9 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 			for i := 0; i < 5; i++ {
 				time.Sleep(5 * time.Second)
-				_, tx, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
+				res, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
 				Expect(err).Should(BeNil())
-				log.Printf("tx = %v", tx.TxHash().String())
+				log.Print(res.String())
 			}
 		})
 
@@ -143,7 +143,7 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Create a new cosigner wallet")
-			wallet, err := cosigner.NewWallet(network, key1, cosignerPub, indexer, client, btcClient, feeEstimator)
+			wallet, err := cosigner.NewWallet(network, key1, indexer, client, btcClient, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("fund the wallets")
@@ -160,9 +160,9 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 			for i := 0; i < 5; i++ {
 				time.Sleep(5 * time.Second)
-				_, tx, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
+				res, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
 				Expect(err).Should(BeNil())
-				log.Printf("tx = %v", tx.TxHash().String())
+				log.Print(res.String())
 			}
 		})
 
@@ -179,7 +179,7 @@ var _ = FDescribe("wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Create a new cosigner wallet")
-			wallet, err := cosigner.NewWallet(network, key1, cosignerPub, indexer, client, btcClient, feeEstimator)
+			wallet, err := cosigner.NewWallet(network, key1, indexer, client, btcClient, feeEstimator)
 			Expect(err).Should(BeNil())
 
 			By("fund the wallets")
@@ -210,9 +210,9 @@ var _ = FDescribe("wallet", func() {
 
 			By("Execute all actions one by one using rbf")
 			for i := 0; i < len(actions); i++ {
-				tx1, tx2, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
+				res, err := wallet.Execute(ctx, []btc.HtlcAction{actions[i]})
 				Expect(err).Should(BeNil())
-				Expect(tx1 != nil || tx2 != nil).Should(BeTrue())
+				log.Print(res.String())
 				time.Sleep(1 * time.Second)
 			}
 		})
