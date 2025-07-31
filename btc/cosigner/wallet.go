@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -95,6 +96,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []btc.HtlcAction) (*wire
 			others = append(others, action)
 		}
 	}
+	log.Print("have %v init and %v others", len(inits), len(others))
 
 	// Process actions
 	var initTx, otherTx *wire.MsgTx
@@ -169,6 +171,12 @@ func (wal *wallet) processInits(ctx context.Context, actions []btc.HtlcAction) (
 		if err := signers.Sign(tx); err != nil {
 			return nil, err
 		}
+
+		raw, err := btc.TxRawBytes(tx)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("raw = %v", hex.EncodeToString(raw))
 
 		// Submit to cosigner server
 		signedTx, err := wal.cosignerClient.NewTransaction(wal.addr.EncodeAddress(), tx)
@@ -312,6 +320,11 @@ func (wal *wallet) processInits(ctx context.Context, actions []btc.HtlcAction) (
 		}
 		backupTxs[txid] = backupTx
 	}
+	raw, err := btc.TxRawBytes(tx)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("raw = %v", string(raw))
 
 	// Submit to cosigner server
 	signedTx, err := wal.cosignerClient.UpdateTransaction(wal.addr.EncodeAddress(), tx, backupTxs)

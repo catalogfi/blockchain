@@ -461,7 +461,7 @@ var _ = Describe("Wallet", func() {
 		})
 
 		Context("rbf", func() {
-			FIt("should be able to do rbf with new actions", func(ctx context.Context) {
+			It("should be able to do rbf with new actions", func(ctx context.Context) {
 				for _, addrType := range addrTypes {
 					By("Init keys and wallets")
 					feeEstimator := btc.NewFixFeeEstimator(10e3)

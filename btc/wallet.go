@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -239,7 +238,6 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	// Validate tx
 	utxo, recipient, err := ValidateInstantRefundTx(htlc, tx, wal.network)
 	if err != nil {
-		log.Print("err here ")
 		return nil, err
 	}
 
@@ -275,11 +273,6 @@ func (wal *wallet) InstantRefund(ctx context.Context, htlc *HTLC, tx *wire.MsgTx
 	if err := signers.Sign(transaction); err != nil {
 		return nil, err
 	}
-	raw, err := TxRawBytes(transaction)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("raw = %v", hex.EncodeToString(raw))
 
 	// Submit tx
 	if err := wal.indexer.SubmitTx(ctx, transaction); err != nil {
@@ -370,7 +363,7 @@ func (wal *wallet) Execute(ctx context.Context, actions []HtlcAction, prevTxid s
 					signers.AddUtxo(signer, utxo)
 					sequenceMap[utxo.String()] = vin.Sequence
 				case HtlcActionInstantRefund:
-					otherSig := witness[0]
+					otherSig := witness[1]
 					signer = NewHtlcInstantRefundSigner(wal.externalKey, leaf, *ctrBlock, true, otherSig)
 					signers.AddUtxo(signer, utxo)
 				}
