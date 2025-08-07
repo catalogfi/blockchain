@@ -27,6 +27,10 @@ var _ = Describe("wallet", func() {
 			Expect(err).Should(BeNil())
 
 			By("Fund the wallet")
+			addr1, err := btc.PublicKeyAddress(network, waddrmgr.WitnessPubKey, key1.PubKey())
+			Expect(err).Should(BeNil())
+			_, err = btctest.Faucet(addr1.EncodeAddress())
+			Expect(err).Should(BeNil())
 			fundTx, err := btctest.Faucet(wallet.Address().EncodeAddress())
 			Expect(err).Should(BeNil())
 			Expect(btctest.WaitMined(ctx, indexer, btctest.WaitTx(fundTx.String()))).Should(Succeed())
@@ -166,7 +170,7 @@ var _ = Describe("wallet", func() {
 			}
 		})
 
-		It("should be able to do a mix of actions ", func(ctx context.Context) {
+		FIt("should be able to do a mix of actions ", func(ctx context.Context) {
 			By("Create new wallets")
 			key1, err := btcec.NewPrivateKey()
 			Expect(err).Should(BeNil())
@@ -199,11 +203,11 @@ var _ = Describe("wallet", func() {
 			Expect(err).Should(BeNil())
 			refunds, err := btctest.PrepareActions(ctx, number, wal1, wal2, indexer, btc.HtlcActionRefund)
 			Expect(err).Should(BeNil())
-			// instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
-			// Expect(err).Should(BeNil())
+			instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
+			Expect(err).Should(BeNil())
 
 			By("Combined all actions and shuffle the order")
-			actions := append(inits, append(redeems, refunds...)...)
+			actions := append(inits, append(redeems, append(instantRefunds, refunds...)...)...)
 			rand.Shuffle(len(actions), func(i, j int) {
 				actions[i], actions[j] = actions[j], actions[i]
 			})
