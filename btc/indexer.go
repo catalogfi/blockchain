@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"go.uber.org/zap"
 )
@@ -171,9 +172,19 @@ func (client *electrsIndexerClient) GetUTXOs(ctx context.Context, address btcuti
 		if err := json.NewDecoder(resp.Body).Decode(&utxos); err != nil {
 			return fmt.Errorf("failed to decode UTXOs: %w", err)
 		}
+
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	// Add the pkScript to the utxos
+	pkScrip, err := txscript.PayToAddrScript(address)
+	if err != nil {
+		return nil, err
+	}
+	for i := range utxos {
+		utxos[i].PkScript = pkScrip
 	}
 
 	return utxos, nil

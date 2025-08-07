@@ -151,9 +151,9 @@ func NewHTLC(initiatorPubKey, redeemerPubKey, secretHash []byte, timelock, amoun
 	}, nil
 }
 
-// Address returns the address of the htlc script. We panic for the error since it shouldn't happen, this will make
+// MustAddress returns the address of the htlc script. We panic for the error since it shouldn't happen, this will make
 // things easier for the caller.
-func (htlc *HTLC) Address(network *chaincfg.Params) btcutil.Address {
+func (htlc *HTLC) MustAddress(network *chaincfg.Params) btcutil.Address {
 	if htlc.tree == nil {
 		panic(fmt.Errorf("empty htlc tree"))
 	}
@@ -174,7 +174,7 @@ func (htlc *HTLC) Secret() []byte {
 	return htlc.secret
 }
 
-func (htlc *HTLC) P2trScript() ([]byte, error) {
+func (htlc *HTLC) ScriptPubKey() ([]byte, error) {
 	rootHash := htlc.tree.RootNode.TapHash()
 	outputKey := txscript.ComputeTaprootOutputKey(GardenNums, rootHash[:])
 	return txscript.PayToTaprootScript(outputKey)
@@ -210,7 +210,7 @@ func (htlc *HTLC) Refundable(utxos []UTXO, latest uint64) bool {
 
 // Utxo finds the initiation utxo of the htlc.
 func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) (UTXO, error) {
-	addr := htlc.Address(network)
+	addr := htlc.MustAddress(network)
 	utxos, err := indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return UTXO{}, err
@@ -225,7 +225,7 @@ func (htlc *HTLC) Utxo(ctx context.Context, network *chaincfg.Params, indexer In
 }
 
 func (htlc *HTLC) RefundableUtxos(ctx context.Context, network *chaincfg.Params, indexer IndexerClient) ([]UTXO, error) {
-	addr := htlc.Address(network)
+	addr := htlc.MustAddress(network)
 	utxos, err := indexer.GetUTXOs(ctx, addr)
 	if err != nil {
 		return nil, err
@@ -463,7 +463,7 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 	}
 
 	// Verify signature
-	script, err := htlc.P2trScript()
+	script, err := htlc.ScriptPubKey()
 	if err != nil {
 		return UTXO{}, nil, err
 	}
@@ -491,9 +491,10 @@ func ValidateInstantRefundTx(htlc *HTLC, tx *wire.MsgTx, network *chaincfg.Param
 
 	// Parse the input's utxo and output address from the tx
 	utxo := UTXO{
-		TxID:   tx.TxIn[0].PreviousOutPoint.Hash.String(),
-		Vout:   tx.TxIn[0].PreviousOutPoint.Index,
-		Amount: amount,
+		TxID:     tx.TxIn[0].PreviousOutPoint.Hash.String(),
+		Vout:     tx.TxIn[0].PreviousOutPoint.Index,
+		Amount:   amount,
+		PkScript: script,
 	}
 	return utxo, tx.TxOut[0], nil
 }
@@ -530,4 +531,126 @@ func decodeLocktime(v []byte) int64 {
 	}
 
 	return result
+}
+
+type HtlcRedeemSigner struct {
+	opts   *SigOptions
+	leaf   txscript.TapLeaf
+	ctrBlk txscript.ControlBlock
+	key    *btcec.PrivateKey
+	secret []byte
+}
+
+func NewHtlcRedeemSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, secret []byte, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcRedeemSigner{
+		key:    key,
+		leaf:   leaf,
+		ctrBlk: ctrBlk,
+		opts:   opts,
+		secret: secret,
+	}
+}
+
+func (signer *HtlcRedeemSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig, signer.secret, signer.leaf.Script, ctrBlkBytes}
+	return nil
+}
+
+func (signer *HtlcRedeemSigner) SigSize() (int, int) {
+	return BaseSizeHtlcRedeem, SegwitSizeHtlcRedeem(len(signer.secret))
+}
+
+type HtlcRefundSigner struct {
+	opts     *SigOptions
+	leaf     txscript.TapLeaf
+	ctrBlk   txscript.ControlBlock
+	key      *btcec.PrivateKey
+	timelock int64
+}
+
+func NewHtlcRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, timelock int64, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcRefundSigner{
+		opts:     opts,
+		leaf:     leaf,
+		ctrBlk:   ctrBlk,
+		key:      key,
+		timelock: timelock,
+	}
+}
+
+func (signer *HtlcRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig, signer.leaf.Script, ctrBlkBytes}
+	return nil
+}
+
+func (signer *HtlcRefundSigner) SigSize() (int, int) {
+	return BaseSizeHtlcRefund, SegwitSizeHtlcRefund(signer.timelock)
+}
+
+type HtlcInstantRefundSigner struct {
+	opts     *SigOptions
+	redeemer bool
+	otherSig []byte
+	leaf     txscript.TapLeaf
+	ctrBlk   txscript.ControlBlock
+	key      *btcec.PrivateKey
+}
+
+func NewHtlcInstantRefundSigner(key *btcec.PrivateKey, leaf txscript.TapLeaf, ctrBlk txscript.ControlBlock, redeemer bool, otherSig []byte, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &HtlcInstantRefundSigner{
+		key:      key,
+		redeemer: redeemer,
+		otherSig: otherSig,
+		leaf:     leaf,
+		ctrBlk:   ctrBlk,
+		opts:     opts,
+	}
+}
+
+func (signer *HtlcInstantRefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	ctrBlkBytes, err := signer.ctrBlk.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	sig, err := txscript.RawTxInTapscriptSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.leaf, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	if signer.redeemer {
+		tx.TxIn[index].Witness = wire.TxWitness{sig, signer.otherSig, signer.leaf.Script, ctrBlkBytes}
+	} else {
+		tx.TxIn[index].Witness = wire.TxWitness{signer.otherSig, sig, signer.leaf.Script, ctrBlkBytes}
+	}
+
+	return nil
+}
+
+func (signer *HtlcInstantRefundSigner) SigSize() (int, int) {
+	return BaseSizeHtlcInstantRefund, SegwitSizeHtlcInstantRefund
 }

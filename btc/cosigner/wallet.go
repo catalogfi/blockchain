@@ -4,86 +4,112 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
 )
+
+type ExecutionResult struct {
+	InitTx           *wire.MsgTx
+	RedeemOrRefundTx *wire.MsgTx
+	InstantRefundTx  *wire.MsgTx
+}
+
+func (res ExecutionResult) String() string {
+	s := ""
+	if res.InitTx != nil {
+		s += "initTx = " + res.InitTx.TxID() + "\n"
+	}
+	if res.RedeemOrRefundTx != nil {
+		s += "redeemOrRefundTx = " + res.RedeemOrRefundTx.TxID() + "\n"
+	}
+	if res.InstantRefundTx != nil {
+		s += "instantRefundTx = " + res.InstantRefundTx.TxID() + "\n"
+	}
+	return s
+}
 
 type Wallet interface {
 	PublicKey() *btcec.PublicKey
 
 	Address() btcutil.Address
 
-	// Send(ctx context.Context, recipients []*wire.TxOut) (*wire.MsgTx, error)
-
-	Patch(ctx context.Context, outputs []*wire.TxOut) (*wire.MsgTx, error)
-
-	// Merge(ctx context.Context) (*wire.MsgTx, error)
-	// Execute(ctx context.Context, actions []Action, prevTxid string) (*wire.MsgTx, error)
+	Execute(ctx context.Context, actions []btc.HtlcAction) (ExecutionResult, error)
 }
 
 type wallet struct {
-	mu      *sync.Mutex
-	network *chaincfg.Params
+	mu           *sync.Mutex
+	network      *chaincfg.Params
+	addrType     waddrmgr.AddressType
+	script       []byte
+	cosignerAddr btcutil.Address
+	addr         btcutil.Address
 
-	key      *btcec.PrivateKey
-	cosigner *btcec.PublicKey
-	script   []byte
-	addr     btcutil.Address
+	cosigner         *btcec.PublicKey
+	instantRefundTx  *wire.MsgTx
+	redeemOrRefundTx *wire.MsgTx
 
+	key            *btcec.PrivateKey
 	indexer        btc.IndexerClient
 	cosignerClient *Client
 	btcClient      btc.Client
 	feeEstimator   btc.FeeEstimator
-	fetcher        *btc.InMemFetcher
 }
 
-func NewWallet(network *chaincfg.Params, privateKey *btcec.PrivateKey, cosignerPub *btcec.PublicKey, indexer btc.IndexerClient, client *Client, btcClient btc.Client, estimator btc.FeeEstimator) (Wallet, error) {
+func NewWallet(network *chaincfg.Params, privateKey *btcec.PrivateKey, indexer btc.IndexerClient, client *Client, btcClient btc.Client, estimator btc.FeeEstimator) (Wallet, error) {
+	// Fetch the cosigner's public key
+	cosignerPub, err := client.CosignerPub()
+	if err != nil {
+		return nil, err
+	}
 
 	// Calculate the address
 	script, err := Script(cosignerPub.SerializeCompressed(), privateKey.PubKey().SerializeCompressed(), DefaultTimelock)
 	if err != nil {
 		return nil, err
 	}
-	addr, err := btc.P2wshAddress(script, network)
+	cosignerAddr, err := btc.P2wshAddress(script, network)
 	if err != nil {
 		return nil, err
 	}
 
-	// todo : Create account if first time initiated
+	// Create an account with cosigner server in case we haven't
 	response, err := client.NewAccount(privateKey.PubKey())
 	if err != nil {
 		return nil, err
 	}
-	if response != addr.EncodeAddress() {
+	if response != cosignerAddr.EncodeAddress() {
 		return nil, fmt.Errorf("cosigner: cosigner address mismatch")
 	}
-	fetcher, err := btc.NewInMemFetcher(time.Hour, indexer)
+
+	// Self address
+	addr, err := btc.PublicKeyAddress(network, waddrmgr.WitnessPubKey, privateKey.PubKey())
 	if err != nil {
 		return nil, err
 	}
 
 	return &wallet{
-		mu:      new(sync.Mutex),
-		network: network,
+		mu:           new(sync.Mutex),
+		network:      network,
+		addrType:     waddrmgr.WitnessPubKey,
+		script:       script,
+		addr:         addr,
+		cosignerAddr: cosignerAddr,
+		cosigner:     cosignerPub,
 
-		key:      privateKey,
-		cosigner: cosignerPub,
-		script:   script,
-		addr:     addr,
-
+		key:            privateKey,
 		indexer:        indexer,
 		cosignerClient: client,
 		btcClient:      btcClient,
 		feeEstimator:   estimator,
-		fetcher:        fetcher,
 	}, nil
 }
 
@@ -92,24 +118,106 @@ func (wal *wallet) PublicKey() *btcec.PublicKey {
 }
 
 func (wal *wallet) Address() btcutil.Address {
-	return wal.addr
+	return wal.cosignerAddr
 }
 
-func (wal *wallet) Patch(ctx context.Context, outputs []*wire.TxOut) (*wire.MsgTx, error) {
+func (wal *wallet) Execute(ctx context.Context, actions []btc.HtlcAction) (ExecutionResult, error) {
+	// Separate action into different categories
+	inits, spends, irs := []btc.HtlcAction{}, []btc.HtlcAction{}, []btc.HtlcAction{}
+	for _, action := range actions {
+		switch action.ActionType {
+		case btc.HtlcActionInitiate:
+			inits = append(inits, action)
+		case btc.HtlcActionRedeem, btc.HtlcActionRefund:
+			spends = append(spends, action)
+		case btc.HtlcActionInstantRefund:
+			irs = append(irs, action)
+		}
+	}
+
+	result := ExecutionResult{}
+
+	// Process inits
+	if len(inits) != 0 {
+		initTx, err := wal.processInits(ctx, inits)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+		result.InitTx = initTx
+	}
+
+	// Process redeems/refunds
+	if len(spends) != 0 {
+		tx, err := wal.processRedeemOrRefund(ctx, spends)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+		result.RedeemOrRefundTx = tx
+	}
+
+	// Process instant refunds
+	if len(irs) != 0 {
+		tx, err := wal.processInstantRefunds(ctx, irs)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+		result.InstantRefundTx = tx
+	}
+
+	return result, nil
+}
+
+func (wal *wallet) processInits(ctx context.Context, actions []btc.HtlcAction) (*wire.MsgTx, error) {
 	// Fetch address latest tx
-	latest, err := wal.cosignerClient.GetLatestTransaction(wal.addr.EncodeAddress())
+	latest, err := wal.cosignerClient.GetLatestTransaction(wal.cosignerAddr.EncodeAddress())
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if we need to create a new tx or update the existing tx
-	if len(latest.TxHashes) > 0 {
-		last := latest.TxHashes[len(latest.TxHashes)-1]
-		lastTxStr, ok := latest.MempoolTransactions[last]
-		if !ok {
-			return nil, fmt.Errorf("cannot find mempool transaction = %v", lastTxStr)
+	// Fetch wallet utxos
+	utxos, err := wal.fetchWalletUtxos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	signer := NewSpendSigner(wal.key, wal.script, nil, true)
+	signers, err := btc.NewSigners(signer, utxos...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current fee rate
+	feeRate, err := wal.feeEstimator.FeeSuggestion()
+	if err != nil {
+		return nil, err
+	}
+
+	// Prevent double init
+	outputMap := map[string]bool{}
+
+	// Create a new tx when there's no existing one
+	inputs, outputs := []btc.UTXO{}, []*wire.TxOut{}
+	var feeMode btc.FeeMode
+	if len(latest.TxHashes) == 0 {
+		for _, action := range actions {
+			// todo : need to check if the htlc has been initiated in previous txs
+			scriptPk, err := action.Htlc.ScriptPubKey()
+			if err != nil {
+				return nil, err
+			}
+			scriptPkHex := hex.EncodeToString(scriptPk)
+			if ok := outputMap[scriptPkHex]; ok {
+				continue
+			}
+			recipient := wire.NewTxOut(action.Htlc.Amount, scriptPk)
+			outputs = append(outputs, recipient)
+			outputMap[scriptPkHex] = true
 		}
-		lastTx, err := wal.decodeTxFromString(lastTxStr)
+
+		feeMode = btc.MinFeeRateMode(feeRate.High, signers)
+	} else {
+		// Get the latest tx status
+		last := latest.TxHashes[len(latest.TxHashes)-1]
+		lastTx, err := wal.indexer.GetTx(ctx, last)
 		if err != nil {
 			return nil, err
 		}
@@ -122,8 +230,6 @@ func (wal *wallet) Patch(ctx context.Context, outputs []*wire.TxOut) (*wire.MsgT
 				return nil, err
 			}
 
-			// If merge is not from the latest tx, we can safely ignore it
-			// todo : check if this is right, especially when non-latest tx is mined
 			if len(mtx.TxIn) != 1 {
 				return nil, fmt.Errorf("cosigner: merge tx %v has invalid number of inputs", mtx.TxHash().String())
 			}
@@ -131,105 +237,100 @@ func (wal *wallet) Patch(ctx context.Context, outputs []*wire.TxOut) (*wire.MsgT
 				mergeTxs = append(mergeTxs, mtx)
 			}
 		}
-		txOuts := map[string][]*wire.TxOut{}
+		txOuts := map[int][]*wire.TxOut{}
 		for _, mergeTx := range mergeTxs {
-			// Get the TxOut from the mergeTx input
-			if len(mergeTx.TxIn) != 1 {
-				return nil, fmt.Errorf("invalid merge tx %v : inputs more than 1", mergeTx.TxHash().String())
-			}
-			txid := mergeTx.TxIn[0].PreviousOutPoint.Hash.String()
 			vout := mergeTx.TxIn[0].PreviousOutPoint.Index
-			prevTxStr, ok := latest.MempoolTransactions[txid]
-			if !ok {
-				return nil, fmt.Errorf("cannot find mempool transaction = %v", txid)
-			}
-			prevTxBytes, err := hex.DecodeString(prevTxStr)
+			txOuts[int(vout)] = mergeTx.TxOut
+		}
+
+		// Including all inputs and outputs from the last tx
+		for _, vin := range lastTx.VINs {
+			pkScript, err := hex.DecodeString(vin.Prevout.ScriptPubKey)
 			if err != nil {
 				return nil, err
 			}
-			prevTx, err := btcutil.NewTxFromBytes(prevTxBytes)
-			if err != nil {
-				return nil, err
+			utxo := btc.UTXO{
+				TxID:     vin.TxID,
+				Vout:     uint32(vin.Vout),
+				Amount:   int64(vin.Prevout.Value),
+				PkScript: pkScript,
 			}
-
-			txOut := prevTx.MsgTx().TxOut[vout]
-			outKey := fmt.Sprintf("%v:%v", hex.EncodeToString(txOut.PkScript), txOut.Value)
-
-			txOuts[outKey] = mergeTx.TxOut
+			inputs = append(inputs, utxo)
+			signers.AddUtxo(signer, utxo)
+			// outputMap[hex.EncodeToString(pkScript)] = true // mark the target has been initiated
 		}
-
-		// If there're no new outputs, nor new merge txs, only thing left to check is the last tx's fee rate.
-		if len(outputs) == 0 && len(mergeTxs) == 0 {
-			// todo : check last tx position and do a rbf to update fee rate if needed
-		}
-
-		// Create a new tx basing on the mergeTx and new outputs
-		lastUtxos := make([]btc.UTXO, 0)
-		for _, vin := range lastTx.TxIn {
-			value, ok := latest.Values[vin.PreviousOutPoint.String()]
-			if !ok {
-				return nil, fmt.Errorf("utxo [%v] not found in the values field", vin.PreviousOutPoint.String())
-			}
-			lastUtxos = append(lastUtxos, btc.UTXO{
-				TxID:   vin.PreviousOutPoint.Hash.String(),
-				Vout:   vin.PreviousOutPoint.Index,
-				Amount: value,
-			})
-		}
-		utxos, err := wal.fetchWalletUtxos(ctx)
-		if err != nil {
-			return nil, err
-		}
-		// todo : we assume all utxos are from the wallet for now
-		wal.fetcher.AddUtxo(wal.script, append(utxos, lastUtxos...)...)
-		// fetcher, err := btc.NewFetcher(wal.script, append(utxos, lastUtxos...)...)
-		// if err != nil {
-		// 	return nil, err
-		// }
-		sizer := btc.NewSizeEstimator(BaseSizeSpend, SegwitSizeSpend, append(lastUtxos, utxos...)...)
-		feeMode, err := btc.RbfModeFromPrevTx(wal.btcClient, last, sizer)
-		if err != nil {
-			return nil, err
-		}
-		inputs := make([]btc.UTXO, 0)
-		for _, input := range lastTx.TxIn {
-			out := wal.fetcher.FetchPrevOutput(input.PreviousOutPoint)
-			inputs = append(inputs, btc.UtxoFromOutPoint(input.PreviousOutPoint, out.Value))
-		}
-		recipients := make([]*wire.TxOut, 0)
-		walPkSript, err := txscript.PayToAddrScript(wal.addr)
-		if err != nil {
-			return nil, err
-		}
-		for i, output := range lastTx.TxOut {
-			if i == len(lastTx.TxOut)-1 && bytes.Equal(output.PkScript, walPkSript) {
+		for i, vout := range lastTx.VOUTs {
+			// Ignore the change output
+			if i == len(lastTx.VOUTs)-1 && vout.ScriptPubKeyAddress == wal.Address().EncodeAddress() {
 				continue
 			}
-			outKey := fmt.Sprintf("%v:%v", hex.EncodeToString(output.PkScript), output.Value)
-			newOutputs, ok := txOuts[outKey]
-			if ok {
-				recipients = append(recipients, newOutputs...)
-			} else {
-				recipients = append(recipients, output)
-			}
-		}
-		recipients = append(recipients, outputs...)
-
-		tx, err := btc.BuildTx(feeMode, inputs, nil, recipients, wal.addr)
-		if err != nil {
-			return nil, err
-		}
-
-		// Sign the new tx
-		for i := range tx.TxIn {
-			sig, err := Sign(wal.script, tx, i, wal.fetcher, wal.key)
+			outputMap[vout.ScriptPubKey] = true // mark the target has been initiated
+			pkScript, err := hex.DecodeString(vout.ScriptPubKey)
 			if err != nil {
 				return nil, err
 			}
-			tx.TxIn[i].Witness = Witness(wal.script, nil, sig, false)
+			mergedOuts, ok := txOuts[i]
+			if ok {
+				outputs = append(outputs, mergedOuts...)
+			} else {
+				outputs = append(outputs, &wire.TxOut{
+					Value:    int64(vout.Value),
+					PkScript: pkScript,
+				})
+			}
 		}
 
-		// todo : build backup tx
+		// Process all htlc actions
+		for _, action := range actions {
+			scriptPk, err := action.Htlc.ScriptPubKey()
+			if err != nil {
+				return nil, err
+			}
+			scriptPkHex := hex.EncodeToString(scriptPk)
+			if ok := outputMap[scriptPkHex]; ok {
+				continue
+			}
+			recipient := wire.NewTxOut(action.Htlc.Amount, scriptPk)
+			outputs = append(outputs, recipient)
+			outputMap[scriptPkHex] = true
+		}
+
+		// Rbf fee mode
+		feeMode, err = btc.RbfModeFromPrevTx(wal.btcClient, last, signers)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Build the tx
+	tx, err := btc.BuildTx(feeMode, inputs, utxos, outputs, wal.cosignerAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign tx
+	if err := signers.Sign(tx); err != nil {
+		return nil, err
+	}
+
+	// Submit the partial signed tx to cosigner
+	var signedTx *wire.MsgTx
+	if len(latest.TxHashes) == 0 {
+		signedTx, err = wal.cosignerClient.NewTransaction(wal.cosignerAddr.EncodeAddress(), tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Save all utxos to a map for quick query
+		utxosMap := map[string]btc.UTXO{}
+		for _, utxo := range utxos {
+			utxosMap[utxo.String()] = utxo
+		}
+		for _, utxo := range inputs {
+			utxosMap[utxo.String()] = utxo
+		}
+
+		// Build backup txs
 		backupTxs := map[string]*wire.MsgTx{}
 		for txid, mpTxStr := range latest.MempoolTransactions {
 			mpTx, err := wal.decodeTxFromString(mpTxStr)
@@ -248,104 +349,356 @@ func (wal *wallet) Patch(ctx context.Context, outputs []*wire.TxOut) (*wire.MsgT
 				}
 			}
 
-			backupTx, err := wal.buildBackupTx(mpTx, prevBackupTx, tx, txOuts)
+			backupTx, err := wal.buildBackupTx(mpTx, prevBackupTx, tx, utxosMap, nil, signers)
 			if err != nil {
 				return nil, err
 			}
 			backupTxs[txid] = backupTx
 		}
 
-		// Submit the tx to cosigner
-		signedTx, err := wal.cosignerClient.UpdateTransaction(wal.addr.EncodeAddress(), tx, backupTxs)
+		signedTx, err = wal.cosignerClient.UpdateTransaction(wal.cosignerAddr.EncodeAddress(), tx, backupTxs)
 		if err != nil {
 			return nil, err
 		}
-		if err := wal.indexer.SubmitTx(ctx, signedTx); err != nil {
-			return nil, err
-		}
-		return signedTx, nil
+	}
 
-	} else {
-		// Construct a new tx of the cosigner account
-		utxos, err := wal.fetchWalletUtxos(ctx)
-		if err != nil {
-			return nil, err
-		}
-		sizer := btc.NewSizeEstimator(BaseSizeSpend, SegwitSizeSpend, utxos...)
-		feeRate, err := wal.feeEstimator.FeeSuggestion()
-		if err != nil {
-			return nil, err
-		}
-		feeMode := btc.MinFeeRateMode(feeRate.High, sizer)
-		tx, err := btc.BuildTx(feeMode, nil, utxos, outputs, wal.addr)
+	return signedTx, wal.indexer.SubmitTx(ctx, signedTx)
+}
+
+func (wal *wallet) processRedeemOrRefund(ctx context.Context, actions []btc.HtlcAction) (*wire.MsgTx, error) {
+	signers, err := btc.NewSigners(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Include all actions from the redeemOrRefundTx
+	inputs := []btc.UTXO{}
+	inputsMap := map[string]bool{}
+	sequenceMap := map[string]int{}
+	if wal.redeemOrRefundTx != nil {
+		replacedTx, err := wal.indexer.GetTx(ctx, wal.redeemOrRefundTx.TxID())
 		if err != nil {
 			return nil, err
 		}
 
-		// Sign the tx
-		wal.fetcher.AddUtxo(wal.script, utxos...)
-		for i := range tx.TxIn {
-			sig, err := Sign(wal.script, tx, i, wal.fetcher, wal.key)
+		if !replacedTx.Status.Confirmed {
+			for _, vin := range replacedTx.VINs {
+				pkScript, err := hex.DecodeString(vin.Prevout.ScriptPubKey)
+				if err != nil {
+					return nil, err
+				}
+				utxo := btc.UTXO{
+					TxID:     vin.TxID,
+					Vout:     uint32(vin.Vout),
+					Amount:   int64(vin.Prevout.Value),
+					PkScript: pkScript,
+				}
+				inputs = append(inputs, utxo)
+				inputsMap[utxo.String()] = true
+
+				// Decode the action from its witness
+				witness, err := btc.DecodeWitness(*vin.Witness)
+				if err != nil {
+					return nil, err
+				}
+				action, err := btc.HtlcActionFromWitness(witness)
+				if err != nil {
+					return nil, err
+				}
+
+				leaf := txscript.NewTapLeaf(txscript.BaseLeafVersion, witness[len(witness)-2])
+				ctrBlock, err := txscript.ParseControlBlock(witness[len(witness)-1])
+				if err != nil {
+					return nil, err
+				}
+
+				var signer btc.Signer
+				switch action {
+				case btc.HtlcActionRedeem:
+					secret := witness[1]
+					signer = btc.NewHtlcRedeemSigner(wal.key, leaf, *ctrBlock, secret)
+					signers.AddUtxo(signer, utxo)
+				case btc.HtlcActionRefund:
+					timelock := int64(vin.Sequence)
+					signer = btc.NewHtlcRefundSigner(wal.key, leaf, *ctrBlock, timelock)
+					signers.AddUtxo(signer, utxo)
+					sequenceMap[utxo.String()] = vin.Sequence
+				}
+			}
+		} else {
+			wal.redeemOrRefundTx = nil
+		}
+	}
+
+	for _, action := range actions {
+		utxo, err := action.Htlc.Utxo(ctx, wal.network, wal.indexer)
+		if err != nil {
+			return nil, err
+		}
+		if exists := inputsMap[utxo.String()]; exists {
+			continue
+		}
+		inputs = append(inputs, utxo)
+		leaf, ctrBlk := action.Htlc.Leaf(action.ActionType)
+
+		// Signer for different actions
+		switch action.ActionType {
+		case btc.HtlcActionRedeem:
+			signer := btc.NewHtlcRedeemSigner(wal.key, leaf, ctrBlk, action.Htlc.Secret())
+			signers.AddUtxo(signer, utxo)
+		case btc.HtlcActionRefund:
+			signer := btc.NewHtlcRefundSigner(wal.key, leaf, ctrBlk, action.Htlc.Timelock)
+			signers.AddUtxo(signer, utxo)
+			sequenceMap[utxo.String()] = int(action.Htlc.Timelock)
+			// todo : ignore refundTo for now
+		default:
+			return nil, errors.New("invalid action type")
+		}
+	}
+
+	// Fees
+	feeRates, err := wal.feeEstimator.FeeSuggestion()
+	if err != nil {
+		return nil, err
+	}
+	feeRate := feeRates.High
+	feeMode := btc.MinFeeRateMode(feeRate, signers)
+	if wal.redeemOrRefundTx != nil {
+		entry, err := wal.btcClient.GetMempoolEntry(ctx, wal.redeemOrRefundTx.TxID())
+		if err != nil {
+			return nil, err
+		}
+		prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+		if err != nil {
+			return nil, err
+		}
+
+		prevFeeRate := btc.NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
+		feeMode = btc.RbfMode(feeRate, prevFeeRate, int64(prevFees), signers)
+	}
+
+	// Build the tx (all funds go back to the wallet address at the moment)
+	tx, err := btc.BuildTx(feeMode, inputs, nil, nil, wal.Address())
+	if err != nil {
+		return nil, err
+	}
+
+	// Set sequence number for refund inputs
+	for i := range tx.TxIn {
+		seq, ok := sequenceMap[tx.TxIn[i].PreviousOutPoint.String()]
+		if ok {
+			tx.TxIn[i].Sequence = uint32(seq)
+		}
+	}
+
+	// Sign the tx
+	if err := signers.Sign(tx); err != nil {
+		return nil, err
+	}
+
+	// Submit tx
+	if err := wal.indexer.SubmitTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	wal.redeemOrRefundTx = tx
+	return tx, nil
+}
+
+func (wal *wallet) processInstantRefunds(ctx context.Context, irs []btc.HtlcAction) (*wire.MsgTx, error) {
+
+	// Fetch confirmed utxos
+	walUtxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
+	if err != nil {
+		return nil, err
+	}
+	utxos := make([]btc.UTXO, 0, len(walUtxos))
+	for _, utxo := range walUtxos {
+		if utxo.Status != nil && utxo.Status.Confirmed {
+			utxos = append(utxos, utxo)
+		}
+	}
+	if len(utxos) == 0 {
+		return nil, fmt.Errorf("wallet %v has no confirmed funds", wal.addr)
+	}
+	signers, _, err := btc.NewSignersByAddrType(wal.addrType, wal.key, utxos)
+	if err != nil {
+		return nil, err
+	}
+
+	inputs, outputs := []btc.UTXO{}, []*wire.TxOut{}
+	inputsMap := map[string]bool{}
+
+	// Parse actions from previous tx if they are not confirmed
+	if wal.instantRefundTx != nil {
+		replacedTx, err := wal.indexer.GetTx(ctx, wal.redeemOrRefundTx.TxID())
+		if err != nil {
+			return nil, err
+		}
+
+		if !replacedTx.Status.Confirmed {
+			for _, vin := range replacedTx.VINs {
+				if vin.Prevout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
+					continue
+				}
+				pkScript, err := hex.DecodeString(vin.Prevout.ScriptPubKey)
+				if err != nil {
+					return nil, err
+				}
+				utxo := btc.UTXO{
+					TxID:     vin.TxID,
+					Vout:     uint32(vin.Vout),
+					Amount:   int64(vin.Prevout.Value),
+					PkScript: pkScript,
+				}
+				inputs = append(inputs, utxo)
+				inputsMap[utxo.String()] = true
+
+				// Decode the action from its witness
+				witness, err := btc.DecodeWitness(*vin.Witness)
+				if err != nil {
+					return nil, err
+				}
+				action, err := btc.HtlcActionFromWitness(witness)
+				if err != nil {
+					return nil, err
+				}
+
+				leaf := txscript.NewTapLeaf(txscript.BaseLeafVersion, witness[len(witness)-2])
+				ctrBlock, err := txscript.ParseControlBlock(witness[len(witness)-1])
+				if err != nil {
+					return nil, err
+				}
+
+				var signer btc.Signer
+				switch action {
+				case btc.HtlcActionInstantRefund:
+					otherSig := witness[1]
+					signer = btc.NewHtlcInstantRefundSigner(wal.key, leaf, *ctrBlock, true, otherSig)
+					signers.AddUtxo(signer, utxo)
+				default:
+					return nil, errors.New("invalid action type")
+				}
+			}
+
+			for i, vout := range replacedTx.VOUTs {
+				if i == len(replacedTx.VOUTs)-1 && vout.ScriptPubKeyAddress == wal.addr.EncodeAddress() {
+					continue
+				}
+
+				pkScript, err := hex.DecodeString(vout.ScriptPubKey)
+				if err != nil {
+					return nil, err
+				}
+				outputs = append(outputs, &wire.TxOut{
+					Value:    int64(vout.Value),
+					PkScript: pkScript,
+				})
+			}
+		} else {
+			wal.instantRefundTx = nil
+		}
+	}
+
+	// Process new actions
+	for _, action := range irs {
+		switch action.ActionType {
+		case btc.HtlcActionInstantRefund:
+			utxo, recipient, err := btc.ValidateInstantRefundTx(action.Htlc, action.InstantRefundTx, wal.network)
 			if err != nil {
 				return nil, err
 			}
-			tx.TxIn[i].Witness = Witness(wal.script, nil, sig, false)
-		}
+			if ok := inputsMap[utxo.String()]; ok {
+				continue
+			}
+			inputs = append([]btc.UTXO{utxo}, inputs...)
+			outputs = append([]*wire.TxOut{recipient}, outputs...)
+			inputsMap[utxo.String()] = true
 
-		// Submit to cosigner server
-		signedTx, err := wal.cosignerClient.NewTransaction(wal.addr.EncodeAddress(), tx)
+			leaf, ctrBlk := action.Htlc.Leaf(btc.HtlcActionInstantRefund)
+			signer := btc.NewHtlcInstantRefundSigner(wal.key, leaf, ctrBlk, true, action.InstantRefundTx.TxIn[0].Witness[0])
+			signers.AddUtxo(signer, utxo)
+		default:
+			return nil, errors.New("invalid action type")
+		}
+	}
+
+	// Fees
+	feeRates, err := wal.feeEstimator.FeeSuggestion()
+	if err != nil {
+		return nil, err
+	}
+	feeRate := feeRates.High
+	feeMode := btc.MinFeeRateMode(feeRate, signers)
+	if wal.instantRefundTx != nil {
+		entry, err := wal.btcClient.GetMempoolEntry(ctx, wal.instantRefundTx.TxID())
 		if err != nil {
 			return nil, err
 		}
-		if err := wal.indexer.SubmitTx(ctx, signedTx); err != nil {
+		prevFees, err := btcutil.NewAmount(entry.Fees.Descendant)
+		if err != nil {
 			return nil, err
 		}
-		return signedTx, nil
+
+		prevFeeRate := btc.NewSatoshiPerKb(int64(prevFees), int(entry.DescendantSize))
+		feeMode = btc.RbfMode(feeRate, prevFeeRate, int64(prevFees), signers)
 	}
+
+	// Build the tx (all funds go back to the wallet address at the moment)
+	tx, err := btc.BuildTx(feeMode, inputs, utxos, outputs, wal.addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sign the tx
+	if err := signers.Sign(tx); err != nil {
+		return nil, err
+	}
+
+	// Submit tx
+	if err := wal.indexer.SubmitTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	wal.instantRefundTx = tx
+	return tx, nil
 }
 
-func (wal *wallet) buildBackupTx(baseTx, prevBackupTx, newTx *wire.MsgTx, mergeTxOuts map[string][]*wire.TxOut) (*wire.MsgTx, error) {
+func (wal *wallet) buildBackupTx(baseTx, prevBackupTx, newTx *wire.MsgTx, utxoMaps map[string]btc.UTXO, mergeTxOuts map[string][]*wire.TxOut, signers btc.Signers) (*wire.MsgTx, error) {
 
 	// Inputs
-	// 1. Get all utxos used in the new tx
+	// 1. Get all utxos used in the base tx
 	outpointMap := map[string]btc.UTXO{}
-	for _, txin := range newTx.TxIn {
-		output := wal.fetcher.FetchPrevOutput(txin.PreviousOutPoint)
-		outpointMap[txin.PreviousOutPoint.String()] = btc.UTXO{
-			TxID:   txin.PreviousOutPoint.Hash.String(),
-			Vout:   txin.PreviousOutPoint.Index,
-			Amount: output.Value,
-		}
+	for _, vin := range newTx.TxIn {
+		utxo := utxoMaps[vin.PreviousOutPoint.String()]
+		outpointMap[utxo.String()] = utxo
 	}
 	// 2. Find utxos which are missing in the base tx
-	var inputs []btc.UTXO
-	for _, txin := range prevBackupTx.TxIn {
-		_, ok := outpointMap[txin.PreviousOutPoint.String()]
-		if !ok {
-			output := wal.fetcher.FetchPrevOutput(txin.PreviousOutPoint)
-			inputs = append(inputs, btc.UTXO{
-				TxID:   txin.PreviousOutPoint.Hash.String(),
-				Vout:   txin.PreviousOutPoint.Index,
-				Amount: output.Value,
-			})
-		}
+	for _, txin := range baseTx.TxIn {
+		delete(outpointMap, txin.PreviousOutPoint.String())
 	}
 	// 3. Add the change utxo from the base tx
+	var inputs []btc.UTXO
 	if len(baseTx.TxOut) != 0 {
 		// todo : we assume the change is always the last output
 		// todo : what if user trying to make payment to the cosigner wallet address?  how to differentiate?
 		change := baseTx.TxOut[len(baseTx.TxOut)-1]
-		_, addrs, numSigs, err := txscript.ExtractPkScriptAddrs(change.PkScript, wal.network)
+		walPkScript, err := txscript.PayToAddrScript(wal.cosignerAddr)
 		if err != nil {
 			return nil, err
 		}
-		if numSigs == 1 && len(addrs) == 1 && addrs[0].EncodeAddress() == wal.addr.EncodeAddress() {
-			inputs = append(inputs, btc.UTXO{
-				TxID:   baseTx.TxHash().String(),
-				Vout:   uint32(len(baseTx.TxOut) - 1),
-				Amount: change.Value,
-			})
+		if bytes.Equal(change.PkScript, walPkScript) {
+			utxo := btc.UTXO{
+				TxID:     baseTx.TxHash().String(),
+				Vout:     uint32(len(baseTx.TxOut) - 1),
+				Amount:   change.Value,
+				PkScript: change.PkScript,
+			}
+			inputs = append(inputs, utxo)
+			signer := NewSpendSigner(wal.key, wal.script, nil, true)
+			signers.AddUtxo(signer, utxo)
 		}
+	}
+	for _, utxo := range outpointMap {
+		inputs = append(inputs, utxo)
 	}
 
 	// Outputs
@@ -369,19 +722,19 @@ func (wal *wallet) buildBackupTx(baseTx, prevBackupTx, newTx *wire.MsgTx, mergeT
 	for i, txout := range newTx.TxOut {
 		// ignore change output
 		if i == len(newTx.TxOut)-1 {
-			_, addrs, numSigs, err := txscript.ExtractPkScriptAddrs(txout.PkScript, wal.network)
-			if err != nil {
-				return nil, err
-			}
-			if numSigs == 1 && len(addrs) == 1 && addrs[0].EncodeAddress() == wal.addr.EncodeAddress() {
-				continue
-			}
+			// todo
+			continue
 		}
 
 		outKey := fmt.Sprintf("%v:%v", hex.EncodeToString(txout.PkScript), txout.Value)
 		count, ok := txOutMap[outKey]
 		if !ok || count == 1 {
-			recipients = append(recipients, txout)
+			output := &wire.TxOut{
+				Value:    txout.Value,
+				PkScript: txout.PkScript,
+			}
+
+			recipients = append(recipients, output)
 			if ok {
 				txOutMap[outKey]--
 				if txOutMap[outKey] == 0 {
@@ -396,27 +749,20 @@ func (wal *wallet) buildBackupTx(baseTx, prevBackupTx, newTx *wire.MsgTx, mergeT
 	if err != nil {
 		return nil, err
 	}
-	sizer := btc.NewSizeEstimator(BaseSizeSpend, SegwitSizeSpend, inputs...)
-	feeMode := btc.MinFeeRateMode(feeRate.High, sizer)
-	wal.fetcher.AddUtxo(wal.script, inputs...)
-	tx, err := btc.BuildTx(feeMode, inputs, nil, recipients, wal.addr)
+	feeMode := btc.MinFeeRateMode(feeRate.High, signers)
+
+	tx, err := btc.BuildTx(feeMode, inputs, nil, recipients, wal.cosignerAddr)
 	if err != nil {
 		return nil, err
 	}
-
-	// Sign the tx
-	for i := range tx.TxIn {
-		sig, err := Sign(wal.script, tx, i, wal.fetcher, wal.key)
-		if err != nil {
-			return nil, err
-		}
-		tx.TxIn[i].Witness = Witness(wal.script, nil, sig, false)
+	if err := signers.Sign(tx); err != nil {
+		return nil, err
 	}
 	return tx, nil
 }
 
 func (wal *wallet) fetchWalletUtxos(ctx context.Context) (btc.UTXOs, error) {
-	allUtxos, err := wal.indexer.GetUTXOs(ctx, wal.addr)
+	allUtxos, err := wal.indexer.GetUTXOs(ctx, wal.cosignerAddr)
 	if err != nil {
 		return nil, err
 	}

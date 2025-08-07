@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/catalogfi/blockchain/btc"
@@ -159,7 +159,8 @@ var _ = Describe("bitcoin fees", func() {
 				By("Build some transactions and compare the estimated weight vs actual weight")
 				utxos, err := indexer.GetUTXOs(ctx, addr1)
 				Expect(err).To(BeNil())
-				sizer := btc.NewSizeEstimatorOfAddrType(addrType, utxos...)
+				signers, _, err := btc.NewSignersByAddrType(addrType, key1, utxos)
+				Expect(err).To(BeNil())
 
 				edge := 0
 				exact := 0
@@ -168,14 +169,14 @@ var _ = Describe("bitcoin fees", func() {
 					recipient, err := btc.NewTxOutFromAddress(addr2, amount)
 					Expect(err).To(BeNil())
 					recipients := []*wire.TxOut{recipient}
-					feeMode := btc.MinFeeRateMode(feeRate, sizer)
-					transaction, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
+					feeMode := btc.MinFeeRateMode(feeRate, signers)
+					tx, err := btc.BuildTx(feeMode, nil, utxos, recipients, addr1)
 					Expect(err).To(BeNil())
 
-					estWeight, err := sizer.EstimateTxWeight(transaction)
+					estWeight, err := signers.EstimateTxWeight(tx)
 					Expect(err).To(BeNil())
-					Expect(btc.SignTx(addrType, transaction, key1, utxos)).Should(Succeed())
-					actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))
+					Expect(signers.Sign(tx)).Should(Succeed())
+					actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(tx))
 					Expect(estWeight - int(actualWeight)).Should(BeNumerically(">=", 0))
 
 					switch addrType {
@@ -223,9 +224,10 @@ var _ = Describe("bitcoin fees", func() {
 
 		It("should return a proper estimate of tx size when spending both legacy and segwit utxos", func(ctx context.Context) {
 			By("Initialization keys")
-			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.PubKeyHash, nil)
+			addrType1, addrType2 := waddrmgr.PubKeyHash, waddrmgr.WitnessPubKey
+			key1, addr1, err := btctest.NewBtcAddrWithFunds(network, addrType1, nil)
 			Expect(err).To(BeNil())
-			key2, addr2, err := btctest.NewBtcAddrWithFunds(network, waddrmgr.WitnessPubKey, indexer)
+			key2, addr2, err := btctest.NewBtcAddrWithFunds(network, addrType2, indexer)
 			Expect(err).To(BeNil())
 
 			By("Fetch all utxos from addr1 and addr2")
@@ -233,36 +235,32 @@ var _ = Describe("bitcoin fees", func() {
 			Expect(err).To(BeNil())
 			utxos2, err := indexer.GetUTXOs(ctx, addr2)
 			Expect(err).To(BeNil())
-			sizer := btc.NewSizeEstimatorOfAddrType(waddrmgr.PubKeyHash, utxos1...)
-			sizer.AddUtxos(btc.BaseSizeP2WPKH, btc.SegwitSizeP2WPKH, utxos2...)
+			signers, _, err := btc.NewSignersByAddrType(addrType1, key1, utxos1)
+			Expect(err).To(BeNil())
+			_, signer, err := btc.NewSignersByAddrType(addrType2, key2, utxos2)
+			Expect(err).To(BeNil())
+			signers.AddUtxo(signer, utxos2...)
 
-			By("Init the fetcher")
-			pkScript1, err := btc.PkScript(waddrmgr.PubKeyHash, key1.PubKey())
-			Expect(err).To(BeNil())
-			fetcher, err := btc.NewFetcher(pkScript1, utxos1...)
-			Expect(err).To(BeNil())
-			pkScript2, err := btc.PkScript(waddrmgr.WitnessPubKey, key2.PubKey())
-			Expect(err).To(BeNil())
-			Expect(btc.AddUtxosToFetcher(fetcher, pkScript2, utxos2...)).Should(Succeed())
+			By("Construct the key map")
+			keyMap := map[string]*btcec.PrivateKey{}
+			for _, utxo := range utxos1 {
+				keyMap[utxo.String()] = key1
+			}
+			for _, utxo := range utxos2 {
+				keyMap[utxo.String()] = key2
+			}
 
 			By("Build and sign the transaction")
 			diff := map[int]int{}
 			for i := 0; i < 10000; i++ {
-				feeMode := btc.MinFeeRateMode(btctest.RandomFeeRate(), sizer)
-				transaction, err := btc.BuildTx(feeMode, append(utxos1, utxos2...), nil, nil, addr1)
+				feeMode := btc.MinFeeRateMode(btctest.RandomFeeRate(), signers)
+				tx, err := btc.BuildTx(feeMode, append(utxos1, utxos2...), nil, nil, addr1)
 				Expect(err).To(BeNil())
-				estWeight, err := sizer.EstimateTxWeight(transaction)
+				estWeight, err := signers.EstimateTxWeight(tx)
 				Expect(err).To(BeNil())
+				Expect(signers.Sign(tx)).Should(Succeed())
 
-				sigHashes := txscript.NewTxSigHashes(transaction, fetcher)
-				for i := range transaction.TxIn {
-					if i < len(utxos1) {
-						Expect(btc.SignInput(waddrmgr.PubKeyHash, transaction, i, key1, fetcher, sigHashes)).Should(Succeed())
-					} else {
-						Expect(btc.SignInput(waddrmgr.WitnessPubKey, transaction, i, key2, fetcher, sigHashes)).Should(Succeed())
-					}
-				}
-				actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(transaction))
+				actualWeight := blockchain.GetTransactionWeight(btcutil.NewTx(tx))
 				Expect(estWeight - int(actualWeight)).Should(BeNumerically(">=", 0))
 				diff[estWeight-int(actualWeight)]++
 			}

@@ -1,63 +1,338 @@
 package btc
 
 import (
-	"context"
-	"encoding/hex"
 	"fmt"
-	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/catalogfi/tools"
-	"github.com/catalogfi/tools/pkg/memcache"
 )
 
-type SigOptions func(*sigOptions)
+var (
+	// BaseSizeP2PKH is the worst case (largest) serialize size of a transaction input script that redeems a compressed
+	// P2PKH output. This assumes we always use a low-s value signature. The signature size are usually 71 (60%) or
+	// 72(40%), with a very small chance of 70 or 69 (<1%). It is calculated as :
+	// sigLength(1) + sig(72) + pubKeyLength(1) + compressedPubKey(33)
+	BaseSizeP2PKH = 1 + 72 + 1 + 33
 
-type sigOptions struct {
-	compressed        bool
-	sighashType       txscript.SigHashType
-	tapScriptRootHash []byte
-	ignoredIndexes    map[int]struct{}
+	BaseSizeP2WPKH = 0
+
+	BaseSizeP2TR = 0
+
+	SegwitSizeP2PKH = 0
+
+	// SegwitSizeP2WPKH is the worst case weight of a witness for spending P2WPKH outputs. It is calculated as :
+	// number of items(1) + sigLength(1) + sig(72) + pubKeyLength(1) + compressedPubKey(33)
+	SegwitSizeP2WPKH = 1 + 1 + 72 + 1 + 33
+
+	// SegwitSizeP2TR is the worst case weight of a witness for spending P2TR outputs. It is calculated as :
+	// number of items(1) + sigLength(1) + sig(64)
+	SegwitSizeP2TR = 1 + 1 + 64
+
+	// SegwitSizeP2trDefault is the witness size when the schnorr signature is signed using the default sighash flag.
+	SegwitSizeP2trDefault = 1 + 1 + 64
+)
+
+type SigOption func(*SigOptions)
+
+type SigOptions struct {
+	Compressed        bool
+	SigHashes         *txscript.TxSigHashes
+	SigHashType       txscript.SigHashType
+	TapScriptRootHash []byte
 }
 
-func defaultSigOptions() *sigOptions {
-	return &sigOptions{
-		compressed:        true,
-		sighashType:       txscript.SigHashAll,
-		tapScriptRootHash: nil,
-		ignoredIndexes:    map[int]struct{}{},
+func (so *SigOptions) Parse(sigOpts ...SigOption) {
+	for _, sigOpt := range sigOpts {
+		sigOpt(so)
 	}
 }
 
-func WithCompressed(compressed bool) SigOptions {
-	return func(o *sigOptions) {
-		o.compressed = compressed
+func DefaultSigOptions() *SigOptions {
+	return &SigOptions{
+		Compressed:        true,
+		SigHashType:       txscript.SigHashDefault,
+		TapScriptRootHash: nil,
 	}
 }
 
-func WithSighashType(sighashType txscript.SigHashType) SigOptions {
-	return func(o *sigOptions) {
-		o.sighashType = sighashType
+func WithCompressed(compressed bool) SigOption {
+	return func(o *SigOptions) {
+		o.Compressed = compressed
 	}
 }
 
-func WithTapScriptRootHash(hash []byte) SigOptions {
-	return func(o *sigOptions) {
-		o.tapScriptRootHash = hash
+func WithSighashes(sighashes *txscript.TxSigHashes) SigOption {
+	return func(o *SigOptions) {
+		o.SigHashes = sighashes
 	}
 }
 
-func WithIgnoredIndex(indexes ...int) SigOptions {
-	return func(o *sigOptions) {
-		for _, index := range indexes {
-			o.ignoredIndexes[index] = struct{}{}
+func WithSighashType(sighashType txscript.SigHashType) SigOption {
+	return func(o *SigOptions) {
+		o.SigHashType = sighashType
+	}
+}
+
+func WithTapScriptRootHash(hash []byte) SigOption {
+	return func(o *SigOptions) {
+		o.TapScriptRootHash = hash
+	}
+}
+
+type Signers interface {
+	AddUtxo(signer Signer, utxos ...UTXO)
+
+	Sign(tx *wire.MsgTx) error
+
+	EstimateTxWeight(tx *wire.MsgTx) (int, error)
+
+	EstimateTxVirtualSize(tx *wire.MsgTx) (int, error)
+}
+
+type signers struct {
+	fetcher *txscript.MultiPrevOutFetcher
+	signers map[string]Signer
+}
+
+func NewSigners(signer Signer, utxos ...UTXO) (Signers, error) {
+	sm := map[string]Signer{}
+	fetcher := txscript.NewMultiPrevOutFetcher(nil)
+
+	for _, utxo := range utxos {
+		if len(utxo.PkScript) == 0 {
+			return nil, fmt.Errorf("utxo %v has no pkscript", utxo)
+		}
+
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return nil, err
+		}
+		fetcher.AddPrevOut(wire.OutPoint{
+			Hash:  *hash,
+			Index: utxo.Vout,
+		}, wire.NewTxOut(utxo.Amount, utxo.PkScript))
+		sm[utxo.String()] = signer
+	}
+
+	return &signers{
+		fetcher: fetcher,
+		signers: sm,
+	}, nil
+}
+
+func NewSignersByAddrType(addrType waddrmgr.AddressType, key *btcec.PrivateKey, utxos []UTXO, sigOpts ...SigOption) (Signers, Signer, error) {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	var signer Signer
+	switch addrType {
+	case waddrmgr.PubKeyHash:
+		signer = NewP2pkhSigner(key, sigOpts...)
+	case waddrmgr.WitnessPubKey:
+		signer = NewP2wpkSigner(key, sigOpts...)
+	case waddrmgr.TaprootPubKey:
+		signer = NewP2trSigner(key, sigOpts...)
+	default:
+		return nil, nil, fmt.Errorf("unsupported address type = %v", addrType)
+	}
+	s, err := NewSigners(signer, utxos...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s, signer, nil
+}
+
+func (signers signers) AddUtxo(signer Signer, utxos ...UTXO) {
+	for _, utxo := range utxos {
+		hash, err := chainhash.NewHashFromStr(utxo.TxID)
+		if err != nil {
+			return
+		}
+		signers.fetcher.AddPrevOut(wire.OutPoint{
+			Hash:  *hash,
+			Index: utxo.Vout,
+		}, wire.NewTxOut(utxo.Amount, utxo.PkScript))
+		signers.signers[utxo.String()] = signer
+	}
+}
+
+func (signers signers) Sign(tx *wire.MsgTx) error {
+	// Make sure we have the txOut info for all the inputs
+	for _, input := range tx.TxIn {
+		outpiont := signers.fetcher.FetchPrevOutput(input.PreviousOutPoint)
+		if outpiont == nil {
+			return fmt.Errorf("no output found for txid=%v", tx.TxHash())
 		}
 	}
+	sigHashes := txscript.NewTxSigHashes(tx, signers.fetcher)
+
+	for i, input := range tx.TxIn {
+		// Make sure we have the txOut info for all the inputs
+		outpoint := signers.fetcher.FetchPrevOutput(input.PreviousOutPoint)
+		if outpoint == nil {
+			return fmt.Errorf("no output found for txid=%v", tx.TxHash())
+		}
+
+		// Sign the input
+		signer, ok := signers.signers[input.PreviousOutPoint.String()]
+		if !ok {
+			return fmt.Errorf("Signers.Sign: don't know how to sign %v", input.PreviousOutPoint.String())
+		}
+		if err := signer.Sign(tx, i, outpoint, sigHashes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (signers signers) EstimateTxWeight(tx *wire.MsgTx) (int, error) {
+	totalBase, totalSegwit := tx.SerializeSizeStripped(), 0
+	legacy := 0
+	for _, input := range tx.TxIn {
+		key := input.PreviousOutPoint.String()
+		base, segwit := signers.SigSize(key)
+		if base == 0 && segwit == 0 {
+			return 0, fmt.Errorf("unknown utxo = %v", key)
+		}
+		totalBase += base
+		totalSegwit += segwit
+		if base != 0 {
+			legacy++
+		}
+	}
+
+	// Additional 2 weight units for segwit marker + flag if tx has any witness input
+	if totalSegwit > 0 {
+		totalSegwit += 2
+	}
+
+	// When including both legacy and segwit inputs
+	if totalSegwit > 0 && legacy > 0 {
+		totalSegwit += legacy
+	}
+
+	return totalBase*4 + totalSegwit, nil
+}
+
+func (signers signers) EstimateTxVirtualSize(tx *wire.MsgTx) (int, error) {
+	weight, err := signers.EstimateTxWeight(tx)
+	if err != nil {
+		return 0, err
+	}
+	return (weight + 3) / blockchain.WitnessScaleFactor, nil
+}
+
+func (signers signers) SigSize(id string) (int, int) {
+	signer, ok := signers.signers[id]
+	if !ok {
+		return 0, 0
+	}
+	return signer.SigSize()
+}
+
+// Signer specify a particular way to spend the script.
+type Signer interface {
+	Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error
+
+	SigSize() (int, int)
+}
+
+type P2pkhSigner struct {
+	opts *SigOptions
+	key  *btcec.PrivateKey
+}
+
+func NewP2pkhSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &P2pkhSigner{
+		opts: opts,
+		key:  key,
+	}
+}
+
+func (signer *P2pkhSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+	sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, signer.opts.SigHashType, signer.key, signer.opts.Compressed)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].SignatureScript = sigScript
+
+	return nil
+}
+
+func (signer *P2pkhSigner) SigSize() (int, int) {
+	return BaseSizeP2PKH, SegwitSizeP2PKH
+}
+
+type P2wpkSigner struct {
+	opts *SigOptions
+	key  *btcec.PrivateKey
+}
+
+func NewP2wpkSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &P2wpkSigner{
+		opts: opts,
+		key:  key,
+	}
+}
+
+func (signer *P2wpkSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig, signer.key.PubKey().SerializeCompressed()}
+	return nil
+}
+
+func (signer *P2wpkSigner) SigSize() (int, int) {
+	return BaseSizeP2WPKH, SegwitSizeP2WPKH
+}
+
+type P2trSigner struct {
+	opts *SigOptions
+	key  *btcec.PrivateKey
+}
+
+func NewP2trSigner(key *btcec.PrivateKey, sigOpts ...SigOption) Signer {
+	opts := DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &P2trSigner{
+		opts: opts,
+		key:  key,
+	}
+}
+
+func (signer *P2trSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, signer.opts.TapScriptRootHash, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	tx.TxIn[index].Witness = wire.TxWitness{sig}
+	return nil
+}
+
+func (signer *P2trSigner) SigSize() (int, int) {
+	return BaseSizeP2TR, SegwitSizeP2TR
 }
 
 // PayToPubKeyHashScript creates a new script to pay a transaction
@@ -94,48 +369,6 @@ func PayToWitnessTaprootScript(rawKey []byte) ([]byte, error) {
 	return txscript.NewScriptBuilder().AddOp(txscript.OP_1).AddData(rawKey).Script()
 }
 
-// SignInput signs the input of the `tx` at index `index` with the private key.
-func SignInput(addrType waddrmgr.AddressType, tx *wire.MsgTx, index int, key *btcec.PrivateKey, fetcher *txscript.MultiPrevOutFetcher, sigHashes *txscript.TxSigHashes, sigOpts ...SigOptions) error {
-	// Parse the options
-	opts := defaultSigOptions()
-	for _, sigOpt := range sigOpts {
-		sigOpt(opts)
-	}
-	if _, ok := opts.ignoredIndexes[index]; ok {
-		return nil
-	}
-
-	outpoint := fetcher.FetchPrevOutput(tx.TxIn[index].PreviousOutPoint)
-	switch addrType {
-	case waddrmgr.PubKeyHash:
-		sigScript, err := txscript.SignatureScript(tx, index, outpoint.PkScript, opts.sighashType, key, opts.compressed)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].SignatureScript = sigScript
-	case waddrmgr.WitnessPubKey:
-		sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, opts.sighashType, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].Witness = wire.TxWitness{sig, key.PubKey().SerializeCompressed()}
-	case waddrmgr.TaprootPubKey:
-		sighashType := opts.sighashType
-		if sighashType == txscript.SigHashAll {
-			sighashType = txscript.SigHashDefault
-		}
-		sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, index, outpoint.Value, outpoint.PkScript, opts.tapScriptRootHash, sighashType, key)
-		if err != nil {
-			return err
-		}
-		tx.TxIn[index].Witness = wire.TxWitness{sig}
-	default:
-		return fmt.Errorf("unknown address type: %v", addrType)
-	}
-
-	return nil
-}
-
 // PkScript returns the pkScript basing on the addr type.
 func PkScript(addrType waddrmgr.AddressType, key *btcec.PublicKey) ([]byte, error) {
 	switch addrType {
@@ -148,98 +381,4 @@ func PkScript(addrType waddrmgr.AddressType, key *btcec.PublicKey) ([]byte, erro
 	default:
 		return nil, fmt.Errorf("unknown address type: %v", addrType)
 	}
-}
-
-// SignTx signs the entire transaction `tx` with the private key.
-func SignTx(addrType waddrmgr.AddressType, tx *wire.MsgTx, key *btcec.PrivateKey, utxos UTXOs, sigOpts ...SigOptions) error {
-	opts := defaultSigOptions()
-	for _, sigOpt := range sigOpts {
-		sigOpt(opts)
-	}
-
-	// Calculate the pkScript basing on the addr type
-	externalKey := key.PubKey()
-	if addrType == waddrmgr.TaprootPubKey {
-		externalKey = txscript.ComputeTaprootOutputKey(key.PubKey(), opts.tapScriptRootHash)
-	}
-	pkScript, err := PkScript(addrType, externalKey)
-	if err != nil {
-		return err
-	}
-
-	// Calculate the sighashes
-	fetcher, err := NewFetcher(pkScript, utxos...)
-	if err != nil {
-		return err
-	}
-	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
-
-	// Sign each utxo
-	for i := range tx.TxIn {
-		if err := SignInput(addrType, tx, i, key, fetcher, sigHashes, sigOpts...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type InMemFetcher struct {
-	cache   memcache.Cache[wire.TxOut]
-	indexer IndexerClient
-}
-
-func NewInMemFetcher(ttl time.Duration, indexer IndexerClient) (*InMemFetcher, error) {
-	cache, err := tools.NewMemCache[wire.TxOut](memcache.WithTtl(ttl))
-	if err != nil {
-		return nil, err
-	}
-
-	return &InMemFetcher{
-		cache:   cache,
-		indexer: indexer,
-	}, nil
-}
-
-func (fetcher InMemFetcher) AddPrevOut(op wire.OutPoint, txOut *wire.TxOut) {
-	key := op.String()
-	fetcher.cache.Set(key, *txOut)
-}
-
-func (fetcher InMemFetcher) AddUtxo(pkScript []byte, utxos ...UTXO) {
-	for _, utxo := range utxos {
-		key := utxo.String()
-		txOut := wire.TxOut{
-			Value:    utxo.Amount,
-			PkScript: pkScript,
-		}
-		fetcher.cache.Set(key, txOut)
-	}
-}
-
-func (fetcher InMemFetcher) FetchPrevOutput(outpoint wire.OutPoint) *wire.TxOut {
-	key := outpoint.String()
-	val, ok := fetcher.cache.Get(key)
-	if !ok {
-		if fetcher.indexer != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			tx, err := fetcher.indexer.GetTx(ctx, outpoint.Hash.String())
-			if err != nil {
-				return nil
-			}
-			if len(tx.VOUTs) > int(outpoint.Index) {
-				out := tx.VOUTs[outpoint.Index]
-				pkScript, err := hex.DecodeString(out.ScriptPubKey)
-				if err != nil {
-					return nil
-				}
-				return &wire.TxOut{
-					Value:    int64(out.Value),
-					PkScript: pkScript,
-				}
-			}
-		}
-		return nil
-	}
-	return &val
 }

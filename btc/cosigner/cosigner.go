@@ -4,6 +4,7 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/catalogfi/blockchain/btc"
 )
 
 var DefaultTimelock = int64(144 * 180)
@@ -73,4 +74,95 @@ func Witness(script, cosignerSig, userSig []byte, refund bool) wire.TxWitness {
 	}
 
 	return witnessStack
+}
+
+type SpendSigner struct {
+	opts      *btc.SigOptions
+	key       *btcec.PrivateKey
+	script    []byte
+	othersSig []byte
+	user      bool
+}
+
+func NewSpendSigner(key *btcec.PrivateKey, script, otherSig []byte, user bool, sigOpts ...btc.SigOption) btc.Signer {
+	opts := btc.DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &SpendSigner{
+		opts:      opts,
+		key:       key,
+		script:    script,
+		othersSig: otherSig,
+		user:      user,
+	}
+}
+
+func (signer *SpendSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, signer.script, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	coSignerSig, userSig := sig, signer.othersSig
+	if signer.user {
+		coSignerSig, userSig = signer.othersSig, sig
+	}
+
+	witnessStack := make(wire.TxWitness, 5)
+	witnessStack[0] = nil
+	witnessStack[1] = coSignerSig
+	witnessStack[2] = userSig
+	witnessStack[3] = []byte{0x1}
+	witnessStack[4] = signer.script
+	tx.TxIn[index].Witness = witnessStack
+
+	return nil
+}
+
+func (signer *SpendSigner) SigSize() (int, int) {
+	return BaseSizeSpend, SegwitSizeSpend
+}
+
+type RefundSigner struct {
+	opts     *btc.SigOptions
+	key      *btcec.PrivateKey
+	script   []byte
+	timelock int64
+}
+
+func NewRefundSigner(key *btcec.PrivateKey, script []byte, timelock int64, sigOpts ...btc.SigOption) btc.Signer {
+	opts := btc.DefaultSigOptions()
+	opts.Parse(sigOpts...)
+
+	return &RefundSigner{
+		opts:     opts,
+		key:      key,
+		script:   script,
+		timelock: timelock,
+	}
+}
+
+func (signer *RefundSigner) Sign(tx *wire.MsgTx, index int, outpoint *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	if signer.opts.SigHashType == txscript.SigHashDefault {
+		signer.opts.SigHashType = txscript.SigHashAll
+	}
+	sig, err := txscript.RawTxInWitnessSignature(tx, sigHashes, index, outpoint.Value, signer.script, signer.opts.SigHashType, signer.key)
+	if err != nil {
+		return err
+	}
+	witnessStack := make(wire.TxWitness, 3)
+	witnessStack[0] = sig
+	witnessStack[1] = nil
+	witnessStack[2] = signer.script
+	tx.TxIn[index].Witness = witnessStack
+
+	return nil
+
+}
+
+func (signer *RefundSigner) SigSize() (int, int) {
+	return BaseSizeRefund, SegwitSizeRefund(signer.timelock)
 }

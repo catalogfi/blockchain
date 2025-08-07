@@ -11,7 +11,6 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/btc/btctest"
 	"github.com/fatih/color"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -103,7 +102,7 @@ var _ = Describe("Wallet", func() {
 			}
 		})
 
-		FIt("should be able to instant refund a HTLC", func(ctx context.Context) {
+		It("should be able to instant refund a HTLC", func(ctx context.Context) {
 			for _, addrType := range addrTypes {
 				By("Init keys and wallet")
 				feeEstimator := btc.NewFixFeeEstimator(1e3)
@@ -339,7 +338,7 @@ var _ = Describe("Wallet", func() {
 					By("Initiate an HTLC and fund it with a different amount")
 					amount, timelock := int64(1e7), int64(6)
 					htlc, err := btctest.NewHtlc(wal1.PublicKey(), wal2.PublicKey(), timelock, amount)
-					htlcAddr := htlc.Address(network)
+					htlcAddr := htlc.MustAddress(network)
 					_, err = btctest.Faucet(htlcAddr.EncodeAddress())
 					Expect(err).Should(BeNil())
 					time.Sleep(5 * time.Second)
@@ -458,7 +457,6 @@ var _ = Describe("Wallet", func() {
 					_, err = wal1.Execute(ctx, actions3, "")
 					Expect(err).Should(BeNil())
 				}
-
 			})
 		})
 
@@ -480,7 +478,7 @@ var _ = Describe("Wallet", func() {
 					Expect(err).Should(BeNil())
 					refunds, err := btctest.PrepareActions(ctx, number, wal1, wal2, indexer, btc.HtlcActionRefund)
 					Expect(err).Should(BeNil())
-					instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInitiate)
+					instantRefunds, err := btctest.PrepareActions(ctx, number, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
 					Expect(err).Should(BeNil())
 
 					By("Combined all actions and shuffle the order")
@@ -591,14 +589,11 @@ var _ = Describe("Wallet", func() {
 					By("Redeem one htlc")
 					redeems, err := btctest.PrepareActions(ctx, 2, wal2, wal1, indexer, btc.HtlcActionRedeem)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, redeems[:1], "")
-					Expect(err).Should(BeNil())
-					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Redeem again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(redeems, redeems...), tx1.TxHash().String())
+					tx, err := wal1.Execute(ctx, append(redeems, redeems...), "")
 					Expect(err).Should(BeNil())
-					color.Green("tx2: %s", tx2.TxHash().String())
+					color.Green("tx: %s", tx.TxHash().String())
 				}
 			})
 
@@ -614,14 +609,11 @@ var _ = Describe("Wallet", func() {
 					By("Refund one htlc")
 					refunds, err := btctest.PrepareActions(ctx, 2, wal1, wal2, indexer, btc.HtlcActionRefund)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, refunds[:1], "")
-					Expect(err).Should(BeNil())
-					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Refund again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(refunds, refunds...), tx1.TxHash().String())
+					tx, err := wal1.Execute(ctx, append(refunds, refunds...), "")
 					Expect(err).Should(BeNil())
-					color.Green("tx2: %s", tx2.TxHash().String())
+					color.Green("tx: %s", tx.TxHash().String())
 				}
 			})
 
@@ -637,14 +629,11 @@ var _ = Describe("Wallet", func() {
 					By("Instant refunds one htlc")
 					instantRefunds, err := btctest.PrepareActions(ctx, 2, wal2, wal1, indexer, btc.HtlcActionInstantRefund)
 					Expect(err).Should(BeNil())
-					tx1, err := wal1.Execute(ctx, instantRefunds[:1], "")
-					Expect(err).Should(BeNil())
-					color.Green("tx1: %s", tx1.TxHash().String())
 
 					By("Instant refunds again with duplicate actions")
-					tx2, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), tx1.TxHash().String())
+					tx, err := wal1.Execute(ctx, append(instantRefunds, instantRefunds...), "")
 					Expect(err).Should(BeNil())
-					color.Green("tx2: %s", tx2.TxHash().String())
+					color.Green("tx: %s", tx.TxHash().String())
 				}
 			})
 		})
