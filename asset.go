@@ -316,6 +316,18 @@ var (
 	}
 )
 
+// Asset on Bnb
+var (
+	// Mainnet
+
+	AssetBnbSmartChainBnb = Asset{
+		Chain:    NewEvmChain(BnbSmartChain),
+		Address:  Native,
+		Decimals: 19,
+		Symbol:   "BNB",
+	}
+)
+
 func HtlcContractAddress(asset Asset) common.Address {
 	switch {
 	case asset.Chain.Name() == Ethereum:
