@@ -69,6 +69,8 @@ var (
 	ErrInvalidInstantRefundScript = fmt.Errorf("invalid instant refund script")
 
 	ErrHTLCNeedMoreBlocks = func(blocks uint64) error { return fmt.Errorf("need more %d blocks to refund", blocks) }
+
+	ErrNoSpendUTXOs = fmt.Errorf("no confirmed utxos available to spend")
 )
 
 type HTLC struct {
@@ -87,7 +89,7 @@ type HTLCWallet interface {
 	// Initiate sends the amount to the HTLC address
 	Initiate(ctx context.Context, htlc *HTLC, amount int64) (string, error)
 	// Redeem redeems the HTLC with the secret
-	Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error)
+	Redeem(ctx context.Context, htlc *HTLC, secret []byte, amount int64) (string, error)
 	// Refund refunds the HTLC if the htlc is expired.
 	// For instant refunds, the SACP tx signed by counterparty should be passed
 	Refund(ctx context.Context, htlc *HTLC, instantRefundSACPTx []byte) (string, error)
@@ -223,7 +225,7 @@ func (hw *htlcWallet) Initiate(ctx context.Context, htlc *HTLC, amount int64) (s
 	}, nil, nil)
 }
 
-func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte, recipient btcutil.Address) (SpendRequest, error) {
+func (hw *htlcWallet) redeem(ctx context.Context, htlc *HTLC, secret []byte, recipient btcutil.Address, amount int64) (SpendRequest, error) {
 	if !isSecretValid(secret, htlc) {
 		return SpendRequest{}, ErrInvalidSecret
 	}
@@ -244,6 +246,32 @@ func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte, recipient btcutil.Addres
 		return SpendRequest{}, err
 	}
 
+	utxos, err := hw.indexer.GetUTXOs(ctx, scriptAddr)
+	if err != nil {
+		return SpendRequest{}, fmt.Errorf("failed to validate spends for %s: %w", scriptAddr, err)
+	}
+
+	var confirmedUTXOS UTXOs
+
+	for _, utxo := range utxos {
+		if utxo.Status.Confirmed {
+			confirmedUTXOS = append(confirmedUTXOS, utxo)
+		}
+	}
+
+	if len(confirmedUTXOS) == 0 {
+		return SpendRequest{}, ErrNoSpendUTXOs
+	}
+
+	totalUtxoValue := int64(0)
+	for _, utxo := range confirmedUTXOS {
+		totalUtxoValue += utxo.Amount
+	}
+
+	if totalUtxoValue < amount {
+		return SpendRequest{}, fmt.Errorf("insufficient funds to redeem HTLC: required %d, got %d", amount, totalUtxoValue)
+	}
+
 	return SpendRequest{
 		Witness:       witness,
 		Leaf:          redeemTapLeaf,
@@ -254,8 +282,8 @@ func (hw *htlcWallet) redeem(htlc *HTLC, secret []byte, recipient btcutil.Addres
 }
 
 // Redeem redeems the HTLC with the secret
-func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte) (string, error) {
-	redeemSpendRequest, err := hw.redeem(htlc, secret, nil)
+func (hw *htlcWallet) Redeem(ctx context.Context, htlc *HTLC, secret []byte, amount int64) (string, error) {
+	redeemSpendRequest, err := hw.redeem(ctx, htlc, secret, nil, amount)
 	if err != nil {
 		return "", err
 	}
@@ -339,7 +367,7 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 				Amount: htlcAction.Amount,
 			})
 		case RedeemHTLCAction:
-			redeemSpendRequest, err := hw.redeem(&htlcAction.HTLC, htlcAction.Secret, htlcAction.Recipient)
+			redeemSpendRequest, err := hw.redeem(ctx, &htlcAction.HTLC, htlcAction.Secret, htlcAction.Recipient, htlcAction.Amount)
 			if err != nil {
 				return "", err
 			}
