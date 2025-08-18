@@ -55,6 +55,9 @@ const (
 
 	Corn        Name = "corn"
 	CornTestnet Name = "corn_testnet"
+
+	BnbSmartChain        Name = "bsc"
+	BnbSmartChainTestnet Name = "bsc_testnet"
 )
 
 type Type string
@@ -123,7 +126,8 @@ func ParseChainName(name Name) (Chain, error) {
 		Starknet, StarknetSepolia, StarknetDevnet,
 		Unichain, UnichainSepolia,
 		Botanix, BotanixTestnet,
-		Corn, CornTestnet:
+		Corn, CornTestnet,
+		BnbSmartChain, BnbSmartChainTestnet:
 		return NewEvmChain(name), nil
 	case Solana, SolanaDevnet, SolanaLocalnet:
 		return NewSolanaChain(name), nil
