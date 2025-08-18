@@ -269,7 +269,7 @@ func (hw *htlcWallet) redeem(ctx context.Context, htlc *HTLC, secret []byte, rec
 	}
 
 	if totalUtxoValue < amount {
-		return SpendRequest{}, fmt.Errorf("insufficient funds to redeem HTLC: required %d, got %d", amount, totalUtxoValue)
+		return SpendRequest{}, fmt.Errorf("insufficient funds in redeem HTLC: required %d, got %d", amount, totalUtxoValue)
 	}
 
 	return SpendRequest{
