@@ -135,6 +135,12 @@ var (
 		Decimals: 8,
 		Symbol:   "IBTC",
 	}
+	AssetSeedArbitrum = Asset{
+		Chain:    NewEvmChain(Arbitrum),
+		Address:  "0x86f65121804D2Cdbef79F9f072D4e0c2eEbABC08",
+		Decimals: 18,
+		Symbol:   "SEED",
+	}
 
 	// Testnet
 
