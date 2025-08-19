@@ -329,15 +329,20 @@ var (
 	AssetBnbBnbSmartChain = Asset{
 		Chain:    NewEvmChain(BnbSmartChain),
 		Address:  Native,
-		Decimals: 19,
+		Decimals: 18,
 		Symbol:   "BNB",
 	}
-
 	AssetUsdcBnbSmartChain = Asset{
 		Chain:    NewEvmChain(BnbSmartChain),
 		Address:  "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
 		Decimals: 18,
 		Symbol:   "USDC",
+	}
+	AssetBtcbBnbSmartChain = Asset{
+		Chain:    NewEvmChain(BnbSmartChain),
+		Address:  "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+		Decimals: 18,
+		Symbol:   "BTCB",
 	}
 )
 
