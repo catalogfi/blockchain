@@ -90,6 +90,12 @@ var (
 		Decimals: 8,
 		Symbol:   "IBTC",
 	}
+	AssetSeedEthereum = Asset{
+		Chain:    NewEvmChain(Ethereum),
+		Address:  "0x5eed99d066a8CaF10f3E4327c1b3D8b673485eED",
+		Decimals: 18,
+		Symbol:   "SEED",
+	}
 
 	// Testnet
 
