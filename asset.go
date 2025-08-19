@@ -247,6 +247,25 @@ var (
 	}
 )
 
+// Asset on Starknet
+
+var (
+	// Mainnet
+
+	AssetEthStarknet = Asset{
+		Chain:    NewEvmChain(Starknet),
+		Address:  Native,
+		Decimals: 18,
+		Symbol:   "STRK",
+	}
+	AssetWbtcStarknet = Asset{
+		Chain:    NewEvmChain(Starknet),
+		Address:  "0x03fe2b97c1fd336e750087d68b9b867997fd64a2661ff3ca5a7c771641e8e7ac",
+		Decimals: 8,
+		Symbol:   "WBTC",
+	}
+)
+
 // Asset on Unichain
 var (
 	// Mainnet
