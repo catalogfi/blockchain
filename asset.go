@@ -252,7 +252,7 @@ var (
 var (
 	// Mainnet
 
-	AssetEthStarknet = Asset{
+	AssetStrkStarknet = Asset{
 		Chain:    NewEvmChain(Starknet),
 		Address:  Native,
 		Decimals: 18,
@@ -281,6 +281,12 @@ var (
 		Address:  "0x927B51f251480a681271180DA4de28D44EC4AfB8",
 		Decimals: 8,
 		Symbol:   "WBTC",
+	}
+	AssetUsdcUnichain = Asset{
+		Chain:    NewEvmChain(Unichain),
+		Address:  "0x078D782b760474a361dDA0AF3839290b0EF57AD6",
+		Decimals: 6,
+		Symbol:   "USDC",
 	}
 )
 
