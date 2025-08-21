@@ -31,7 +31,7 @@ var (
 
 // GardenHTLCV3MetaData contains all meta data concerning the GardenHTLCV3 contract.
 var GardenHTLCV3MetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token_\",\"type\":\"address\"},{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\"},{\"internalType\":\"string\",\"name\":\"version\",\"type\":\"string\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"HTLC__DuplicateOrder\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__IncorrectSecret\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidInitiatorSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidRedeemerSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderFulfilled\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotExpired\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotInitiated\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameFunderAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameInitiatorAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressInitiator\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAmount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroTimelock\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidShortString\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"SafeERC20FailedOperation\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"str\",\"type\":\"string\"}],\"name\":\"StringTooLong\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[],\"name\":\"EIP712DomainChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"Initiated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"Redeemed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"Refunded\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"eip712Domain\",\"outputs\":[{\"internalType\":\"bytes1\",\"name\":\"fields\",\"type\":\"bytes1\"},{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\"},{\"internalType\":\"string\",\"name\":\"version\",\"type\":\"string\"},{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"verifyingContract\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"salt\",\"type\":\"bytes32\"},{\"internalType\":\"uint256[]\",\"name\":\"extensions\",\"type\":\"uint256[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"initiateWithSignature\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"instantRefund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"instantRefundDigest\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"orders\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"initiatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"fulfilledAt\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"token\",\"outputs\":[{\"internalType\":\"contractIERC20\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"HTLC__DuplicateOrder\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__HTLCAlreadyInitialized\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__IncorrectSecret\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidInitiatorSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidRedeemerSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderFulfilled\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotExpired\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotInitiated\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameFunderAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameInitiatorAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressInitiator\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAmount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroTimelock\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidShortString\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"SafeERC20FailedOperation\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"str\",\"type\":\"string\"}],\"name\":\"StringTooLong\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[],\"name\":\"EIP712DomainChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"Initiated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"InitiatedOnBehalf\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"Redeemed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"Refunded\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"eip712Domain\",\"outputs\":[{\"internalType\":\"bytes1\",\"name\":\"fields\",\"type\":\"bytes1\"},{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\"},{\"internalType\":\"string\",\"name\":\"version\",\"type\":\"string\"},{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"verifyingContract\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"salt\",\"type\":\"bytes32\"},{\"internalType\":\"uint256[]\",\"name\":\"extensions\",\"type\":\"uint256[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_token\",\"type\":\"address\"}],\"name\":\"initialise\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"initiateWithSignature\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"instantRefund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"instantRefundDigest\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"isInitialized\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"name\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"orders\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"initiatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"fulfilledAt\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"token\",\"outputs\":[{\"internalType\":\"contractIERC20\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"version\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
 }
 
 // GardenHTLCV3ABI is the input ABI used to generate the binding from.
@@ -281,6 +281,68 @@ func (_GardenHTLCV3 *GardenHTLCV3CallerSession) InstantRefundDigest(orderID [32]
 	return _GardenHTLCV3.Contract.InstantRefundDigest(&_GardenHTLCV3.CallOpts, orderID)
 }
 
+// IsInitialized is a free data retrieval call binding the contract method 0x392e53cd.
+//
+// Solidity: function isInitialized() view returns(uint256)
+func (_GardenHTLCV3 *GardenHTLCV3Caller) IsInitialized(opts *bind.CallOpts) (*big.Int, error) {
+	var out []interface{}
+	err := _GardenHTLCV3.contract.Call(opts, &out, "isInitialized")
+
+	if err != nil {
+		return *new(*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+
+	return out0, err
+
+}
+
+// IsInitialized is a free data retrieval call binding the contract method 0x392e53cd.
+//
+// Solidity: function isInitialized() view returns(uint256)
+func (_GardenHTLCV3 *GardenHTLCV3Session) IsInitialized() (*big.Int, error) {
+	return _GardenHTLCV3.Contract.IsInitialized(&_GardenHTLCV3.CallOpts)
+}
+
+// IsInitialized is a free data retrieval call binding the contract method 0x392e53cd.
+//
+// Solidity: function isInitialized() view returns(uint256)
+func (_GardenHTLCV3 *GardenHTLCV3CallerSession) IsInitialized() (*big.Int, error) {
+	return _GardenHTLCV3.Contract.IsInitialized(&_GardenHTLCV3.CallOpts)
+}
+
+// Name is a free data retrieval call binding the contract method 0x06fdde03.
+//
+// Solidity: function name() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3Caller) Name(opts *bind.CallOpts) (string, error) {
+	var out []interface{}
+	err := _GardenHTLCV3.contract.Call(opts, &out, "name")
+
+	if err != nil {
+		return *new(string), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(string)).(*string)
+
+	return out0, err
+
+}
+
+// Name is a free data retrieval call binding the contract method 0x06fdde03.
+//
+// Solidity: function name() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3Session) Name() (string, error) {
+	return _GardenHTLCV3.Contract.Name(&_GardenHTLCV3.CallOpts)
+}
+
+// Name is a free data retrieval call binding the contract method 0x06fdde03.
+//
+// Solidity: function name() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3CallerSession) Name() (string, error) {
+	return _GardenHTLCV3.Contract.Name(&_GardenHTLCV3.CallOpts)
+}
+
 // Orders is a free data retrieval call binding the contract method 0x9c3f1e90.
 //
 // Solidity: function orders(bytes32 ) view returns(address initiator, address redeemer, uint256 initiatedAt, uint256 timelock, uint256 amount, uint256 fulfilledAt)
@@ -377,6 +439,58 @@ func (_GardenHTLCV3 *GardenHTLCV3CallerSession) Token() (common.Address, error) 
 	return _GardenHTLCV3.Contract.Token(&_GardenHTLCV3.CallOpts)
 }
 
+// Version is a free data retrieval call binding the contract method 0x54fd4d50.
+//
+// Solidity: function version() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3Caller) Version(opts *bind.CallOpts) (string, error) {
+	var out []interface{}
+	err := _GardenHTLCV3.contract.Call(opts, &out, "version")
+
+	if err != nil {
+		return *new(string), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(string)).(*string)
+
+	return out0, err
+
+}
+
+// Version is a free data retrieval call binding the contract method 0x54fd4d50.
+//
+// Solidity: function version() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3Session) Version() (string, error) {
+	return _GardenHTLCV3.Contract.Version(&_GardenHTLCV3.CallOpts)
+}
+
+// Version is a free data retrieval call binding the contract method 0x54fd4d50.
+//
+// Solidity: function version() view returns(string)
+func (_GardenHTLCV3 *GardenHTLCV3CallerSession) Version() (string, error) {
+	return _GardenHTLCV3.Contract.Version(&_GardenHTLCV3.CallOpts)
+}
+
+// Initialise is a paid mutator transaction binding the contract method 0x9d6a890f.
+//
+// Solidity: function initialise(address _token) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Transactor) Initialise(opts *bind.TransactOpts, _token common.Address) (*types.Transaction, error) {
+	return _GardenHTLCV3.contract.Transact(opts, "initialise", _token)
+}
+
+// Initialise is a paid mutator transaction binding the contract method 0x9d6a890f.
+//
+// Solidity: function initialise(address _token) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Session) Initialise(_token common.Address) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initialise(&_GardenHTLCV3.TransactOpts, _token)
+}
+
+// Initialise is a paid mutator transaction binding the contract method 0x9d6a890f.
+//
+// Solidity: function initialise(address _token) returns()
+func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) Initialise(_token common.Address) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initialise(&_GardenHTLCV3.TransactOpts, _token)
+}
+
 // Initiate is a paid mutator transaction binding the contract method 0x97ffc7ae.
 //
 // Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
@@ -417,6 +531,27 @@ func (_GardenHTLCV3 *GardenHTLCV3Session) InitiateOnBehalf(initiator common.Addr
 // Solidity: function initiateOnBehalf(address initiator, address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
 func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) InitiateOnBehalf(initiator common.Address, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
 	return _GardenHTLCV3.Contract.InitiateOnBehalf(&_GardenHTLCV3.TransactOpts, initiator, redeemer, timelock, amount, secretHash)
+}
+
+// InitiateOnBehalf0 is a paid mutator transaction binding the contract method 0xa66a8641.
+//
+// Solidity: function initiateOnBehalf(address initiator, address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Transactor) InitiateOnBehalf0(opts *bind.TransactOpts, initiator common.Address, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.contract.Transact(opts, "initiateOnBehalf0", initiator, redeemer, timelock, amount, secretHash, destinationData)
+}
+
+// InitiateOnBehalf0 is a paid mutator transaction binding the contract method 0xa66a8641.
+//
+// Solidity: function initiateOnBehalf(address initiator, address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Session) InitiateOnBehalf0(initiator common.Address, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.InitiateOnBehalf0(&_GardenHTLCV3.TransactOpts, initiator, redeemer, timelock, amount, secretHash, destinationData)
+}
+
+// InitiateOnBehalf0 is a paid mutator transaction binding the contract method 0xa66a8641.
+//
+// Solidity: function initiateOnBehalf(address initiator, address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) InitiateOnBehalf0(initiator common.Address, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.InitiateOnBehalf0(&_GardenHTLCV3.TransactOpts, initiator, redeemer, timelock, amount, secretHash, destinationData)
 }
 
 // InitiateWithSignature is a paid mutator transaction binding the contract method 0xd4705e9e.
@@ -705,38 +840,56 @@ func (it *GardenHTLCV3InitiatedIterator) Close() error {
 
 // GardenHTLCV3Initiated represents a Initiated event raised by the GardenHTLCV3 contract.
 type GardenHTLCV3Initiated struct {
-	OrderID [32]byte
-	Raw     types.Log // Blockchain specific contextual infos
+	OrderID    [32]byte
+	SecretHash [32]byte
+	Amount     *big.Int
+	Raw        types.Log // Blockchain specific contextual infos
 }
 
-// FilterInitiated is a free log retrieval operation binding the contract event 0x08007a3b331cd9bd3d1d3667a3724ba04d1b2799b75845215f1944debbdf844f.
+// FilterInitiated is a free log retrieval operation binding the contract event 0x01b41cbd4bbcc3c5b968a04d3fbdd8c1648a39ff6d9a3929b4840cea1142bc65.
 //
-// Solidity: event Initiated(bytes32 indexed orderID)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiated(opts *bind.FilterOpts, orderID [][32]byte) (*GardenHTLCV3InitiatedIterator, error) {
+// Solidity: event Initiated(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiated(opts *bind.FilterOpts, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (*GardenHTLCV3InitiatedIterator, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
 		orderIDRule = append(orderIDRule, orderIDItem)
 	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
+	var amountRule []interface{}
+	for _, amountItem := range amount {
+		amountRule = append(amountRule, amountItem)
+	}
 
-	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "Initiated", orderIDRule)
+	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "Initiated", orderIDRule, secretHashRule, amountRule)
 	if err != nil {
 		return nil, err
 	}
 	return &GardenHTLCV3InitiatedIterator{contract: _GardenHTLCV3.contract, event: "Initiated", logs: logs, sub: sub}, nil
 }
 
-// WatchInitiated is a free log subscription operation binding the contract event 0x08007a3b331cd9bd3d1d3667a3724ba04d1b2799b75845215f1944debbdf844f.
+// WatchInitiated is a free log subscription operation binding the contract event 0x01b41cbd4bbcc3c5b968a04d3fbdd8c1648a39ff6d9a3929b4840cea1142bc65.
 //
-// Solidity: event Initiated(bytes32 indexed orderID)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiated(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3Initiated, orderID [][32]byte) (event.Subscription, error) {
+// Solidity: event Initiated(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiated(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3Initiated, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (event.Subscription, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
 		orderIDRule = append(orderIDRule, orderIDItem)
 	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
+	var amountRule []interface{}
+	for _, amountItem := range amount {
+		amountRule = append(amountRule, amountItem)
+	}
 
-	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "Initiated", orderIDRule)
+	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "Initiated", orderIDRule, secretHashRule, amountRule)
 	if err != nil {
 		return nil, err
 	}
@@ -768,12 +921,175 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiated(opts *bind.WatchOpts, 
 	}), nil
 }
 
-// ParseInitiated is a log parse operation binding the contract event 0x08007a3b331cd9bd3d1d3667a3724ba04d1b2799b75845215f1944debbdf844f.
+// ParseInitiated is a log parse operation binding the contract event 0x01b41cbd4bbcc3c5b968a04d3fbdd8c1648a39ff6d9a3929b4840cea1142bc65.
 //
-// Solidity: event Initiated(bytes32 indexed orderID)
+// Solidity: event Initiated(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount)
 func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseInitiated(log types.Log) (*GardenHTLCV3Initiated, error) {
 	event := new(GardenHTLCV3Initiated)
 	if err := _GardenHTLCV3.contract.UnpackLog(event, "Initiated", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
+}
+
+// GardenHTLCV3InitiatedOnBehalfIterator is returned from FilterInitiatedOnBehalf and is used to iterate over the raw logs and unpacked data for InitiatedOnBehalf events raised by the GardenHTLCV3 contract.
+type GardenHTLCV3InitiatedOnBehalfIterator struct {
+	Event *GardenHTLCV3InitiatedOnBehalf // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *GardenHTLCV3InitiatedOnBehalfIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(GardenHTLCV3InitiatedOnBehalf)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(GardenHTLCV3InitiatedOnBehalf)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *GardenHTLCV3InitiatedOnBehalfIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *GardenHTLCV3InitiatedOnBehalfIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// GardenHTLCV3InitiatedOnBehalf represents a InitiatedOnBehalf event raised by the GardenHTLCV3 contract.
+type GardenHTLCV3InitiatedOnBehalf struct {
+	OrderID         [32]byte
+	SecretHash      [32]byte
+	Amount          *big.Int
+	DestinationData []byte
+	Raw             types.Log // Blockchain specific contextual infos
+}
+
+// FilterInitiatedOnBehalf is a free log retrieval operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+//
+// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiatedOnBehalf(opts *bind.FilterOpts, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (*GardenHTLCV3InitiatedOnBehalfIterator, error) {
+
+	var orderIDRule []interface{}
+	for _, orderIDItem := range orderID {
+		orderIDRule = append(orderIDRule, orderIDItem)
+	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
+	var amountRule []interface{}
+	for _, amountItem := range amount {
+		amountRule = append(amountRule, amountItem)
+	}
+
+	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "InitiatedOnBehalf", orderIDRule, secretHashRule, amountRule)
+	if err != nil {
+		return nil, err
+	}
+	return &GardenHTLCV3InitiatedOnBehalfIterator{contract: _GardenHTLCV3.contract, event: "InitiatedOnBehalf", logs: logs, sub: sub}, nil
+}
+
+// WatchInitiatedOnBehalf is a free log subscription operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+//
+// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedOnBehalf(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3InitiatedOnBehalf, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (event.Subscription, error) {
+
+	var orderIDRule []interface{}
+	for _, orderIDItem := range orderID {
+		orderIDRule = append(orderIDRule, orderIDItem)
+	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
+	var amountRule []interface{}
+	for _, amountItem := range amount {
+		amountRule = append(amountRule, amountItem)
+	}
+
+	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "InitiatedOnBehalf", orderIDRule, secretHashRule, amountRule)
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(GardenHTLCV3InitiatedOnBehalf)
+				if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedOnBehalf", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseInitiatedOnBehalf is a log parse operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+//
+// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseInitiatedOnBehalf(log types.Log) (*GardenHTLCV3InitiatedOnBehalf, error) {
+	event := new(GardenHTLCV3InitiatedOnBehalf)
+	if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedOnBehalf", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
@@ -849,39 +1165,48 @@ func (it *GardenHTLCV3RedeemedIterator) Close() error {
 
 // GardenHTLCV3Redeemed represents a Redeemed event raised by the GardenHTLCV3 contract.
 type GardenHTLCV3Redeemed struct {
-	OrderID [32]byte
-	Secret  []byte
-	Raw     types.Log // Blockchain specific contextual infos
+	OrderID    [32]byte
+	SecretHash [32]byte
+	Secret     []byte
+	Raw        types.Log // Blockchain specific contextual infos
 }
 
-// FilterRedeemed is a free log retrieval operation binding the contract event 0x866c33f43c7dda3105124ae616b2a42ff25811f48048edbb4ab215c59563b1e6.
+// FilterRedeemed is a free log retrieval operation binding the contract event 0x4c9a044220477b4e94dbb0d07ff6ff4ac30d443bef59098c4541b006954778e2.
 //
-// Solidity: event Redeemed(bytes32 indexed orderID, bytes secret)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterRedeemed(opts *bind.FilterOpts, orderID [][32]byte) (*GardenHTLCV3RedeemedIterator, error) {
+// Solidity: event Redeemed(bytes32 indexed orderID, bytes32 indexed secretHash, bytes secret)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterRedeemed(opts *bind.FilterOpts, orderID [][32]byte, secretHash [][32]byte) (*GardenHTLCV3RedeemedIterator, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
 		orderIDRule = append(orderIDRule, orderIDItem)
 	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
 
-	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "Redeemed", orderIDRule)
+	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "Redeemed", orderIDRule, secretHashRule)
 	if err != nil {
 		return nil, err
 	}
 	return &GardenHTLCV3RedeemedIterator{contract: _GardenHTLCV3.contract, event: "Redeemed", logs: logs, sub: sub}, nil
 }
 
-// WatchRedeemed is a free log subscription operation binding the contract event 0x866c33f43c7dda3105124ae616b2a42ff25811f48048edbb4ab215c59563b1e6.
+// WatchRedeemed is a free log subscription operation binding the contract event 0x4c9a044220477b4e94dbb0d07ff6ff4ac30d443bef59098c4541b006954778e2.
 //
-// Solidity: event Redeemed(bytes32 indexed orderID, bytes secret)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchRedeemed(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3Redeemed, orderID [][32]byte) (event.Subscription, error) {
+// Solidity: event Redeemed(bytes32 indexed orderID, bytes32 indexed secretHash, bytes secret)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchRedeemed(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3Redeemed, orderID [][32]byte, secretHash [][32]byte) (event.Subscription, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
 		orderIDRule = append(orderIDRule, orderIDItem)
 	}
+	var secretHashRule []interface{}
+	for _, secretHashItem := range secretHash {
+		secretHashRule = append(secretHashRule, secretHashItem)
+	}
 
-	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "Redeemed", orderIDRule)
+	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "Redeemed", orderIDRule, secretHashRule)
 	if err != nil {
 		return nil, err
 	}
@@ -913,9 +1238,9 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchRedeemed(opts *bind.WatchOpts, s
 	}), nil
 }
 
-// ParseRedeemed is a log parse operation binding the contract event 0x866c33f43c7dda3105124ae616b2a42ff25811f48048edbb4ab215c59563b1e6.
+// ParseRedeemed is a log parse operation binding the contract event 0x4c9a044220477b4e94dbb0d07ff6ff4ac30d443bef59098c4541b006954778e2.
 //
-// Solidity: event Redeemed(bytes32 indexed orderID, bytes secret)
+// Solidity: event Redeemed(bytes32 indexed orderID, bytes32 indexed secretHash, bytes secret)
 func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseRedeemed(log types.Log) (*GardenHTLCV3Redeemed, error) {
 	event := new(GardenHTLCV3Redeemed)
 	if err := _GardenHTLCV3.contract.UnpackLog(event, "Redeemed", log); err != nil {
