@@ -31,7 +31,7 @@ var (
 
 // GardenHTLCV3MetaData contains all meta data concerning the GardenHTLCV3 contract.
 var GardenHTLCV3MetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"HTLC__DuplicateOrder\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__HTLCAlreadyInitialized\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__IncorrectSecret\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidInitiatorSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidRedeemerSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderFulfilled\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotExpired\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotInitiated\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameFunderAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameInitiatorAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressInitiator\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAmount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroTimelock\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidShortString\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"SafeERC20FailedOperation\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"str\",\"type\":\"string\"}],\"name\":\"StringTooLong\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[],\"name\":\"EIP712DomainChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"Initiated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"InitiatedOnBehalf\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"Redeemed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"Refunded\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"eip712Domain\",\"outputs\":[{\"internalType\":\"bytes1\",\"name\":\"fields\",\"type\":\"bytes1\"},{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\"},{\"internalType\":\"string\",\"name\":\"version\",\"type\":\"string\"},{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"verifyingContract\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"salt\",\"type\":\"bytes32\"},{\"internalType\":\"uint256[]\",\"name\":\"extensions\",\"type\":\"uint256[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_token\",\"type\":\"address\"}],\"name\":\"initialise\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"initiateWithSignature\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"instantRefund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"instantRefundDigest\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"isInitialized\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"name\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"orders\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"initiatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"fulfilledAt\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"token\",\"outputs\":[{\"internalType\":\"contractIERC20\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"version\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
+	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"HTLC__DuplicateOrder\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__HTLCAlreadyInitialized\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__IncorrectSecret\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidInitiatorSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__InvalidRedeemerSignature\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderFulfilled\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotExpired\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__OrderNotInitiated\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameFunderAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__SameInitiatorAndRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressInitiator\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAddressRedeemer\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroAmount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"HTLC__ZeroTimelock\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidShortString\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"token\",\"type\":\"address\"}],\"name\":\"SafeERC20FailedOperation\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"str\",\"type\":\"string\"}],\"name\":\"StringTooLong\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[],\"name\":\"EIP712DomainChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"Initiated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"InitiatedWithDestinationData\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"Redeemed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"Refunded\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"eip712Domain\",\"outputs\":[{\"internalType\":\"bytes1\",\"name\":\"fields\",\"type\":\"bytes1\"},{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\"},{\"internalType\":\"string\",\"name\":\"version\",\"type\":\"string\"},{\"internalType\":\"uint256\",\"name\":\"chainId\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"verifyingContract\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"salt\",\"type\":\"bytes32\"},{\"internalType\":\"uint256[]\",\"name\":\"extensions\",\"type\":\"uint256[]\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_token\",\"type\":\"address\"}],\"name\":\"initialise\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"destinationData\",\"type\":\"bytes\"}],\"name\":\"initiateOnBehalf\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"initiateWithSignature\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"signature\",\"type\":\"bytes\"}],\"name\":\"instantRefund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"instantRefundDigest\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"isInitialized\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"name\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"name\":\"orders\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"initiator\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"redeemer\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"initiatedAt\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"timelock\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"fulfilledAt\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes\",\"name\":\"secret\",\"type\":\"bytes\"}],\"name\":\"redeem\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"orderID\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"token\",\"outputs\":[{\"internalType\":\"contractIERC20\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"version\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]",
 }
 
 // GardenHTLCV3ABI is the input ABI used to generate the binding from.
@@ -491,25 +491,46 @@ func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) Initialise(_token common.Add
 	return _GardenHTLCV3.Contract.Initialise(&_GardenHTLCV3.TransactOpts, _token)
 }
 
-// Initiate is a paid mutator transaction binding the contract method 0x97ffc7ae.
+// Initiate is a paid mutator transaction binding the contract method 0x4ede0ab7.
 //
-// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
-func (_GardenHTLCV3 *GardenHTLCV3Transactor) Initiate(opts *bind.TransactOpts, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
-	return _GardenHTLCV3.contract.Transact(opts, "initiate", redeemer, timelock, amount, secretHash)
+// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Transactor) Initiate(opts *bind.TransactOpts, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.contract.Transact(opts, "initiate", redeemer, timelock, amount, secretHash, destinationData)
 }
 
-// Initiate is a paid mutator transaction binding the contract method 0x97ffc7ae.
+// Initiate is a paid mutator transaction binding the contract method 0x4ede0ab7.
 //
-// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
-func (_GardenHTLCV3 *GardenHTLCV3Session) Initiate(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
-	return _GardenHTLCV3.Contract.Initiate(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash)
+// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Session) Initiate(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initiate(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash, destinationData)
 }
 
-// Initiate is a paid mutator transaction binding the contract method 0x97ffc7ae.
+// Initiate is a paid mutator transaction binding the contract method 0x4ede0ab7.
+//
+// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash, bytes destinationData) returns()
+func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) Initiate(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte, destinationData []byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initiate(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash, destinationData)
+}
+
+// Initiate0 is a paid mutator transaction binding the contract method 0x97ffc7ae.
 //
 // Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
-func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) Initiate(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
-	return _GardenHTLCV3.Contract.Initiate(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash)
+func (_GardenHTLCV3 *GardenHTLCV3Transactor) Initiate0(opts *bind.TransactOpts, redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.contract.Transact(opts, "initiate0", redeemer, timelock, amount, secretHash)
+}
+
+// Initiate0 is a paid mutator transaction binding the contract method 0x97ffc7ae.
+//
+// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
+func (_GardenHTLCV3 *GardenHTLCV3Session) Initiate0(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initiate0(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash)
+}
+
+// Initiate0 is a paid mutator transaction binding the contract method 0x97ffc7ae.
+//
+// Solidity: function initiate(address redeemer, uint256 timelock, uint256 amount, bytes32 secretHash) returns()
+func (_GardenHTLCV3 *GardenHTLCV3TransactorSession) Initiate0(redeemer common.Address, timelock *big.Int, amount *big.Int, secretHash [32]byte) (*types.Transaction, error) {
+	return _GardenHTLCV3.Contract.Initiate0(&_GardenHTLCV3.TransactOpts, redeemer, timelock, amount, secretHash)
 }
 
 // InitiateOnBehalf is a paid mutator transaction binding the contract method 0x13d4a787.
@@ -933,9 +954,9 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseInitiated(log types.Log) (*Garde
 	return event, nil
 }
 
-// GardenHTLCV3InitiatedOnBehalfIterator is returned from FilterInitiatedOnBehalf and is used to iterate over the raw logs and unpacked data for InitiatedOnBehalf events raised by the GardenHTLCV3 contract.
-type GardenHTLCV3InitiatedOnBehalfIterator struct {
-	Event *GardenHTLCV3InitiatedOnBehalf // Event containing the contract specifics and raw log
+// GardenHTLCV3InitiatedWithDestinationDataIterator is returned from FilterInitiatedWithDestinationData and is used to iterate over the raw logs and unpacked data for InitiatedWithDestinationData events raised by the GardenHTLCV3 contract.
+type GardenHTLCV3InitiatedWithDestinationDataIterator struct {
+	Event *GardenHTLCV3InitiatedWithDestinationData // Event containing the contract specifics and raw log
 
 	contract *bind.BoundContract // Generic contract to use for unpacking event data
 	event    string              // Event name to use for unpacking event data
@@ -949,7 +970,7 @@ type GardenHTLCV3InitiatedOnBehalfIterator struct {
 // Next advances the iterator to the subsequent event, returning whether there
 // are any more events found. In case of a retrieval or parsing error, false is
 // returned and Error() can be queried for the exact failure.
-func (it *GardenHTLCV3InitiatedOnBehalfIterator) Next() bool {
+func (it *GardenHTLCV3InitiatedWithDestinationDataIterator) Next() bool {
 	// If the iterator failed, stop iterating
 	if it.fail != nil {
 		return false
@@ -958,7 +979,7 @@ func (it *GardenHTLCV3InitiatedOnBehalfIterator) Next() bool {
 	if it.done {
 		select {
 		case log := <-it.logs:
-			it.Event = new(GardenHTLCV3InitiatedOnBehalf)
+			it.Event = new(GardenHTLCV3InitiatedWithDestinationData)
 			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 				it.fail = err
 				return false
@@ -973,7 +994,7 @@ func (it *GardenHTLCV3InitiatedOnBehalfIterator) Next() bool {
 	// Iterator still in progress, wait for either a data or an error event
 	select {
 	case log := <-it.logs:
-		it.Event = new(GardenHTLCV3InitiatedOnBehalf)
+		it.Event = new(GardenHTLCV3InitiatedWithDestinationData)
 		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
 			it.fail = err
 			return false
@@ -989,19 +1010,19 @@ func (it *GardenHTLCV3InitiatedOnBehalfIterator) Next() bool {
 }
 
 // Error returns any retrieval or parsing error occurred during filtering.
-func (it *GardenHTLCV3InitiatedOnBehalfIterator) Error() error {
+func (it *GardenHTLCV3InitiatedWithDestinationDataIterator) Error() error {
 	return it.fail
 }
 
 // Close terminates the iteration process, releasing any pending underlying
 // resources.
-func (it *GardenHTLCV3InitiatedOnBehalfIterator) Close() error {
+func (it *GardenHTLCV3InitiatedWithDestinationDataIterator) Close() error {
 	it.sub.Unsubscribe()
 	return nil
 }
 
-// GardenHTLCV3InitiatedOnBehalf represents a InitiatedOnBehalf event raised by the GardenHTLCV3 contract.
-type GardenHTLCV3InitiatedOnBehalf struct {
+// GardenHTLCV3InitiatedWithDestinationData represents a InitiatedWithDestinationData event raised by the GardenHTLCV3 contract.
+type GardenHTLCV3InitiatedWithDestinationData struct {
 	OrderID         [32]byte
 	SecretHash      [32]byte
 	Amount          *big.Int
@@ -1009,10 +1030,10 @@ type GardenHTLCV3InitiatedOnBehalf struct {
 	Raw             types.Log // Blockchain specific contextual infos
 }
 
-// FilterInitiatedOnBehalf is a free log retrieval operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+// FilterInitiatedWithDestinationData is a free log retrieval operation binding the contract event 0x380328b26f928a9e51ec19f8e2199a2bce34db266d093d1e0104bce139ed7555.
 //
-// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiatedOnBehalf(opts *bind.FilterOpts, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (*GardenHTLCV3InitiatedOnBehalfIterator, error) {
+// Solidity: event InitiatedWithDestinationData(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiatedWithDestinationData(opts *bind.FilterOpts, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (*GardenHTLCV3InitiatedWithDestinationDataIterator, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
@@ -1027,17 +1048,17 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) FilterInitiatedOnBehalf(opts *bind.Fi
 		amountRule = append(amountRule, amountItem)
 	}
 
-	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "InitiatedOnBehalf", orderIDRule, secretHashRule, amountRule)
+	logs, sub, err := _GardenHTLCV3.contract.FilterLogs(opts, "InitiatedWithDestinationData", orderIDRule, secretHashRule, amountRule)
 	if err != nil {
 		return nil, err
 	}
-	return &GardenHTLCV3InitiatedOnBehalfIterator{contract: _GardenHTLCV3.contract, event: "InitiatedOnBehalf", logs: logs, sub: sub}, nil
+	return &GardenHTLCV3InitiatedWithDestinationDataIterator{contract: _GardenHTLCV3.contract, event: "InitiatedWithDestinationData", logs: logs, sub: sub}, nil
 }
 
-// WatchInitiatedOnBehalf is a free log subscription operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+// WatchInitiatedWithDestinationData is a free log subscription operation binding the contract event 0x380328b26f928a9e51ec19f8e2199a2bce34db266d093d1e0104bce139ed7555.
 //
-// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedOnBehalf(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3InitiatedOnBehalf, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (event.Subscription, error) {
+// Solidity: event InitiatedWithDestinationData(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedWithDestinationData(opts *bind.WatchOpts, sink chan<- *GardenHTLCV3InitiatedWithDestinationData, orderID [][32]byte, secretHash [][32]byte, amount []*big.Int) (event.Subscription, error) {
 
 	var orderIDRule []interface{}
 	for _, orderIDItem := range orderID {
@@ -1052,7 +1073,7 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedOnBehalf(opts *bind.Wat
 		amountRule = append(amountRule, amountItem)
 	}
 
-	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "InitiatedOnBehalf", orderIDRule, secretHashRule, amountRule)
+	logs, sub, err := _GardenHTLCV3.contract.WatchLogs(opts, "InitiatedWithDestinationData", orderIDRule, secretHashRule, amountRule)
 	if err != nil {
 		return nil, err
 	}
@@ -1062,8 +1083,8 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedOnBehalf(opts *bind.Wat
 			select {
 			case log := <-logs:
 				// New log arrived, parse the event and forward to the user
-				event := new(GardenHTLCV3InitiatedOnBehalf)
-				if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedOnBehalf", log); err != nil {
+				event := new(GardenHTLCV3InitiatedWithDestinationData)
+				if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedWithDestinationData", log); err != nil {
 					return err
 				}
 				event.Raw = log
@@ -1084,12 +1105,12 @@ func (_GardenHTLCV3 *GardenHTLCV3Filterer) WatchInitiatedOnBehalf(opts *bind.Wat
 	}), nil
 }
 
-// ParseInitiatedOnBehalf is a log parse operation binding the contract event 0xdc0ce069e6298c891cc161042ac25a1a9e289972e883ea7249ee2eaf41412239.
+// ParseInitiatedWithDestinationData is a log parse operation binding the contract event 0x380328b26f928a9e51ec19f8e2199a2bce34db266d093d1e0104bce139ed7555.
 //
-// Solidity: event InitiatedOnBehalf(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
-func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseInitiatedOnBehalf(log types.Log) (*GardenHTLCV3InitiatedOnBehalf, error) {
-	event := new(GardenHTLCV3InitiatedOnBehalf)
-	if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedOnBehalf", log); err != nil {
+// Solidity: event InitiatedWithDestinationData(bytes32 indexed orderID, bytes32 indexed secretHash, uint256 indexed amount, bytes destinationData)
+func (_GardenHTLCV3 *GardenHTLCV3Filterer) ParseInitiatedWithDestinationData(log types.Log) (*GardenHTLCV3InitiatedWithDestinationData, error) {
+	event := new(GardenHTLCV3InitiatedWithDestinationData)
+	if err := _GardenHTLCV3.contract.UnpackLog(event, "InitiatedWithDestinationData", log); err != nil {
 		return nil, err
 	}
 	event.Raw = log
