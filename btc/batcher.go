@@ -168,6 +168,15 @@ type Batch struct {
 	Strategy    Strategy
 }
 
+func NewEmptyBatch(strategy Strategy) Batch {
+	return Batch{
+		Tx:          Transaction{},
+		RequestIds:  make(map[string]bool),
+		IsFinalized: false,
+		Strategy:    strategy,
+	}
+}
+
 func NewBatcherWallet(privateKey *secp256k1.PrivateKey, indexer IndexerClient, feeEstimator FeeEstimator, chainParams *chaincfg.Params, cache Cache, logger *zap.Logger, rpc *BitcoinClient, opts ...func(*batcherWallet) error) (BatcherWallet, error) {
 	wallet := &batcherWallet{
 		indexer:      indexer,

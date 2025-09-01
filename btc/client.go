@@ -550,10 +550,11 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 	baseFee := math.Ceil(entry.Fees.Base * 1e8)
 	descendantFee := math.Ceil((entry.Fees.Descendant - entry.Fees.Base) * 1e8)
 
+	prevTxExactFeeRate := baseFee / float64(entry.VSize)
 	feeInfo := &RBFTxFeeInfo{
 		TotalFee:      totalFee,
 		DescendantFee: descendantFee,
-		TxFeeRate:     float64(totalFee) / float64(entry.DescendantSize),
+		TxFeeRate:     prevTxExactFeeRate,
 	}
 	// If there are no descendants, fee rate is is the base fee divided by the vsize of the transaction
 	if len(descendants) == 0 {
@@ -570,8 +571,10 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 			directDescendantFee += float64(desc.Fees.Base * 1e8)
 		}
 	}
+
 	if directDescendantSize+float64(entry.VSize) > 0 {
-		feeInfo.TxFeeRate = float64(directDescendantFee+baseFee) / float64(directDescendantSize+float64(entry.VSize))
+		// tx fee rate is calculated as max(directDescendantFee+baseFee)/max(directDescendantSize+float64(entry.VSize), prevTxExactFeeRate)
+		feeInfo.TxFeeRate = math.Max(float64(directDescendantFee+baseFee)/float64(directDescendantSize+float64(entry.VSize)), prevTxExactFeeRate)
 	}
 
 	return feeInfo, nil
