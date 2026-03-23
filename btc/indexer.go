@@ -306,7 +306,16 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 	// Send the request
 	var tx Transaction
 	if err := retry(client.logger, ctx, client.retryInterval, func() error {
-		resp, err := http.Get(endpoint)
+		// Per-request deadline so a single slow/hanging response doesn't block
+		// for the entire parent context timeout.
+		reqCtx, reqCancel := context.WithTimeout(ctx, client.retryInterval)
+		defer reqCancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -420,40 +429,6 @@ func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggest
 	})
 	return fees, err
 }
-
-// retry runs f until it succeeds, ctx is done, or f returns NoRetryError.
-// Waits use exponential backoff from dur; any ctx deadline cancels the current
-// wait early via select on ctx.Done().
-// func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {
-// 	backoff := dur
-
-// 	err := f()
-// 	for err != nil {
-// 		// Skip retrying if it's a `NoRetryError`
-// 		var e *NoRetryError
-// 		if errors.As(err, &e) {
-// 			return err
-// 		}
-
-// 		logger.Debug("retrying", zap.Any("error", err.Error()), zap.Duration("backoff", backoff))
-// 		timer := time.NewTimer(backoff)
-// 		select {
-// 		case <-ctx.Done():
-// 			if !timer.Stop() {
-// 				<-timer.C
-// 			}
-// 			return fmt.Errorf("%v : %v", ctx.Err(), err)
-// 		case <-timer.C:
-// 			err = f()
-// 		}
-// 		if err != nil {
-// 			if next := backoff * 2; next > backoff {
-// 				backoff = next
-// 			}
-// 		}
-// 	}
-// 	return nil
-// }
 
 func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {
 	ticker := time.NewTicker(dur)

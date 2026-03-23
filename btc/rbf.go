@@ -279,8 +279,9 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	const maxRetrievalAttempts = 3
 
 	var transaction Transaction
-	extendedRetry := false
-	for attempt := 0; attempt < maxRetrievalAttempts; attempt++ {
+	hasAppearedInMemppool := false
+	attempt := 0
+	for attempt < maxRetrievalAttempts {
 		retrievalCtx, retrievalCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		transaction, err = w.indexer.GetTx(retrievalCtx, txID)
 		retrievalCancel()
@@ -295,6 +296,20 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		mempoolCancel()
 
 		if mempoolErr != nil {
+			// if the tx has already appeared in mempool before, we return an error
+			if hasAppearedInMemppool {
+				// tx could have been confirmed, so we check one last time if it is confirmed
+				ctx, cancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
+				confirmedTx, err := w.indexer.GetTx(ctx, txID)
+				cancel()
+				if err == nil && confirmedTx.Status.Confirmed {
+					w.logger.Info("tx confirmed in chain", zap.String("txid", txID))
+					transaction = confirmedTx
+					break
+				}
+				w.logger.Error("tx not found in node mempool, but has already appeared in mempool", zap.Error(mempoolErr), zap.String("txid", txID))
+				return fmt.Errorf("tx not found in node mempool, but has already appeared in mempool before : %w", mempoolErr)
+			}
 			// Node doesn't have it — re-submit and retry
 			w.logger.Warn("tx not found in node mempool, re-submitting", zap.Error(mempoolErr), zap.String("txid", txID))
 			resubmitCtx, resubmitCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
@@ -307,21 +322,23 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			}
 			resubmitCancel()
 		} else {
-			// Node has the tx but indexer hasn't caught up — if this is the last attempt,
-			// grant one extra retry since we know the tx exists. Only extend once to
-			// avoid looping indefinitely.
-			if attempt == maxRetrievalAttempts-1 && !extendedRetry {
-				attempt--
-				extendedRetry = true
-				w.logger.Info("tx confirmed in node mempool on last attempt, retrying indexer once more", zap.String("txid", txID))
-			} else {
-				w.logger.Info("tx found in node mempool, indexer likely lagging behind", zap.String("txid", txID))
-			}
+			// it is in the node, but not in indexer yet, so we wait indefinitely for the indexer to catch up
+			hasAppearedInMemppool = true
+			w.logger.Info("tx found in node mempool, waiting for indexer to catch up", zap.String("txid", txID))
+			continue;
 		}
+		attempt++
 	}
 	if err != nil {
-		w.logger.Error("exhausted all attempts to retrieve tx", zap.String("txid", txID))
-		return fmt.Errorf("failed to retrieve tx %s after submission: %w", txID, err)
+		w.logger.Error("exhausted all attempts to retrieve tx, storing local tx details", zap.String("txid", txID))
+		transaction = Transaction{
+			TxID: txID,
+			Version: int(tx.Version),
+			LockTime: int(tx.LockTime),
+			Status: Status{
+				Confirmed: false,
+			},
+		}
 	}
 
 	// Create a new batch with the transaction details and save it to the cache
