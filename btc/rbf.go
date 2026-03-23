@@ -263,15 +263,54 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		return err
 	}
 
-	w.logger.Info("submitted rbf tx", zap.String("txid", tx.TxHash().String()))
+	txID := tx.TxHash().String()
+	w.logger.Info("submitted rbf tx", zap.String("txid", txID))
+
+	// Retrieve the full transaction from the indexer. 
+	// This is critical without it the batch won't be persisted and 
+	// we'll hit "no confirmed batch found" errors. We use dedicated
+	// contexts (detached from the caller) so that upstream cancellation cannot prevent us from
+	// fetching and persisting the batch after a successful submission.
+	//
+	// Each attempt gives the indexer DefaultAPITimeout (60s) where its internal tick-based
+	// retry will keep polling. If it fails, we check the Bitcoin node's mempool:
+	//   - Node has the tx  → indexer is lagging, retry indexer.GetTx.
+	//   - Node doesn't have it → re-submit the tx, then retry.
+	const maxRetrievalAttempts = 5
 
 	var transaction Transaction
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		transaction, err = w.indexer.GetTx(ctx, tx.TxHash().String())
-		return err
-	})
+	for attempt := 0; attempt < maxRetrievalAttempts; attempt++ {
+		retrievalCtx, retrievalCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
+		transaction, err = w.indexer.GetTx(retrievalCtx, txID)
+		retrievalCancel()
+		if err == nil {
+			break
+		}
+		w.logger.Error("failed to get tx from indexer", zap.Error(err), zap.String("txid", txID), zap.Int("attempt", attempt+1))
+
+		// Check if the node has the tx in its mempool before deciding to re-submit
+		mempoolCtx, mempoolCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
+		_, mempoolErr := w.rpc.GetMempoolEntry(mempoolCtx, txID)
+		mempoolCancel()
+
+		if mempoolErr != nil {
+			// Node doesn't have it — re-submit and retry
+			w.logger.Warn("tx not found in node mempool, re-submitting", zap.Error(mempoolErr), zap.String("txid", txID))
+			resubmitCtx, resubmitCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
+			if resubmitErr := w.indexer.SubmitTx(resubmitCtx, tx); resubmitErr != nil {
+				w.logger.Warn("failed to re-submit tx", zap.Error(resubmitErr), zap.String("txid", txID))
+			} else {
+				w.logger.Info("re-submitted tx", zap.String("txid", txID))
+			}
+			resubmitCancel()
+		} else {
+			// Node has the tx but indexer hasn't caught up — next attempt will retry
+			w.logger.Info("tx found in node mempool, indexer likely lagging behind", zap.String("txid", txID))
+		}
+	}
 	if err != nil {
-		return err
+		w.logger.Error("exhausted all attempts to retrieve tx", zap.String("txid", txID))
+		return fmt.Errorf("failed to retrieve tx %s after submission: %w", txID, err)
 	}
 
 	// Create a new batch with the transaction details and save it to the cache
