@@ -276,9 +276,10 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	// retry will keep polling. If it fails, we check the Bitcoin node's mempool:
 	//   - Node has the tx  → indexer is lagging, retry indexer.GetTx.
 	//   - Node doesn't have it → re-submit the tx, then retry.
-	const maxRetrievalAttempts = 5
+	const maxRetrievalAttempts = 3
 
 	var transaction Transaction
+	extendedRetry := false
 	for attempt := 0; attempt < maxRetrievalAttempts; attempt++ {
 		retrievalCtx, retrievalCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 		transaction, err = w.indexer.GetTx(retrievalCtx, txID)
@@ -298,14 +299,24 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			w.logger.Warn("tx not found in node mempool, re-submitting", zap.Error(mempoolErr), zap.String("txid", txID))
 			resubmitCtx, resubmitCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
 			if resubmitErr := w.indexer.SubmitTx(resubmitCtx, tx); resubmitErr != nil {
+				// If the previous submission already went through (e.g. "already in mempool"
+				// or "already in chain"), this is harmless — we just need to retry GetTx.
 				w.logger.Warn("failed to re-submit tx", zap.Error(resubmitErr), zap.String("txid", txID))
 			} else {
 				w.logger.Info("re-submitted tx", zap.String("txid", txID))
 			}
 			resubmitCancel()
 		} else {
-			// Node has the tx but indexer hasn't caught up — next attempt will retry
-			w.logger.Info("tx found in node mempool, indexer likely lagging behind", zap.String("txid", txID))
+			// Node has the tx but indexer hasn't caught up — if this is the last attempt,
+			// grant one extra retry since we know the tx exists. Only extend once to
+			// avoid looping indefinitely.
+			if attempt == maxRetrievalAttempts-1 && !extendedRetry {
+				attempt--
+				extendedRetry = true
+				w.logger.Info("tx confirmed in node mempool on last attempt, retrying indexer once more", zap.String("txid", txID))
+			} else {
+				w.logger.Info("tx found in node mempool, indexer likely lagging behind", zap.String("txid", txID))
+			}
 		}
 	}
 	if err != nil {
