@@ -20,7 +20,7 @@ import (
 var (
 	GuardianSpendWeight = 1 + 1 + 1 + 73 + 1 + 73 + 1 + 1 + 1 + 200 // TODO: update Guardian Script Size to the right number
 	SegwitSpendWeight   = txsizes.RedeemP2WPKHInputWitnessWeight
-	DefaultAPITimeout   = 60 * time.Second
+	DefaultAPITimeout   = 300 * time.Second
 )
 
 var (

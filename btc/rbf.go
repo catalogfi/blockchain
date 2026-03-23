@@ -276,7 +276,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	// retry will keep polling. If it fails, we check the Bitcoin node's mempool:
 	//   - Node has the tx  → indexer is lagging, retry indexer.GetTx.
 	//   - Node doesn't have it → re-submit the tx, then retry.
-	const maxRetrievalAttempts = 3
+	const maxRetrievalAttempts = 5
 
 	var transaction Transaction
 	hasAppearedInMemppool := false
