@@ -421,9 +421,11 @@ func (client *electrsIndexerClient) FeeEstimate(ctx context.Context) (FeeSuggest
 	return fees, err
 }
 
+// retry runs f until it succeeds, ctx is done, or f returns NoRetryError.
+// Waits use exponential backoff from dur; any ctx deadline cancels the current
+// wait early via select on ctx.Done().
 func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() error) error {
-	ticker := time.NewTicker(dur)
-	defer ticker.Stop()
+	backoff := dur
 
 	err := f()
 	for err != nil {
@@ -433,12 +435,21 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 			return err
 		}
 
-		logger.Debug("retrying", zap.Any("error", err.Error()))
+		logger.Debug("retrying", zap.Any("error", err.Error()), zap.Duration("backoff", backoff))
+		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return fmt.Errorf("%v : %v", ctx.Err(), err)
-		case <-ticker.C:
+		case <-timer.C:
 			err = f()
+		}
+		if err != nil {
+			if next := backoff * 2; next > backoff {
+				backoff = next
+			}
 		}
 	}
 	return nil

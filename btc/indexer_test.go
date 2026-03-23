@@ -5,6 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -13,12 +16,52 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/localnet"
 	"github.com/fatih/color"
+	"go.uber.org/zap"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Indexer client", func() {
+	Context("electrs HTTP retry", func() {
+		It("retries with backoff until the indexer responds successfully", func() {
+			var attempts atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := attempts.Add(1)
+				if r.URL.Path != "/blocks/tip/height" {
+					http.NotFound(w, r)
+					return
+				}
+				if n < 3 {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				_, _ = w.Write([]byte("42"))
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+			tip, err := c.GetTipBlockHeight(context.Background())
+			Expect(err).To(BeNil())
+			Expect(tip).To(Equal(uint64(42)))
+			Expect(attempts.Load()).To(BeNumerically(">=", 3))
+		})
+
+		It("stops waiting and returns when the context is cancelled during backoff", func() {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			_, err := c.GetTipBlockHeight(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(context.DeadlineExceeded.Error()))
+		})
+	})
+
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("GetUTXOs()")
