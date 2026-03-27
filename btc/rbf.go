@@ -117,8 +117,10 @@ func (w *batcherWallet) reSubmitBatchWithNewRequests(c context.Context, batch Ba
 		return fmt.Errorf("transaction %s in the batch has no weight", batch.Tx.TxID)
 	}
 
+	ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+	defer cancel()
 	// Calculate the current fee rate for the batch transaction.
-	rbfFeeInfo, err := w.rpc.GetRBFTxFeeInfo(c, batch.Tx.TxID)
+	rbfFeeInfo, err := w.rpc.GetRBFTxFeeInfo(ctx, batch.Tx.TxID)
 	if err != nil {
 		if !errors.Is(err, ErrTxNotFound) {
 			w.logger.Error("failed to get RBF fee info", zap.Error(err), zap.String("txid", batch.Tx.TxID))
@@ -433,8 +435,10 @@ func (w *batcherWallet) updateRBF(c context.Context, requiredFeeRate int) error 
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+	defer cancel()
 	// get current tx fee info
-	feeInfo, err := w.rpc.GetRBFTxFeeInfo(c, tx.TxID)
+	feeInfo, err := w.rpc.GetRBFTxFeeInfo(ctx, tx.TxID)
 	if err != nil {
 		if !errors.Is(err, ErrTxNotFound) {
 			w.logger.Error("failed to get RBF fee info", zap.Error(err), zap.String("txid", tx.TxID))
