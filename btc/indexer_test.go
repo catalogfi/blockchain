@@ -62,6 +62,45 @@ var _ = Describe("Indexer client", func() {
 		})
 	})
 
+	Context("GetTx deadline guard", func() {
+		It("applies DefaultAPITimeout when context has no deadline", func() {
+			// Server returns a valid tx JSON immediately, so the test completes fast
+			// even though GetTx internally adds a 300s timeout.
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"txid":"deadbeef","version":2,"locktime":0,"vin":[],"vout":[],"size":0,"weight":0,"fee":0,"status":{"confirmed":false}}`)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+
+			// Pass context.Background() directly — no deadline.
+			// GetTx should add its own DefaultAPITimeout and succeed.
+			tx, err := c.GetTx(context.Background(), "deadbeef")
+			Expect(err).To(BeNil())
+			Expect(tx.TxID).To(Equal("deadbeef"))
+		})
+
+		It("does not double-wrap when context already carries a deadline", func() {
+			// Server returns a valid tx JSON on the first attempt.
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"txid":"abc123","version":2,"locktime":0,"vin":[],"vout":[],"size":0,"weight":0,"fee":0,"status":{"confirmed":false}}`)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+
+			// Caller already sets a tight deadline — GetTx should skip wrapping.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			tx, err := c.GetTx(ctx, "abc123")
+			Expect(err).To(BeNil())
+			Expect(tx.TxID).To(Equal("abc123"))
+		})
+	})
+
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("GetUTXOs()")

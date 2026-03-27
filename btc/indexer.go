@@ -298,8 +298,14 @@ func (client *electrsIndexerClient) GetTxHex(ctx context.Context, txid string) (
 }
 
 func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Transaction, error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultAPITimeout)
-	defer cancel()
+	_, ok := ctx.Deadline()
+	// Always set a per-call timeout if one isn't already present, but avoid redundant context wrapping.
+	if !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, DefaultAPITimeout)
+		defer cancel()
+	}
+
 	endpoint, err := url.JoinPath(client.url, "tx", txid)
 	if err != nil {
 		return Transaction{}, err
