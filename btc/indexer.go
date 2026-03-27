@@ -302,7 +302,7 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 	// Always set a per-call timeout if one isn't already present, but avoid redundant context wrapping.
 	if !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, DefaultAPITimeout)
+		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 	}
 

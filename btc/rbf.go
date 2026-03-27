@@ -284,7 +284,9 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	hasAppearedInMemppool := false
 	attempt := 0
 	for attempt < maxRetrievalAttempts {
-		transaction, err = w.indexer.GetTx(c, txID)
+		ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+		transaction, err = w.indexer.GetTx(ctx, txID)
+		cancel()
 		if err == nil {
 			break
 		}
@@ -298,8 +300,10 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		if mempoolErr != nil {
 			// if the tx has already appeared in mempool before, we return an error
 			if hasAppearedInMemppool {
+				ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
 				// tx could have been confirmed, so we check one last time if it is confirmed
-				confirmedTx, err := w.indexer.GetTx(c, txID)
+				confirmedTx, err := w.indexer.GetTx(ctx, txID)
+				cancel()
 				if err == nil && confirmedTx.Status.Confirmed {
 					w.logger.Info("tx confirmed in chain", zap.String("txid", txID))
 					transaction = confirmedTx
