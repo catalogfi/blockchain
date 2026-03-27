@@ -298,6 +298,8 @@ func (client *electrsIndexerClient) GetTxHex(ctx context.Context, txid string) (
 }
 
 func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Transaction, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultAPITimeout)
+	defer cancel()
 	endpoint, err := url.JoinPath(client.url, "tx", txid)
 	if err != nil {
 		return Transaction{}, err
@@ -468,7 +470,7 @@ func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, dur time.D
 			return err
 		}
 
-		logger.Debug("retrying", zap.Any("error", err.Error()), zap.Duration("backoff", backoff))
+		logger.Warn("retrying", zap.Any("error", err.Error()), zap.Duration("backoff", backoff))
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
