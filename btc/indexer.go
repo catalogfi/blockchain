@@ -25,8 +25,6 @@ const (
 	DefaultElectrsIndexerURL = "http://0.0.0.0:30000"
 
 	DefaultRetryInterval = 5 * time.Second
-	
-	PerRequestTimeout = 15 * time.Second
 )
 
 type Transaction struct {
@@ -313,8 +311,8 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 
 	var tx Transaction
 	baseBackoff := 2 * time.Second
-	if err := exponentialBackoffRetry(client.logger, ctx, baseBackoff, func() error {
-		reqCtx, reqCancel := context.WithTimeout(ctx, PerRequestTimeout)
+	if err := exponentialBackoffRetry(client.logger, ctx, baseBackoff, func(t time.Duration) error {
+		reqCtx, reqCancel := context.WithTimeout(ctx, t)
 		defer reqCancel()
 
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
@@ -463,11 +461,11 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 
 // exponentialBackoffRetry runs f until it succeeds, ctx is done, or f returns
 // a NoRetryError. Backoff doubles on each failure starting from base.
-func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, base time.Duration, f func() error) error {
+func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, base time.Duration, f func(t time.Duration) error) error {
 	backoff := base
 
 	for {
-		err := f()
+		err := f(backoff)
 		if err == nil {
 			return nil
 		}
