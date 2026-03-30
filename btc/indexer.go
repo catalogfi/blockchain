@@ -25,6 +25,8 @@ const (
 	DefaultElectrsIndexerURL = "http://0.0.0.0:30000"
 
 	DefaultRetryInterval = 5 * time.Second
+	
+	PerRequestTimeout = 15 * time.Second
 )
 
 type Transaction struct {
@@ -298,9 +300,7 @@ func (client *electrsIndexerClient) GetTxHex(ctx context.Context, txid string) (
 }
 
 func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Transaction, error) {
-	_, ok := ctx.Deadline()
-	// Always set a per-call timeout if one isn't already present, but avoid redundant context wrapping.
-	if !ok {
+	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
@@ -311,13 +311,10 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 		return Transaction{}, err
 	}
 
-	// Send the request
 	var tx Transaction
 	baseBackoff := 2 * time.Second
-	if err := exponentialBackoffRetry(client.logger, ctx, baseBackoff, func(t time.Duration) error {
-		// Per-request deadline so a single slow/hanging response doesn't block
-		// for the entire parent context timeout.
-		reqCtx, reqCancel := context.WithTimeout(ctx, t)
+	if err := exponentialBackoffRetry(client.logger, ctx, baseBackoff, func() error {
+		reqCtx, reqCancel := context.WithTimeout(ctx, PerRequestTimeout)
 		defer reqCancel()
 
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
@@ -333,14 +330,16 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 		if resp.StatusCode != http.StatusOK {
 			errMsg, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+				return NewNoRetryError(fmt.Errorf("failed to read response from %s: %w", endpoint, err))
 			}
-			return fmt.Errorf("GetTx : %v", string(errMsg))
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+				return NewNoRetryError(fmt.Errorf("GetTx: %s", errMsg))
+			}
+			return fmt.Errorf("GetTx: status %d: %s", resp.StatusCode, errMsg)
 		}
 
-		// Decode response
 		if err := json.NewDecoder(resp.Body).Decode(&tx); err != nil {
-			return fmt.Errorf("failed to decode UTXOs: %w", err)
+			return NewNoRetryError(fmt.Errorf("failed to decode transaction: %w", err))
 		}
 		return nil
 	}); err != nil {
@@ -451,7 +450,7 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 			return err
 		}
 
-		logger.Debug("retrying", zap.Any("error", err.Error()))
+		logger.Warn("retrying", zap.Any("error", err.Error()))
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("%v : %v", ctx.Err(), err)
@@ -462,38 +461,34 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 	return nil
 }
 
-// retry runs f until it succeeds, ctx is done, or f returns NoRetryError.
-// Waits use exponential backoff from dur; any ctx deadline cancels the current
-// wait early via select on ctx.Done().
-func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func(t time.Duration) error) error {
-	backoff := dur
+// exponentialBackoffRetry runs f until it succeeds, ctx is done, or f returns
+// a NoRetryError. Backoff doubles on each failure starting from base.
+func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, base time.Duration, f func() error) error {
+	backoff := base
 
-	err := f(backoff)
-	for err != nil {
-		// Skip retrying if it's a `NoRetryError`
+	for {
+		err := f()
+		if err == nil {
+			return nil
+		}
+
 		var e *NoRetryError
 		if errors.As(err, &e) {
 			return err
 		}
 
-		logger.Warn("retrying", zap.Any("error", err.Error()), zap.Duration("backoff", backoff))
+		logger.Warn("retrying", zap.Error(err), zap.Duration("backoff", backoff))
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
 				<-timer.C
 			}
-			return fmt.Errorf("%v : %v", ctx.Err(), err)
+			return fmt.Errorf("%v : %w", ctx.Err(), err)
 		case <-timer.C:
-			err = f(backoff)
-		}
-		if err != nil {
-			if next := backoff * 2; next > backoff {
-				backoff = next
-			}
+			backoff *= 2
 		}
 	}
-	return nil
 }
 
 type NoRetryError struct {
