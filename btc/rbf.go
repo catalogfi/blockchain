@@ -282,7 +282,9 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	const maxRetrievalAttempts = 5
 
 	var transaction Transaction
-	indexerTx, err := w.waitForTx(c, tx, maxRetrievalAttempts)
+	ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+	indexerTx, err := w.waitForTx(ctx, tx, maxRetrievalAttempts)
+	cancel()
 	switch {
 	case err != nil:
 		// Something dangerous happened (vanished from mempool, resubmit
