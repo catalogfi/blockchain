@@ -453,14 +453,13 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 	// Build a set of UTXOs (txid:vout) already committed by the latest in-flight
 	// batch transaction. We rely on vin.TxID and vin.Vout because vin.Prevout
 	// may be nil for fallback-constructed transactions.
-	// TODO: should we check for successful save to the cache? 
-	// we know that if it was a fallback save with Status being nil in the tx of the batch instead of a bool
+	// we know that if it was a fallback save with weight being -1 set intentionally
 	committed := map[string]struct{}{}
 	latestBatch, err := w.cache.ReadLatestBatch(ctx)
 	if err != nil && !errors.Is(err, ErrStoreNotFound) {
 		return err
 	}
-	if err == nil  {
+	if err == nil && latestBatch.Tx.Weight == -1 {
 		for _, vin := range latestBatch.Tx.VINs {
 			committed[fmt.Sprintf("%s:%d", vin.TxID, vin.Vout)] = struct{}{}
 		}
