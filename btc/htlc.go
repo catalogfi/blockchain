@@ -392,7 +392,7 @@ func (hw *htlcWallet) filterAndRetryRequests(ctx context.Context, sends []SendRe
 		}
 		txid, err = hw.send(ctx, sends, spends, sacps)
 	}
-	return txid, nil
+	return txid, err
 }
 
 func (hw *htlcWallet) refund(htlc *HTLC, recipient btcutil.Address) (SpendRequest, error) {

@@ -450,6 +450,13 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 		return err
 	}
 
+	latestBatch, err := w.cache.ReadLatestBatch(ctx)
+	if err != nil {
+		return err
+	}
+	tx := latestBatch.Tx
+	tx.VINs
+
 	walletBalance := int64(0)
 	for _, utxo := range utxos {
 		walletBalance += utxo.Amount
