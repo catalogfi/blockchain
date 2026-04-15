@@ -302,6 +302,8 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			Version:  int(tx.Version),
 			LockTime: int(tx.LockTime),
 			Status:   Status{Confirmed: false},
+			VINs:     wireTxInsToVINs(tx.TxIn),
+			VOUTs:    wireTxOutsToPrevouts(tx.TxOut),
 		}
 	}
 
@@ -959,6 +961,51 @@ func (w *batcherWallet) waitForTx(c context.Context, tx *wire.MsgTx, maxAttempts
 	// (once), and subsequent loops with hasResubmitted=true exit via path D.
 	// Kept as a defensive fallback.
 	return nil, fmt.Errorf("exhausted %d attempts to retrieve tx %s", maxAttempts, txID)
+}
+
+// wireTxInsToVINs converts a slice of *wire.TxIn into our []VIN shape for
+// local batch persistence when the indexer has not yet returned the tx.
+//
+// Prevout cannot be derived from a wire.TxIn (it describes the output being
+// spent, which lives in a prior transaction) and is left zero-valued. When the
+// indexer catches up on the next RBF cycle, the batch is replaced with a
+// fully-populated record.
+func wireTxInsToVINs(txIns []*wire.TxIn) []VIN {
+	vins := make([]VIN, len(txIns))
+	for i, in := range txIns {
+		var witness *[]string
+		if len(in.Witness) > 0 {
+			items := make([]string, len(in.Witness))
+			for j, item := range in.Witness {
+				items[j] = hex.EncodeToString(item)
+			}
+			witness = &items
+		}
+		vins[i] = VIN{
+			TxID:      in.PreviousOutPoint.Hash.String(),
+			Vout:      int(in.PreviousOutPoint.Index),
+			ScriptSig: hex.EncodeToString(in.SignatureScript),
+			Witness:   witness,
+			Sequence:  int(in.Sequence),
+		}
+	}
+	return vins
+}
+
+// wireTxOutsToPrevouts converts a slice of *wire.TxOut into our []Prevout shape
+// for local batch persistence. ScriptPubKeyType / ScriptPubKeyAddress are left
+// empty: btcd's ScriptClass.String() format does not match the electrs wire
+// format (e.g. "witness_v1_taproot" vs "v1_p2tr") used elsewhere in the
+// codebase, so populating them here would produce subtly-wrong data.
+func wireTxOutsToPrevouts(txOuts []*wire.TxOut) []Prevout {
+	prevouts := make([]Prevout, len(txOuts))
+	for i, out := range txOuts {
+		prevouts[i] = Prevout{
+			ScriptPubKey: hex.EncodeToString(out.PkScript),
+			Value:        int(out.Value),
+		}
+	}
+	return prevouts
 }
 
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
