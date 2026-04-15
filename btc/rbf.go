@@ -301,7 +301,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			TxID:     txID,
 			Version:  int(tx.Version),
 			LockTime: int(tx.LockTime),
-			// intentioinally skipping status, so to indicate that the batch was not a successful save to the cache
+			Weight: -1, // updating with -1 to indicate that the batch was not a successful save to the cache
 			VINs:     wireTxInsToVINs(tx.TxIn),
 			VOUTs:    wireTxOutsToPrevouts(tx.TxOut),
 		}
