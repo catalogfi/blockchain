@@ -450,17 +450,30 @@ func (w *batcherWallet) validateBatchRequest(ctx context.Context, strategy Strat
 		return err
 	}
 
+	// Build a set of UTXOs (txid:vout) already committed by the latest in-flight
+	// batch transaction. We rely on vin.TxID and vin.Vout because vin.Prevout
+	// may be nil for fallback-constructed transactions.
+	committed := map[string]struct{}{}
 	latestBatch, err := w.cache.ReadLatestBatch(ctx)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrStoreNotFound) {
 		return err
 	}
-	tx := latestBatch.Tx
-	tx.VINs
+	if err == nil {
+		for _, vin := range latestBatch.Tx.VINs {
+			committed[fmt.Sprintf("%s:%d", vin.TxID, vin.Vout)] = struct{}{}
+		}
+	}
 
 	walletBalance := int64(0)
+	availableUtxos := make(UTXOs, 0, len(utxos))
 	for _, utxo := range utxos {
+		if _, used := committed[fmt.Sprintf("%s:%d", utxo.TxID, utxo.Vout)]; used {
+			continue
+		}
+		availableUtxos = append(availableUtxos, utxo)
 		walletBalance += utxo.Amount
 	}
+	utxos = availableUtxos
 
 	spendsAmount := int64(0)
 	spendsUtxos := UTXOs{}
