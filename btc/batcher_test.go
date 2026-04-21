@@ -92,6 +92,17 @@ func (m *mockCache) ReadPendingRequests(ctx context.Context) ([]btc.BatcherReque
 	return requests, nil
 }
 
+func (m *mockCache) DeletePendingRequest(ctx context.Context, id string) error {
+	delete(m.requests, id)
+	for i, rid := range m.requestList {
+		if rid == id {
+			m.requestList = append(m.requestList[:i], m.requestList[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
 func (m *mockCache) SaveRequest(ctx context.Context, req btc.BatcherRequest) error {
 	if _, ok := m.requests[req.ID]; ok {
 		return fmt.Errorf("request already exists")

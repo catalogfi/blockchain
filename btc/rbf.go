@@ -208,8 +208,17 @@ func getMissingRequestIds(batchedIds, confirmedIds map[string]bool) []string {
 	return missingIds
 }
 
-// createNewRBFBatch creates a new RBF batch transaction and saves it to the cache
+// createNewRBFBatch creates a new RBF batch transaction and saves it to the cache.
+//
+// If the merged set of pending requests is un-batchable (insufficient wallet
+// funds, or mempool rejects the assembled tx via testmempoolaccept), the
+// largest-send request is evicted from the cache and the function recurses on
+// the remaining requests.
 func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs, pendingRequests []BatcherRequest, currentFeeRate float64, currentFee, requiredFeeRate, descendantsFee int) error {
+	if len(pendingRequests) == 0 {
+		return ErrBatchParametersNotMet
+	}
+
 	// Filter requests to get spend and send requests
 	spendRequests, sendRequests, sacps, reqIds := unpackBatcherRequests(pendingRequests)
 
@@ -252,7 +261,33 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		10,
 	)
 	if err != nil {
+		if isInsufficientFundsErr(err) {
+			remaining, evErr := w.evictLargestSendRequest(c, pendingRequests)
+			if evErr != nil {
+				return evErr
+			}
+			return w.createNewRBFBatch(c, previousUTXOs, remaining, currentFeeRate, currentFee, requiredFeeRate, descendantsFee)
+		}
 		return err
+	}
+
+	// Dry-run the assembled tx against the mempool before broadcasting.
+	// On rejection, evict a request and recurse.
+	if w.rpc.RpcURL != "" {
+		rejected, rejectReason, dryRunErr := w.dryRunAccept(c, tx)
+		if dryRunErr != nil {
+			w.logger.Warn("testmempoolaccept failed, skipping dry-run", zap.Error(dryRunErr))
+		} else if rejected {
+			w.logger.Warn("testmempoolaccept rejected batch, evicting largest send request and retrying",
+				zap.String("reject_reason", rejectReason),
+				zap.String("txid", tx.TxHash().String()),
+			)
+			remaining, evErr := w.evictLargestSendRequest(c, pendingRequests)
+			if evErr != nil {
+				return evErr
+			}
+			return w.createNewRBFBatch(c, previousUTXOs, remaining, currentFeeRate, currentFee, requiredFeeRate, descendantsFee)
+		}
 	}
 
 	// Submit the new RBF transaction to the indexer
@@ -290,6 +325,71 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	}
 
 	return nil
+}
+
+// dryRunAccept serializes tx and asks the Bitcoin node to test-accept it into
+// the mempool. Returns (rejected, reason, err) — rejected is true only when the
+// RPC completed and the node refused the tx.
+func (w *batcherWallet) dryRunAccept(c context.Context, tx *wire.MsgTx) (bool, string, error) {
+	txBytes, err := GetTxRawBytes(tx)
+	if err != nil {
+		return false, "", err
+	}
+	rawHex := hex.EncodeToString(txBytes)
+	var acceptRes *TestMempoolAcceptResult
+	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
+		acceptRes, err = w.rpc.TestMempoolAccept(ctx, rawHex)
+		return err
+	})
+	if err != nil {
+		return false, "", err
+	}
+	if acceptRes == nil {
+		return false, "", nil
+	}
+	return !acceptRes.Allowed, acceptRes.RejectReason, nil
+}
+
+// evictLargestSendRequest drops the BatcherRequest with the largest total
+// send amount from the pending cache and returns the remaining slice.
+func (w *batcherWallet) evictLargestSendRequest(ctx context.Context, pendingRequests []BatcherRequest) ([]BatcherRequest, error) {
+	if len(pendingRequests) == 0 {
+		return nil, ErrBatchParametersNotMet
+	}
+	idx := 0
+	var maxAmt int64 = -1
+	for i, req := range pendingRequests {
+		var amt int64
+		for _, s := range req.Sends {
+			amt += s.Amount
+		}
+		if amt > maxAmt {
+			maxAmt = amt
+			idx = i
+		}
+	}
+	dropped := pendingRequests[idx]
+	w.logger.Warn("evicting batcher request",
+		zap.String("request_id", dropped.ID),
+		zap.Int64("total_send_amount", maxAmt),
+	)
+	if err := w.cache.DeletePendingRequest(ctx, dropped.ID); err != nil {
+		return nil, fmt.Errorf("failed to evict request %s: %w", dropped.ID, err)
+	}
+	remaining := make([]BatcherRequest, 0, len(pendingRequests)-1)
+	remaining = append(remaining, pendingRequests[:idx]...)
+	remaining = append(remaining, pendingRequests[idx+1:]...)
+	return remaining, nil
+}
+
+// isInsufficientFundsErr reports whether err is from a code-level wallet
+// balance shortfall. Used as a pre-submit signal to evict a request before
+// ever hitting the node.
+func isInsufficientFundsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "insufficient")
 }
 
 // updateRBF updates the fee rate of the latest RBF batch transaction

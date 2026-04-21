@@ -473,6 +473,12 @@ func (l *BatcherCache) SaveRequest(_ context.Context, req BatcherRequest) error 
 	return l.db.Put(l.pendingRequestKey(req.ID), data, nil)
 }
 
+// DeletePendingRequest removes a pending request entry. Finalized requests
+// (those already linked to a saved batch) are untouched.
+func (l *BatcherCache) DeletePendingRequest(_ context.Context, id string) error {
+	return l.db.Delete(l.pendingRequestKey(id), nil)
+}
+
 const (
 	pendingBatchPrefix = "%s_pending_batch_%s"
 	batchPrefix        = "%s_batch_%s"

@@ -359,7 +359,6 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 			sacps = append(sacps, refundSACP)
 		}
 	}
-
 	return hw.send(ctx, sends, spends, sacps)
 }
 

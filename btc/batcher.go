@@ -101,6 +101,10 @@ type Cache interface {
 	ReadPendingRequests(ctx context.Context) ([]BatcherRequest, error)
 	// SaveRequest saves a request.
 	SaveRequest(ctx context.Context, req BatcherRequest) error
+	// DeletePendingRequest evicts a pending request from the cache so it
+	// will not be retried in future batches. Used when a request is
+	// determined to be un-batchable (insufficient funds, mempool reject).
+	DeletePendingRequest(ctx context.Context, id string) error
 }
 
 // Batcher store spend and send requests in a batched request

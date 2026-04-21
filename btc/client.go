@@ -577,6 +577,37 @@ func (client *BitcoinClient) GetRBFTxFeeInfo(ctx context.Context, txid string) (
 	return feeInfo, nil
 }
 
+// TestMempoolAcceptResult models a single entry of the testmempoolaccept response.
+type TestMempoolAcceptResult struct {
+	Txid         string `json:"txid"`
+	Wtxid        string `json:"wtxid"`
+	Allowed      bool   `json:"allowed"`
+	VSize        int    `json:"vsize,omitempty"`
+	RejectReason string `json:"reject-reason,omitempty"`
+}
+
+// TestMempoolAccept performs a dry-run acceptance check of a raw transaction
+// against the local mempool without broadcasting it.
+func (client *BitcoinClient) TestMempoolAccept(ctx context.Context, rawTxHex string) (*TestMempoolAcceptResult, error) {
+	method := "testmempoolaccept"
+	params, err := client.packParams([]string{rawTxHex})
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+	var res []TestMempoolAcceptResult
+	if err := json.Unmarshal(result, &res); err != nil {
+		return nil, fmt.Errorf("testmempoolaccept: failed to unmarshal response: %w", err)
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("testmempoolaccept: empty response")
+	}
+	return &res[0], nil
+}
+
 // packParams converts the provided parameters into a slice of json.RawMessage.
 func (client *BitcoinClient) packParams(params ...interface{}) ([]json.RawMessage, error) {
 	rawParams := make([]json.RawMessage, len(params))
