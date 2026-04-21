@@ -6,8 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
@@ -362,37 +360,7 @@ func (hw *htlcWallet) Execute(ctx context.Context, htlcActions []RawHTLCAction) 
 		}
 	}
 
-	return hw.filterAndRetryRequests(ctx, sends, spends, sacps)
-}
-
-// filterAndRetryRequests calls send with the given requests and, on recoverable
-// errors, filters/drops offending requests and retries. Today it handles:
-//
-//   - insufficient funds: sort sends by Amount descending, drop the largest,
-//     and retry until the send succeeds or there is nothing left to drop.
-//
-// Additional error classes (spend/SACP related) can be handled here without
-// cluttering Execute.
-func (hw *htlcWallet) filterAndRetryRequests(ctx context.Context, sends []SendRequest, spends []SpendRequest, sacps [][]byte) (string, error) {
-	txid, err := hw.send(ctx, sends, spends, sacps)
-	for err != nil {
-		switch {
-		case strings.Contains(strings.ToLower(err.Error()), "insufficient funds"):
-			if len(sends) == 0 {
-				return "", err
-			}
-			sort.Slice(sends, func(i, j int) bool {
-				return sends[i].Amount > sends[j].Amount
-			})
-			dropped := sends[0]
-			sends = sends[1:]
-			fmt.Printf("htlc execute: insufficient funds, dropping largest send amount=%d to=%s, retrying with %d sends\n", dropped.Amount, dropped.To, len(sends))
-		default:
-			return "", err
-		}
-		txid, err = hw.send(ctx, sends, spends, sacps)
-	}
-	return txid, err
+	return hw.send(ctx, sends, spends, sacps)
 }
 
 func (hw *htlcWallet) refund(htlc *HTLC, recipient btcutil.Address) (SpendRequest, error) {
