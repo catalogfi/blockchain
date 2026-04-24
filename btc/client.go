@@ -519,6 +519,30 @@ func (client *BitcoinClient) GetMempoolEntry(ctx context.Context, txid string) (
 	return &res, err
 }
 
+// GetTxOut returns details about an unspent transaction output. It returns nil
+// when the outpoint is already spent.
+func (client *BitcoinClient) GetTxOut(ctx context.Context, hash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, error) {
+	method := "gettxout"
+	params, err := client.packParams(hash.String(), vout, true)
+	if err != nil {
+		return nil, err
+	}
+	result, err := client.send(ctx, method, params)
+	if err != nil {
+		return nil, err
+	}
+
+	if bytes.Equal(bytes.TrimSpace(result), []byte("null")) {
+		return nil, nil
+	}
+
+	var txOut btcjson.GetTxOutResult
+	if err := json.Unmarshal(result, &txOut); err != nil {
+		return nil, fmt.Errorf("gettxout: failed to unmarshal response: %w", err)
+	}
+	return &txOut, nil
+}
+
 type RBFTxFeeInfo struct {
 	// Total fees of in-mempool descendants (including this transaction) in sats
 	TotalFee float64 `json:"total_fee"`

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -281,15 +281,14 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 		if dryRunErr != nil {
 			w.logger.Warn("testmempoolaccept failed, skipping dry-run", zap.Error(dryRunErr))
 		} else if rejected {
-			w.logger.Warn("testmempoolaccept rejected batch, evicting largest send request and retrying",
-				zap.String("reject_reason", rejectReason),
-				zap.String("txid", tx.TxHash().String()),
-			)
-			remaining, evErr := w.evictLargestSendRequest(c, pendingRequests)
-			if evErr != nil {
-				return evErr
+			remaining, retry, rejectErr := w.handleDryRunReject(c, tx, pendingRequests, rejectReason)
+			if rejectErr != nil {
+				return rejectErr
 			}
-			return w.createNewRBFBatch(c, previousUTXOs, remaining, currentFeeRate, currentFee, requiredFeeRate, descendantsFee)
+			if retry {
+				return w.createNewRBFBatch(c, previousUTXOs, remaining, currentFeeRate, currentFee, requiredFeeRate, descendantsFee)
+			}
+			return fmt.Errorf("testmempoolaccept rejected batch: %s", rejectReason)
 		}
 	}
 
@@ -304,8 +303,8 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	txID := tx.TxHash().String()
 	w.logger.Info("submitted rbf tx", zap.String("txid", txID))
 
-	// Retrieve the full transaction from the indexer. 
-	// This is critical without it the batch won't be persisted and 
+	// Retrieve the full transaction from the indexer.
+	// This is critical without it the batch won't be persisted and
 	// we'll hit "no confirmed batch found" errors. We use dedicated
 	// contexts (detached from the caller) so that upstream cancellation cannot prevent us from
 	// fetching and persisting the batch after a successful submission.
@@ -336,7 +335,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			TxID:     txID,
 			Version:  int(tx.Version),
 			LockTime: int(tx.LockTime),
-			Weight: -1, // updating with -1 to indicate that the batch was not a successful save to the cache
+			Weight:   -1, // updating with -1 to indicate that the batch was not a successful save to the cache
 			VINs:     wireTxInsToVINs(tx.TxIn),
 			VOUTs:    wireTxOutsToPrevouts(tx.TxOut),
 		}
@@ -360,27 +359,53 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	return nil
 }
 
-// dryRunAccept serializes tx and asks the Bitcoin node to test-accept it into
-// the mempool. Returns (rejected, reason, err) — rejected is true only when the
-// RPC completed and the node refused the tx.
-func (w *batcherWallet) dryRunAccept(c context.Context, tx *wire.MsgTx) (bool, string, error) {
-	txBytes, err := GetTxRawBytes(tx)
-	if err != nil {
-		return false, "", err
+func (w *batcherWallet) handleDryRunReject(ctx context.Context, tx *wire.MsgTx, pendingRequests []BatcherRequest, rejectReason string) ([]BatcherRequest, bool, error) {
+	switch classifyRejectReason(rejectReason) {
+	case rejectMissingOrSpent:
+		requestID, found, err := w.findSpentInputOwner(ctx, tx, pendingRequests)
+		if err != nil {
+			return nil, false, err
+		}
+		if !found {
+			w.logger.Warn("testmempoolaccept rejected batch, no attributable spent input found so scrapping",
+				zap.String("reject_reason", rejectReason),
+				zap.String("txid", tx.TxHash().String()),
+			)
+			return nil, false, nil
+		}
+		w.logger.Warn("testmempoolaccept rejected batch, evicting request with spent input and retrying",
+			zap.String("request_id", requestID),
+			zap.String("reject_reason", rejectReason),
+			zap.String("txid", tx.TxHash().String()),
+		)
+		remaining, err := w.evictRequestByID(ctx, pendingRequests, requestID)
+		return remaining, true, err
+	case rejectScriptVerify:
+		requestID, found, err := w.findBadScriptInputOwner(ctx, tx, pendingRequests)
+		if err != nil {
+			return nil, false, err
+		}
+		if !found {
+			w.logger.Warn("testmempoolaccept rejected batch, no attributable script failure found so scrapping",
+				zap.String("reject_reason", rejectReason),
+				zap.String("txid", tx.TxHash().String()),
+			)
+			return nil, false, nil
+		}
+		w.logger.Warn("testmempoolaccept rejected batch, evicting request with script failure and retrying",
+			zap.String("request_id", requestID),
+			zap.String("reject_reason", rejectReason),
+			zap.String("txid", tx.TxHash().String()),
+		)
+		remaining, err := w.evictRequestByID(ctx, pendingRequests, requestID)
+		return remaining, true, err
+	default:
+		w.logger.Warn("testmempoolaccept rejected batch, scrapping for retry on next tick",
+			zap.String("reject_reason", rejectReason),
+			zap.String("txid", tx.TxHash().String()),
+		)
+		return nil, false, nil
 	}
-	rawHex := hex.EncodeToString(txBytes)
-	var acceptRes *TestMempoolAcceptResult
-	err = withContextTimeout(c, DefaultAPITimeout, func(ctx context.Context) error {
-		acceptRes, err = w.rpc.TestMempoolAccept(ctx, rawHex)
-		return err
-	})
-	if err != nil {
-		return false, "", err
-	}
-	if acceptRes == nil {
-		return false, "", nil
-	}
-	return !acceptRes.Allowed, acceptRes.RejectReason, nil
 }
 
 // evictLargestSendRequest drops the BatcherRequest with the largest total
@@ -413,6 +438,32 @@ func (w *batcherWallet) evictLargestSendRequest(ctx context.Context, pendingRequ
 	remaining = append(remaining, pendingRequests[:idx]...)
 	remaining = append(remaining, pendingRequests[idx+1:]...)
 	return remaining, nil
+}
+
+func (w *batcherWallet) evictRequestByID(ctx context.Context, pendingRequests []BatcherRequest, requestID string) ([]BatcherRequest, error) {
+	if len(pendingRequests) == 0 {
+		return nil, ErrBatchParametersNotMet
+	}
+
+	for i, req := range pendingRequests {
+		if req.ID != requestID {
+			continue
+		}
+
+		w.logger.Warn("evicting batcher request",
+			zap.String("request_id", req.ID),
+		)
+		if err := w.cache.DeletePendingRequest(ctx, req.ID); err != nil {
+			return nil, fmt.Errorf("failed to evict request %s: %w", req.ID, err)
+		}
+
+		remaining := make([]BatcherRequest, 0, len(pendingRequests)-1)
+		remaining = append(remaining, pendingRequests[:i]...)
+		remaining = append(remaining, pendingRequests[i+1:]...)
+		return remaining, nil
+	}
+
+	return nil, fmt.Errorf("request %s not found in pending batch", requestID)
 }
 
 // isInsufficientFundsErr reports whether err is from a code-level wallet
@@ -943,12 +994,12 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]boo
 //     maxMempoolWaits iterations; if exceeded → return (nil, nil).
 //  3. Indexer doesn't have it, node mempool doesn't have it:
 //     a. If previously seen in the mempool → it may have been confirmed
-//        and evicted. One final indexer check; if confirmed return (*tx, nil),
-//        otherwise return (nil, error).
+//     and evicted. One final indexer check; if confirmed return (*tx, nil),
+//     otherwise return (nil, error).
 //     b. If we already resubmitted → return (nil, error). We submitted but
-//        still can't verify the tx; populating a batch would be dangerous.
+//     still can't verify the tx; populating a batch would be dangerous.
 //     c. Otherwise → re-submit the tx once, mark hasResubmitted, increment
-//        attempt, wait retryDelay, and retry.
+//     attempt, wait retryDelay, and retry.
 //
 // In practice the attempt counter only increments on resubmission (step 3c),
 // which can happen at most once. Subsequent iterations where neither the
