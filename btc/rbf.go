@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -281,65 +282,28 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 	const maxRetrievalAttempts = 5
 
 	var transaction Transaction
-	hasAppearedInMemppool := false
-	attempt := 0
-	for attempt < maxRetrievalAttempts {
-		ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
-		transaction, err = w.indexer.GetTx(ctx, txID)
-		cancel()
-		if err == nil {
-			break
-		}
-		w.logger.Error("failed to get tx from indexer", zap.Error(err), zap.String("txid", txID), zap.Int("attempt", attempt+1))
-
-		// Check if the node has the tx in its mempool before deciding to re-submit
-		mempoolCtx, mempoolCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
-		_, mempoolErr := w.rpc.GetMempoolEntry(mempoolCtx, txID)
-		mempoolCancel()
-
-		if mempoolErr != nil {
-			// if the tx has already appeared in mempool before, we return an error
-			if hasAppearedInMemppool {
-				ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
-				// tx could have been confirmed, so we check one last time if it is confirmed
-				confirmedTx, err := w.indexer.GetTx(ctx, txID)
-				cancel()
-				if err == nil && confirmedTx.Status.Confirmed {
-					w.logger.Info("tx confirmed in chain", zap.String("txid", txID))
-					transaction = confirmedTx
-					break
-				}
-				w.logger.Error("tx not found in node mempool, but has already appeared in mempool", zap.Error(mempoolErr), zap.String("txid", txID))
-				return fmt.Errorf("tx not found in node mempool, but has already appeared in mempool before : %w", mempoolErr)
-			}
-			// Node doesn't have it — re-submit and retry
-			w.logger.Warn("tx not found in node mempool, re-submitting", zap.Error(mempoolErr), zap.String("txid", txID))
-			resubmitCtx, resubmitCancel := context.WithTimeout(context.Background(), DefaultAPITimeout)
-			if resubmitErr := w.indexer.SubmitTx(resubmitCtx, tx); resubmitErr != nil {
-				// If the previous submission already went through (e.g. "already in mempool"
-				// or "already in chain"), this is harmless — we just need to retry GetTx.
-				w.logger.Warn("failed to re-submit tx", zap.Error(resubmitErr), zap.String("txid", txID))
-			} else {
-				w.logger.Info("re-submitted tx", zap.String("txid", txID))
-			}
-			resubmitCancel()
-		} else {
-			// it is in the node, but not in indexer yet, so we wait indefinitely for the indexer to catch up
-			hasAppearedInMemppool = true
-			w.logger.Info("tx found in node mempool, waiting for indexer to catch up", zap.String("txid", txID))
-			continue;
-		}
-		attempt++
-	}
-	if err != nil {
-		w.logger.Error("exhausted all attempts to retrieve tx, storing local tx details", zap.String("txid", txID))
+	ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+	indexerTx, err := w.waitForTx(ctx, tx, maxRetrievalAttempts)
+	cancel()
+	switch {
+	case err != nil:
+		// Something dangerous happened (vanished from mempool, resubmit
+		// failed to produce a fetchable tx). Do not populate the batch.
+		w.logger.Error("dangerous failure waiting for tx", zap.String("txid", txID), zap.Error(err))
+		return err
+	case indexerTx != nil:
+		transaction = *indexerTx
+	default:
+		// (nil, nil): indexer never returned the tx but nothing went wrong
+		// (pure indexer lag). Safe to fall back to local tx details.
+		w.logger.Warn("indexer did not return tx, using local tx details", zap.String("txid", txID))
 		transaction = Transaction{
-			TxID: txID,
-			Version: int(tx.Version),
+			TxID:     txID,
+			Version:  int(tx.Version),
 			LockTime: int(tx.LockTime),
-			Status: Status{
-				Confirmed: false,
-			},
+			Weight: -1, // updating with -1 to indicate that the batch was not a successful save to the cache
+			VINs:     wireTxInsToVINs(tx.TxIn),
+			VOUTs:    wireTxOutsToPrevouts(tx.TxOut),
 		}
 	}
 
@@ -856,6 +820,192 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]boo
 
 	// Return the map of UTXOs to avoid
 	return avoidUtxos, nil
+}
+
+// waitForTx attempts to retrieve a transaction from the indexer after it has
+// been submitted. It is the caller's responsibility to ensure the transaction
+// has already been broadcast before calling this function.
+//
+// Return values:
+//   - (*Transaction, nil) — indexer returned the tx, use it directly.
+//   - (nil, nil)          — the tx is in the node mempool but the indexer
+//     never caught up within maxMempoolWaits (~60 s). Nothing dangerous;
+//     the caller may safely fall back to local tx details.
+//   - (nil, error)        — something dangerous happened and the caller must
+//     NOT populate a batch. This includes: tx vanished from the node mempool
+//     after previously being seen, tx still not found after a resubmission,
+//     or the parent context was cancelled.
+//
+// Decision tree per iteration:
+//  1. Indexer has the tx → return (*tx, nil).
+//  2. Indexer doesn't have it, node mempool has it → indexer is lagging.
+//     Wait retryDelay and retry without burning an attempt. Capped at
+//     maxMempoolWaits iterations; if exceeded → return (nil, nil).
+//  3. Indexer doesn't have it, node mempool doesn't have it:
+//     a. If previously seen in the mempool → it may have been confirmed
+//        and evicted. One final indexer check; if confirmed return (*tx, nil),
+//        otherwise return (nil, error).
+//     b. If we already resubmitted → return (nil, error). We submitted but
+//        still can't verify the tx; populating a batch would be dangerous.
+//     c. Otherwise → re-submit the tx once, mark hasResubmitted, increment
+//        attempt, wait retryDelay, and retry.
+//
+// In practice the attempt counter only increments on resubmission (step 3c),
+// which can happen at most once. Subsequent iterations where neither the
+// indexer nor the mempool has the tx exit immediately via step 3b. The for
+// loop's maxAttempts exit is therefore a defensive fallback.
+func (w *batcherWallet) waitForTx(c context.Context, tx *wire.MsgTx, maxAttempts int) (*Transaction, error) {
+	const retryDelay = 2 * time.Second
+
+	txID := tx.TxHash().String()
+	seenInMempool := false
+	hasResubmitted := false
+	mempoolWaits := 0
+	// maxMempoolWaits caps how long we wait for the indexer to catch up when
+	// the tx is confirmed in the node mempool. With retryDelay=2s this gives
+	// ~60s before we give up and let the caller use local tx details.
+	const maxMempoolWaits = 30
+
+	for attempt := 0; attempt < maxAttempts; {
+		// 1. Ask the indexer.
+		ctx, cancel := context.WithTimeout(c, DefaultAPITimeout)
+		transaction, err := w.indexer.GetTx(ctx, txID)
+		cancel()
+		if err == nil {
+			return &transaction, nil
+		}
+
+		w.logger.Error("failed to get tx from indexer",
+			zap.Error(err),
+			zap.String("txid", txID),
+			zap.Int("attempt", attempt+1),
+			zap.Int("maxAttempts", maxAttempts),
+		)
+
+		// 2. Ask the node mempool.
+		mempoolCtx, mempoolCancel := context.WithTimeout(c, DefaultAPITimeout)
+		_, mempoolErr := w.rpc.GetMempoolEntry(mempoolCtx, txID)
+		mempoolCancel()
+
+		if mempoolErr == nil {
+			// Node has it, indexer is just lagging — wait and retry without
+			// burning an attempt.
+			seenInMempool = true
+			mempoolWaits++
+			if mempoolWaits > maxMempoolWaits {
+				w.logger.Warn("indexer still hasn't caught up after max mempool waits, giving up",
+					zap.String("txid", txID),
+					zap.Int("mempoolWaits", mempoolWaits),
+				)
+				return nil, nil
+			}
+			w.logger.Info("tx found in node mempool, waiting for indexer to catch up",
+				zap.String("txid", txID),
+				zap.Int("mempoolWait", mempoolWaits),
+				zap.Int("maxMempoolWaits", maxMempoolWaits),
+			)
+			select {
+			case <-time.After(retryDelay):
+			case <-c.Done():
+				return nil, fmt.Errorf("context cancelled waiting for indexer to catch up for tx %s: %w", txID, c.Err())
+			}
+			continue
+		}
+
+		// 3. Neither indexer nor node has the tx.
+		if seenInMempool {
+			// It was in the mempool before but has now vanished — it likely
+			// got confirmed and evicted. Do one final indexer check before
+			// giving up.
+			finalCtx, finalCancel := context.WithTimeout(c, DefaultAPITimeout)
+			confirmedTx, finalErr := w.indexer.GetTx(finalCtx, txID)
+			finalCancel()
+			if finalErr == nil && confirmedTx.Status.Confirmed {
+				w.logger.Info("tx confirmed in chain", zap.String("txid", txID))
+				return &confirmedTx, nil
+			}
+			return nil, fmt.Errorf("tx %s vanished from node mempool after being seen: %w", txID, mempoolErr)
+		}
+
+		if hasResubmitted {
+			// We already resubmitted but still can't find the tx anywhere.
+			// Dangerous to proceed — the tx state is unknown.
+			return nil, fmt.Errorf("tx %s not found after resubmission, refusing to populate batch", txID)
+		}
+
+		// Never seen in mempool and haven't resubmitted yet — submit once.
+		w.logger.Warn("tx not found in node mempool, re-submitting",
+			zap.Error(mempoolErr),
+			zap.String("txid", txID),
+			zap.Int("attempt", attempt+1),
+		)
+		resubmitCtx, resubmitCancel := context.WithTimeout(c, DefaultAPITimeout)
+		if resubmitErr := w.indexer.SubmitTx(resubmitCtx, tx); resubmitErr != nil {
+			w.logger.Warn("failed to re-submit tx", zap.Error(resubmitErr), zap.String("txid", txID))
+		} else {
+			w.logger.Info("re-submitted tx", zap.String("txid", txID))
+		}
+		resubmitCancel()
+		hasResubmitted = true
+		attempt++
+
+		// Give the resubmitted tx time to propagate before retrying.
+		select {
+		case <-time.After(retryDelay):
+		case <-c.Done():
+			return nil, fmt.Errorf("context cancelled after resubmitting tx %s: %w", txID, c.Err())
+		}
+	}
+
+	// This is unreachable in practice: attempt only increments on resubmit
+	// (once), and subsequent loops with hasResubmitted=true exit via path D.
+	// Kept as a defensive fallback.
+	return nil, fmt.Errorf("exhausted %d attempts to retrieve tx %s", maxAttempts, txID)
+}
+
+// wireTxInsToVINs converts a slice of *wire.TxIn into our []VIN shape for
+// local batch persistence when the indexer has not yet returned the tx.
+//
+// Prevout cannot be derived from a wire.TxIn (it describes the output being
+// spent, which lives in a prior transaction) and is left zero-valued. When the
+// indexer catches up on the next RBF cycle, the batch is replaced with a
+// fully-populated record.
+func wireTxInsToVINs(txIns []*wire.TxIn) []VIN {
+	vins := make([]VIN, len(txIns))
+	for i, in := range txIns {
+		var witness *[]string
+		if len(in.Witness) > 0 {
+			items := make([]string, len(in.Witness))
+			for j, item := range in.Witness {
+				items[j] = hex.EncodeToString(item)
+			}
+			witness = &items
+		}
+		vins[i] = VIN{
+			TxID:      in.PreviousOutPoint.Hash.String(),
+			Vout:      int(in.PreviousOutPoint.Index),
+			ScriptSig: hex.EncodeToString(in.SignatureScript),
+			Witness:   witness,
+			Sequence:  int(in.Sequence),
+		}
+	}
+	return vins
+}
+
+// wireTxOutsToPrevouts converts a slice of *wire.TxOut into our []Prevout shape
+// for local batch persistence. ScriptPubKeyType / ScriptPubKeyAddress are left
+// empty: btcd's ScriptClass.String() format does not match the electrs wire
+// format (e.g. "witness_v1_taproot" vs "v1_p2tr") used elsewhere in the
+// codebase, so populating them here would produce subtly-wrong data.
+func wireTxOutsToPrevouts(txOuts []*wire.TxOut) []Prevout {
+	prevouts := make([]Prevout, len(txOuts))
+	for i, out := range txOuts {
+		prevouts[i] = Prevout{
+			ScriptPubKey: hex.EncodeToString(out.PkScript),
+			Value:        int(out.Value),
+		}
+	}
+	return prevouts
 }
 
 // buildRBFTransaction builds an unsigned transaction with the given UTXOs, recipients, change address, and fee
