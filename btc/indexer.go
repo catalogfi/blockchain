@@ -298,15 +298,28 @@ func (client *electrsIndexerClient) GetTxHex(ctx context.Context, txid string) (
 }
 
 func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Transaction, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+	}
+
 	endpoint, err := url.JoinPath(client.url, "tx", txid)
 	if err != nil {
 		return Transaction{}, err
 	}
 
-	// Send the request
 	var tx Transaction
-	if err := retry(client.logger, ctx, client.retryInterval, func() error {
-		resp, err := http.Get(endpoint)
+	baseBackoff := 2 * time.Second
+	if err := exponentialBackoffRetry(client.logger, ctx, baseBackoff, func(t time.Duration) error {
+		reqCtx, reqCancel := context.WithTimeout(ctx, t)
+		defer reqCancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -315,14 +328,16 @@ func (client *electrsIndexerClient) GetTx(ctx context.Context, txid string) (Tra
 		if resp.StatusCode != http.StatusOK {
 			errMsg, err := io.ReadAll(resp.Body)
 			if err != nil {
-				return fmt.Errorf("fail to read response from %s: %w", endpoint, err)
+				return NewNoRetryError(fmt.Errorf("failed to read response from %s: %w", endpoint, err))
 			}
-			return fmt.Errorf("GetTx : %v", string(errMsg))
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+				return NewNoRetryError(fmt.Errorf("GetTx: %s", errMsg))
+			}
+			return fmt.Errorf("GetTx: status %d: %s", resp.StatusCode, errMsg)
 		}
 
-		// Decode response
 		if err := json.NewDecoder(resp.Body).Decode(&tx); err != nil {
-			return fmt.Errorf("failed to decode UTXOs: %w", err)
+			return NewNoRetryError(fmt.Errorf("failed to decode transaction: %w", err))
 		}
 		return nil
 	}); err != nil {
@@ -433,7 +448,7 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 			return err
 		}
 
-		logger.Debug("retrying", zap.Any("error", err.Error()))
+		logger.Warn("retrying", zap.Any("error", err.Error()))
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("%v : %v", ctx.Err(), err)
@@ -442,6 +457,36 @@ func retry(logger *zap.Logger, ctx context.Context, dur time.Duration, f func() 
 		}
 	}
 	return nil
+}
+
+// exponentialBackoffRetry runs f until it succeeds, ctx is done, or f returns
+// a NoRetryError. Backoff doubles on each failure starting from base.
+func exponentialBackoffRetry(logger *zap.Logger, ctx context.Context, base time.Duration, f func(t time.Duration) error) error {
+	backoff := base
+
+	for {
+		err := f(backoff)
+		if err == nil {
+			return nil
+		}
+
+		var e *NoRetryError
+		if errors.As(err, &e) {
+			return err
+		}
+
+		logger.Warn("retrying", zap.Error(err), zap.Duration("backoff", backoff))
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return fmt.Errorf("%v : %w", ctx.Err(), err)
+		case <-timer.C:
+			backoff *= 2
+		}
+	}
 }
 
 type NoRetryError struct {

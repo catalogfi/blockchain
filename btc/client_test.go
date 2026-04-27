@@ -273,32 +273,44 @@ var _ = Describe("bitcoin client", func() {
 	})
 
 	Context("Test BitcoinRPCClient", func() {
-		bitcoinClient := btc.NewBitcoinClient("admin1", "123", "http://0.0.0.0:18443")
-		chainParams := chaincfg.RegressionNetParams
-		indexer := localnet.BTCIndexer()
-		feeEstimator := btc.NewFixFeeEstimator(16)
+		var (
+			bitcoinClient btc.BitcoinClient
+			chainParams   chaincfg.Params
+			indexer       btc.IndexerClient
+			feeEstimator  btc.FeeEstimator
+			alice, bob    btc.Wallet
+			send          func(wallet btc.Wallet, to btcutil.Address, amount int64) (string, btc.Transaction)
+		)
 
-		newWallet := func() btc.Wallet {
-			privKey, err := btcec.NewPrivateKey()
-			Expect(err).To(BeNil())
-			wallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.HighFee)
-			Expect(err).To(BeNil())
-			return wallet
-		}
+		BeforeEach(func() {
+			bitcoinClient = btc.NewBitcoinClient("admin1", "123", "http://0.0.0.0:18443")
+			chainParams = chaincfg.RegressionNetParams
+			indexer = localnet.BTCIndexer()
+			feeEstimator = btc.NewFixFeeEstimator(16)
 
-		alice := newWallet()
-		bob := newWallet()
+			newWallet := func() btc.Wallet {
+				privKey, err := btcec.NewPrivateKey()
+				Expect(err).To(BeNil())
+				wallet, err := btc.NewSimpleWallet(privKey, &chainParams, indexer, feeEstimator, btc.HighFee)
+				Expect(err).To(BeNil())
+				return wallet
+			}
 
-		_, err := localnet.FundBitcoin(alice.Address().EncodeAddress(), indexer)
-		Expect(err).To(BeNil())
+			alice = newWallet()
+			bob = newWallet()
 
-		send := func(wallet btc.Wallet, to btcutil.Address, amount int64) (string, btc.Transaction) {
-			txid, err := wallet.Send(context.Background(), []btc.SendRequest{{Amount: amount, To: to}}, nil, nil)
+			_, err := localnet.FundBitcoin(alice.Address().EncodeAddress(), indexer)
 			Expect(err).To(BeNil())
-			tx, _, err := wallet.Status(context.Background(), txid)
-			Expect(err).To(BeNil())
-			return txid, tx
-		}
+
+			send = func(wallet btc.Wallet, to btcutil.Address, amount int64) (string, btc.Transaction) {
+				txid, err := wallet.Send(context.Background(), []btc.SendRequest{{Amount: amount, To: to}}, nil, nil)
+				Expect(err).To(BeNil())
+				tx, _, err := wallet.Status(context.Background(), txid)
+				Expect(err).To(BeNil())
+				return txid, tx
+			}
+		})
+
 
 		It("should return mempool entry", func(ctx context.Context) {
 			// Helper to check mempool entry fee

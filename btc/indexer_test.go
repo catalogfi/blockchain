@@ -5,6 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -13,12 +16,91 @@ import (
 	"github.com/catalogfi/blockchain/btc"
 	"github.com/catalogfi/blockchain/localnet"
 	"github.com/fatih/color"
+	"go.uber.org/zap"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Indexer client", func() {
+	Context("electrs HTTP retry", func() {
+		It("retries with backoff until the indexer responds successfully", func() {
+			var attempts atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := attempts.Add(1)
+				if r.URL.Path != "/blocks/tip/height" {
+					http.NotFound(w, r)
+					return
+				}
+				if n < 3 {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				_, _ = w.Write([]byte("42"))
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+			tip, err := c.GetTipBlockHeight(context.Background())
+			Expect(err).To(BeNil())
+			Expect(tip).To(Equal(uint64(42)))
+			Expect(attempts.Load()).To(BeNumerically(">=", 3))
+		})
+
+		It("stops waiting and returns when the context is cancelled during backoff", func() {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			_, err := c.GetTipBlockHeight(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(context.DeadlineExceeded.Error()))
+		})
+	})
+
+	Context("GetTx deadline guard", func() {
+		It("applies DefaultAPITimeout when context has no deadline", func() {
+			// Server returns a valid tx JSON immediately, so the test completes fast
+			// even though GetTx internally adds a 300s timeout.
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"txid":"deadbeef","version":2,"locktime":0,"vin":[],"vout":[],"size":0,"weight":0,"fee":0,"status":{"confirmed":false}}`)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+
+			// Pass context.Background() directly — no deadline.
+			// GetTx should add its own DefaultAPITimeout and succeed.
+			tx, err := c.GetTx(context.Background(), "deadbeef")
+			Expect(err).To(BeNil())
+			Expect(tx.TxID).To(Equal("deadbeef"))
+		})
+
+		It("does not double-wrap when context already carries a deadline", func() {
+			// Server returns a valid tx JSON on the first attempt.
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"txid":"abc123","version":2,"locktime":0,"vin":[],"vout":[],"size":0,"weight":0,"fee":0,"status":{"confirmed":false}}`)
+			}))
+			defer srv.Close()
+
+			c := btc.NewElectrsIndexerClient(zap.NewNop(), srv.URL, 5*time.Millisecond)
+
+			// Caller already sets a tight deadline — GetTx should skip wrapping.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			tx, err := c.GetTx(ctx, "abc123")
+			Expect(err).To(BeNil())
+			Expect(tx.TxID).To(Equal("abc123"))
+		})
+	})
+
 	Context("When using electrs API", func() {
 		It("should be able to fetch the utxos of an address ", func() {
 			By("GetUTXOs()")
