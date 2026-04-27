@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"time"
+	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -335,7 +335,7 @@ func (w *batcherWallet) createNewRBFBatch(c context.Context, previousUTXOs UTXOs
 			TxID:     txID,
 			Version:  int(tx.Version),
 			LockTime: int(tx.LockTime),
-			Weight:   -1, // updating with -1 to indicate that the batch was not a successful save to the cache
+			Weight: -1, // updating with -1 to indicate that the batch was not a successful save to the cache
 			VINs:     wireTxInsToVINs(tx.TxIn),
 			VOUTs:    wireTxOutsToPrevouts(tx.TxOut),
 		}
@@ -1001,12 +1001,12 @@ func (w *batcherWallet) getUnconfirmedUtxos(ctx context.Context) (map[string]boo
 //     maxMempoolWaits iterations; if exceeded → return (nil, nil).
 //  3. Indexer doesn't have it, node mempool doesn't have it:
 //     a. If previously seen in the mempool → it may have been confirmed
-//     and evicted. One final indexer check; if confirmed return (*tx, nil),
-//     otherwise return (nil, error).
+//        and evicted. One final indexer check; if confirmed return (*tx, nil),
+//        otherwise return (nil, error).
 //     b. If we already resubmitted → return (nil, error). We submitted but
-//     still can't verify the tx; populating a batch would be dangerous.
+//        still can't verify the tx; populating a batch would be dangerous.
 //     c. Otherwise → re-submit the tx once, mark hasResubmitted, increment
-//     attempt, wait retryDelay, and retry.
+//        attempt, wait retryDelay, and retry.
 //
 // In practice the attempt counter only increments on resubmission (step 3c),
 // which can happen at most once. Subsequent iterations where neither the
