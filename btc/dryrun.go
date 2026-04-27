@@ -18,6 +18,7 @@ const (
 	rejectScrap rejectCategory = iota
 	rejectMissingOrSpent
 	rejectScriptVerify
+	rejectAddsUnconfirmed
 )
 
 func classifyRejectReason(reason string) rejectCategory {
@@ -30,6 +31,8 @@ func classifyRejectReason(reason string) rejectCategory {
 	case strings.Contains(r, "mandatory-script-verify-flag-failed"),
 		strings.Contains(r, "non-mandatory-script-verify-flag"):
 		return rejectScriptVerify
+	case strings.Contains(r, "replacement-adds-unconfirmed"):
+		return rejectAddsUnconfirmed
 	default:
 		return rejectScrap
 	}

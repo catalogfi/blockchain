@@ -399,6 +399,13 @@ func (w *batcherWallet) handleDryRunReject(ctx context.Context, tx *wire.MsgTx, 
 		)
 		remaining, err := w.evictRequestByID(ctx, pendingRequests, requestID)
 		return remaining, true, err
+	case rejectAddsUnconfirmed:
+		w.logger.Warn("testmempoolaccept rejected batch with unconfirmed input, evicting largest send request and retrying",
+			zap.String("reject_reason", rejectReason),
+			zap.String("txid", tx.TxHash().String()),
+		)
+		remaining, err := w.evictLargestSendRequest(ctx, pendingRequests)
+		return remaining, true, err
 	default:
 		w.logger.Warn("testmempoolaccept rejected batch, scrapping for retry on next tick",
 			zap.String("reject_reason", rejectReason),

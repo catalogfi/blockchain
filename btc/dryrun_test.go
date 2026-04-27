@@ -51,6 +51,7 @@ func TestClassifyRejectReason(t *testing.T) {
 	}{
 		{name: "missing or spent", reason: "bad-txns-inputs-missingorspent", want: rejectMissingOrSpent},
 		{name: "script verify", reason: "mandatory-script-verify-flag-failed (Signature must be zero for failed CHECK(MULTI)SIG operation)", want: rejectScriptVerify},
+		{name: "adds unconfirmed", reason: "replacement-adds-unconfirmed, replacement eb9396e92324ef6f0d382eedd6774b12d0b8a17ce09e224d4e0d7d4ec9c54405 adds unconfirmed input, idx 4", want: rejectAddsUnconfirmed},
 		{name: "scrap fee", reason: "insufficient fee", want: rejectScrap},
 		{name: "scrap dust", reason: "dust", want: rejectScrap},
 		{name: "scrap empty", reason: "", want: rejectScrap},
